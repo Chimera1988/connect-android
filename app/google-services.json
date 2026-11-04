@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "723788379788",
+    "project_id": "connect-messenger-5c824",
+    "storage_bucket": "connect-messenger-5c824.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:723788379788:android:2c5e17d1c36ecd7a906da9",
+        "android_client_info": {
+          "package_name": "com.connect.messenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAgjKpVbKv9od_p4YZB-opdMki0RL_-Tc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
