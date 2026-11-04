@@ -24,8 +24,11 @@ jobs:
       
       - name: Install Android SDK 35
         run: |
+          
           echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
           mkdir -p "$HOME/android-sdk/cmdline-tools"
+
           curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/android-tools.zip
           unzip -q /tmp/android-tools.zip -d /tmp/android-tools
           mv /tmp/android-tools/cmdline-tools "$HOME/android-sdk/cmdline-tools/latest"
