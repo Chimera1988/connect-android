@@ -25,7 +25,7 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private var chooser: ValueCallback<Array<Uri>>? = null
     private var audioRequest: PermissionRequest? = null
-    private val site = "https://connect-messenger-mu.vercel.app/"
+    private val site = "https://connect-chat.duckdns.org/"
     private val chooserCode = 1001
     private val micCode = 1002
 
@@ -38,7 +38,7 @@ class MainActivity : Activity() {
             FirebaseMessaging.getInstance().token.addOnSuccessListener { fcm ->
                 Thread {
                     try {
-                        val connection=URL("https://connect-messenger-mu.vercel.app/api/push/register").openConnection() as HttpURLConnection
+                        val connection=URL("https://connect-chat.duckdns.org/api/push/register").openConnection() as HttpURLConnection
                         connection.requestMethod="POST";connection.connectTimeout=10000;connection.readTimeout=10000;connection.doOutput=true
                         connection.setRequestProperty("Content-Type","application/json")
                         connection.setRequestProperty("Authorization","Bearer $accessToken")
@@ -74,7 +74,7 @@ class MainActivity : Activity() {
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
-                if (uri.scheme == "https" && uri.host == "connect-messenger-mu.vercel.app") return false
+                if (uri.scheme == "https" && uri.host == "connect-chat.duckdns.org") return false
                 return try { startActivity(Intent(Intent.ACTION_VIEW, uri)); true } catch (_: Exception) { false }
             }
         }
