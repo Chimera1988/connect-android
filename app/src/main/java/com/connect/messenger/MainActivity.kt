@@ -1,15 +1,10 @@
-
 package com.connect.messenger
 
 import android.Manifest
-import android.webkit.JavascriptInterface
-import com.google.firebase.messaging.FirebaseMessaging
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import android.os.Build
-import android.content.Context
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
+import android.os.Environment
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -25,33 +20,10 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private var chooser: ValueCallback<Array<Uri>>? = null
     private var audioRequest: PermissionRequest? = null
-    private val site = "https://connect-chat.duckdns.org/"
+    private val site = "https://connect-messenger-mu.vercel.app/"
     private val chooserCode = 1001
     private val micCode = 1002
 
-    private inner class NativeBridge {
-        @JavascriptInterface fun setPreferences(json: String) {
-            try { val obj=JSONObject(json);getSharedPreferences("connect_push",Context.MODE_PRIVATE).edit().putBoolean("enabled",obj.optBoolean("enabled",true)).putString("sound",obj.optString("sound","soft")).putBoolean("vibrate",obj.optBoolean("vibrate",true)).apply() } catch (_:Exception) {}
-        }
-        @JavascriptInterface fun register(accessToken: String) {
-            if (accessToken.length < 20 || accessToken.length > 8192) return
-            FirebaseMessaging.getInstance().token.addOnSuccessListener { fcm ->
-                Thread {
-                    try {
-                        val connection=URL("https://connect-chat.duckdns.org/api/push/register").openConnection() as HttpURLConnection
-                        connection.requestMethod="POST";connection.connectTimeout=10000;connection.readTimeout=10000;connection.doOutput=true
-                        connection.setRequestProperty("Content-Type","application/json")
-                        connection.setRequestProperty("Authorization","Bearer $accessToken")
-                        val payload=JSONObject().put("platform","android").put("endpoint",fcm).toString()
-                        connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-                        val status=connection.responseCode
-                        connection.disconnect()
-                        runOnUiThread { Toast.makeText(this@MainActivity,if(status in 200..299) "Уведомления подключены" else "Ошибка подключения: $status",Toast.LENGTH_SHORT).show() }
-                    }catch (_:Exception){runOnUiThread { Toast.makeText(this@MainActivity,"Ошибка подключения уведомлений",Toast.LENGTH_SHORT).show() }}
-                }.start()
-            }
-        }
-    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -69,12 +41,10 @@ class MainActivity : Activity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             userAgentString = userAgentString + " ConnectAndroid/1.0"
         }
-        web.addJavascriptInterface(NativeBridge(),"ConnectAndroid")
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),1003)
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
-                if (uri.scheme == "https" && uri.host == "connect-chat.duckdns.org") return false
+                if (uri.scheme == "https" && (uri.host == "connect-messenger-mu.vercel.app" || uri.host?.endsWith(".supabase.co") == true)) return false
                 return try { startActivity(Intent(Intent.ACTION_VIEW, uri)); true } catch (_: Exception) { false }
             }
         }
@@ -94,9 +64,24 @@ class MainActivity : Activity() {
             }
             override fun onPermissionRequestCanceled(request: PermissionRequest?) { if (audioRequest === request) audioRequest = null }
         }
-        web.setDownloadListener { url, _, _, _, _ ->
-            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-            catch (_: Exception) { Toast.makeText(this, "Не удалось открыть файл", Toast.LENGTH_SHORT).show() }
+        web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            try {
+                if (!url.startsWith("https://")) throw IllegalArgumentException("Only HTTPS downloads are supported")
+                val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                val request = DownloadManager.Request(Uri.parse(url)).apply {
+                    setMimeType(mimeType)
+                    addRequestHeader("User-Agent", userAgent ?: web.settings.userAgentString)
+                    val cookies = CookieManager.getInstance().getCookie(url)
+                    if (!cookies.isNullOrEmpty()) addRequestHeader("Cookie", cookies)
+                    setTitle(name)
+                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+                }
+                (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                Toast.makeText(this, "Скачивание началось", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {
+                Toast.makeText(this, "Не удалось сохранить файл", Toast.LENGTH_SHORT).show()
+            }
         }
         web.loadUrl(site)
     }
