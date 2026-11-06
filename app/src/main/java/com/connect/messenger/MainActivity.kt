@@ -4,17 +4,19 @@ import android.Manifest
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
-import android.os.Environment
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.Toast
-import android.view.ViewGroup
-import android.view.WindowManager
-import android.webkit.DownloadListener
+import com.google.firebase.messaging.FirebaseMessaging
+import org.json.JSONObject
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
@@ -23,6 +25,57 @@ class MainActivity : Activity() {
     private val site = "https://connect-messenger-mu.vercel.app/"
     private val chooserCode = 1001
     private val micCode = 1002
+    private val notificationCode = 1003
+
+    inner class AndroidBridge {
+        @JavascriptInterface
+        fun setPreferences(json: String) {
+            try {
+                val data = JSONObject(json)
+                getSharedPreferences("connect_push", Context.MODE_PRIVATE).edit()
+                    .putBoolean("enabled", data.optBoolean("enabled", true))
+                    .putString("sound", data.optString("sound", "soft"))
+                    .putBoolean("vibrate", data.optBoolean("vibrate", true))
+                    .apply()
+            } catch (_: Exception) { }
+        }
+
+        @JavascriptInterface
+        fun register(accessToken: String) {
+            if (accessToken.isBlank()) return
+            runOnUiThread {
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationCode)
+                }
+                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                    if (!task.isSuccessful) {
+                        Toast.makeText(this@MainActivity, "Не удалось получить токен уведомлений", Toast.LENGTH_LONG).show()
+                        return@addOnCompleteListener
+                    }
+                    val fcmToken = task.result ?: return@addOnCompleteListener
+                    Thread {
+                        try {
+                            val connection = java.net.URL("${site}api/push/register").openConnection() as java.net.HttpURLConnection
+                            connection.requestMethod = "POST"
+                            connection.connectTimeout = 15000
+                            connection.readTimeout = 15000
+                            connection.doOutput = true
+                            connection.setRequestProperty("Content-Type", "application/json")
+                            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                            connection.outputStream.use { it.write(JSONObject().put("platform", "android").put("endpoint", fcmToken).toString().toByteArray(Charsets.UTF_8)) }
+                            val success = connection.responseCode in 200..299
+                            connection.disconnect()
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, if (success) "Устройство зарегистрировано для уведомлений" else "Ошибка регистрации уведомлений", Toast.LENGTH_LONG).show()
+                            }
+                        } catch (_: Exception) {
+                            runOnUiThread { Toast.makeText(this@MainActivity, "Не удалось подключить уведомления", Toast.LENGTH_LONG).show() }
+                        }
+                    }.start()
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +94,8 @@ class MainActivity : Activity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             userAgentString = userAgentString + " ConnectAndroid/1.0"
         }
+        // Only the trusted Connect origin is allowed inside this WebView.
+        web.addJavascriptInterface(AndroidBridge(), "ConnectAndroid")
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
@@ -52,8 +107,10 @@ class MainActivity : Activity() {
             override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                 chooser?.onReceiveValue(null)
                 chooser = callback
-                return try { startActivityForResult(params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE) }, chooserCode); true }
-                catch (_: Exception) { chooser = null; callback?.onReceiveValue(null); false }
+                return try {
+                    startActivityForResult(params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE) }, chooserCode)
+                    true
+                } catch (_: Exception) { chooser = null; callback?.onReceiveValue(null); false }
             }
             override fun onPermissionRequest(request: PermissionRequest) {
                 runOnUiThread {
@@ -79,9 +136,7 @@ class MainActivity : Activity() {
                 }
                 (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
                 Toast.makeText(this, "Скачивание началось", Toast.LENGTH_SHORT).show()
-            } catch (_: Exception) {
-                Toast.makeText(this, "Не удалось сохранить файл", Toast.LENGTH_SHORT).show()
-            }
+            } catch (_: Exception) { Toast.makeText(this, "Не удалось сохранить файл", Toast.LENGTH_SHORT).show() }
         }
         web.loadUrl(site)
     }
