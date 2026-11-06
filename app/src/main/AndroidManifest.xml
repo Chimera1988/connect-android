@@ -25,6 +25,12 @@
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
         <activity
+            android:name=".IncomingCallActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
