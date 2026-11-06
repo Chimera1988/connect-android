@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.media.MediaPlayer
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
 import android.net.Uri
@@ -16,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -65,6 +67,66 @@ class MainActivity : Activity() {
     private var previewPlayer: MediaPlayer? = null
     private val previewTimeout = Handler(Looper.getMainLooper())
     private val endPreview = Runnable { stopPreview() }
+    private var connectedCallId: String? = null
+    private var speakerEnabled = false
+    private var proximityLock: PowerManager.WakeLock? = null
+
+    /** Switch off the display ONLY during a connected handset call, never when using speaker/headset. */
+    private fun updateProximityForCall() {
+        // Called on the Activity/UI thread. This is a system proximity wake lock,
+        // not a brightness trick: Android turns the screen back on when the ear moves away.
+        try {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val route = if (Build.VERSION.SDK_INT >= 31) audio.communicationDevice?.type else null
+            val handset = if (Build.VERSION.SDK_INT >= 31) {
+                route == null || route == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            } else {
+                !audio.isSpeakerphoneOn && !audio.isBluetoothScoOn &&
+                    audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).none {
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                    }
+            }
+            val shouldDim = connectedCallId != null && !speakerEnabled && handset &&
+                power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)
+            if (shouldDim) {
+                if (proximityLock == null) {
+                    proximityLock = power.newWakeLock(
+                        PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "$packageName:audio_call_proximity"
+                    ).apply { setReferenceCounted(false) }
+                }
+                if (proximityLock?.isHeld == false) proximityLock?.acquire()
+            } else releaseProximityForCall()
+        } catch (_: Exception) {
+            // Some vendor Android builds don't support proximity screen wake locks.
+            releaseProximityForCall()
+        }
+    }
+
+    private fun releaseProximityForCall() {
+        try {
+            val lock = proximityLock
+            if (lock != null && lock.isHeld) lock.release()
+        } catch (_: Exception) { }
+    }
+
+    /** Prefer the built-in earpiece unless a Bluetooth or wired headset is selected. */
+    private fun routeToHandset(audio: AudioManager) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val selected = audio.communicationDevice?.type
+            // Do not steal audio from an external headset.
+            if (selected == null || selected == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                val earpiece = audio.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+                }
+                if (earpiece != null) audio.setCommunicationDevice(earpiece)
+            }
+        } else if (!audio.isBluetoothScoOn) {
+            audio.isSpeakerphoneOn = false
+        }
+    }
 
     /** Stop the previous clip before leaving the app or changing sound settings. */
     private fun stopPreview() {
@@ -74,6 +136,38 @@ class MainActivity : Activity() {
         if (player != null) {
             try { if (player.isPlaying) player.stop() } catch (_: Exception) {}
             try { player.release() } catch (_: Exception) {}
+            volumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE
+        }
+    }
+
+    /** Preview using Android notification/ringer audio policy. Never play through media volume. */
+    private fun playNativePreview(uri: Uri, kind: String) {
+        stopPreview()
+        if (ConnectNotifications.isSilent(this, kind)) return
+        val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // The physical volume keys must control the same stream the real push uses.
+        val stream = if (kind == "call") AudioManager.STREAM_RING else AudioManager.STREAM_NOTIFICATION
+        volumeControlStream = stream
+        // A preview must not bypass the phone's silent/vibrate mode.
+        if (manager.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        try {
+            previewPlayer = MediaPlayer().apply {
+                setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(if (kind == "call") AudioAttributes.USAGE_NOTIFICATION_RINGTONE else AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build())
+                setDataSource(this@MainActivity, uri)
+                setOnCompletionListener { finished ->
+                    if (previewPlayer === finished) stopPreview()
+                    else try { finished.release() } catch (_: Exception) {}
+                }
+                prepare()
+                start()
+            }
+            previewTimeout.postDelayed(endPreview, 10_000)
+        } catch (_: Exception) {
+            stopPreview()
+            Toast.makeText(this, "Не удалось воспроизвести мелодию", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -206,20 +300,26 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setSpeakerphone(enabled: Boolean) {
             runOnUiThread {
+                // The display must not turn off when playing through the loudspeaker.
+                speakerEnabled = enabled
+                if (enabled) releaseProximityForCall()
                 try {
                     val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                     audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                    volumeControlStream = AudioManager.STREAM_VOICE_CALL
                     if (Build.VERSION.SDK_INT >= 31) {
                         if (enabled) {
                             val speaker = audio.availableCommunicationDevices.firstOrNull {
                                 it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                             }
                             if (speaker != null) audio.setCommunicationDevice(speaker)
-                        } else audio.clearCommunicationDevice()
+                        } else routeToHandset(audio)
                     } else {
-                        audio.isSpeakerphoneOn = enabled
+                        if (enabled) audio.isSpeakerphoneOn = true
+                        else routeToHandset(audio)
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) { }
+                updateProximityForCall()
             }
         }
 
@@ -227,31 +327,30 @@ class MainActivity : Activity() {
         fun previewSound(kind: String) {
             if (!validKind(kind)) return
             runOnUiThread {
-                stopPreview()
-                if (ConnectNotifications.isSilent(this@MainActivity, kind)) return@runOnUiThread
                 val uri = ConnectNotifications.customUri(this@MainActivity, kind)
                     ?: if (kind == "call") Settings.System.DEFAULT_RINGTONE_URI
                     else {
-                        val name = ConnectNotifications.preferences(this@MainActivity).getString("sound", "soft")
-                            ?.takeIf { it in setOf("soft", "bright", "gentle") } ?: "soft"
+                        val name = ConnectNotifications.preferences(this@MainActivity)
+                            .getString("sound", "soft")?.takeIf { it in setOf("soft", "bright", "gentle") } ?: "soft"
                         Uri.parse("android.resource://$packageName/raw/connect_$name")
                     }
-                try {
-                    val player = MediaPlayer()
-                    previewPlayer = player
-                    player.setDataSource(this@MainActivity, uri)
-                    player.setOnCompletionListener { finished ->
-                        if (previewPlayer === finished) stopPreview()
-                        else try { finished.release() } catch (_: Exception) {}
-                    }
-                    player.prepare()
-                    player.start()
-                    // Never play a full-length song indefinitely as a preview.
-                    previewTimeout.postDelayed(endPreview, 10_000)
-                } catch (_: Exception) {
-                    stopPreview()
-                    Toast.makeText(this@MainActivity, "Не удалось воспроизвести мелодию", Toast.LENGTH_SHORT).show()
+                playNativePreview(uri, kind)
+            }
+        }
+
+        // The built-in PWA signals have bundled native equivalents. Their preview must
+        // work from the Android WebView and use notification volume, not media volume.
+        @JavascriptInterface
+        fun previewBuiltInSound(sound: String) {
+            if (sound !in setOf("soft", "bright", "gentle", "silent")) return
+            runOnUiThread {
+                if (sound == "silent") { stopPreview(); return@runOnUiThread }
+                val raw = when (sound) {
+                    "bright" -> R.raw.connect_bright
+                    "gentle" -> R.raw.connect_gentle
+                    else -> R.raw.connect_soft
                 }
+                playNativePreview(Uri.parse("android.resource://$packageName/$raw"), "message")
             }
         }
 
@@ -279,19 +378,36 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun setCallState(callId: String, state: String) {
-            if (validUuid(callId) && state != "ringing") {
-                ConnectNotifications.dismissCall(this@MainActivity, callId)
-                runOnUiThread {
-                    if (state == "ended" || state == "failed" || state == "declined" || state == "missed") {
+            if (!validUuid(callId) || state == "ringing") return
+            ConnectNotifications.dismissCall(this@MainActivity, callId)
+            runOnUiThread {
+                if (state == "active") {
+                    connectedCallId = callId
+                    if (!speakerEnabled) {
+                        try {
+                            val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                            audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                            volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                            routeToHandset(audio)
+                        } catch (_: Exception) { }
+                    }
+                    updateProximityForCall()
+                } else if (state in setOf("ended", "failed", "declined", "missed", "busy")) {
+                    // Ignore a late end event for an older call if another call is active.
+                    if (connectedCallId == null || connectedCallId == callId) {
+                        connectedCallId = null
+                        speakerEnabled = false
+                        releaseProximityForCall()
                         val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice()
                         audio.mode = AudioManager.MODE_NORMAL
+                        volumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE
                     }
-                    if (Build.VERSION.SDK_INT >= 27) {
-                        setShowWhenLocked(false); setTurnScreenOn(false)
-                    } else {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
-                    }
+                }
+                if (Build.VERSION.SDK_INT >= 27) {
+                    setShowWhenLocked(false); setTurnScreenOn(false)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
                 }
             }
         }
@@ -522,6 +638,9 @@ class MainActivity : Activity() {
     @Deprecated("Back navigation")
     override fun onBackPressed() { if (web.canGoBack()) web.goBack() else super.onBackPressed() }
     override fun onDestroy() {
+        connectedCallId = null
+        speakerEnabled = false
+        releaseProximityForCall()
         stopPreview()
         ConnectAppPresence.visible = false
         ConnectAppPresence.activeConversation = ""

@@ -71,6 +71,9 @@ object ConnectNotifications {
     }
 
     fun dismissCall(context: Context, callId: String) {
-        if (callId.isNotBlank()) manager(context).cancel("call:$callId", CALL_ID)
+        if (callId.isBlank()) return
+        // Shared state is visible to IncomingCallActivity even if the WebView is asleep.
+        preferences(context).edit().putBoolean("call_closed_$callId", true).apply()
+        manager(context).cancel("call:$callId", CALL_ID)
     }
 }

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -18,10 +19,23 @@ import android.widget.TextView
  */
 class IncomingCallActivity : Activity() {
     private val closeHandler = Handler(Looper.getMainLooper())
+    private var activeCallId: String? = null
     private val closeIfNotAnswered = Runnable { if (!isFinishing) finish() }
+    private val checkCallEnded = object : Runnable {
+        override fun run() {
+            val id = activeCallId ?: return
+            if (ConnectNotifications.preferences(this@IncomingCallActivity)
+                    .getBoolean("call_closed_$id", false)) {
+                if (!isFinishing) finish()
+                return
+            }
+            if (!isFinishing && !isDestroyed) closeHandler.postDelayed(this, 350)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        volumeControlStream = AudioManager.STREAM_RING
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -32,6 +46,11 @@ class IncomingCallActivity : Activity() {
 
         val id = intent.getStringExtra("connect_call_id")
         if (id == null || !id.matches(Regex("[0-9a-fA-F-]{36}"))) { finish(); return }
+        activeCallId = id
+        if (ConnectNotifications.preferences(this).getBoolean("call_closed_$id", false)) {
+            finish()
+            return
+        }
         val name = intent.getStringExtra("connect_caller_name")?.take(80) ?: "Собеседник"
         val chatId = intent.getStringExtra("connect_chat_id")
         val root = LinearLayout(this).apply {
@@ -79,11 +98,14 @@ class IncomingCallActivity : Activity() {
         root.addView(actions, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT))
         setContentView(root)
+        closeHandler.post(checkCallEnded)
         closeHandler.postDelayed(closeIfNotAnswered, 65_000)
     }
 
     override fun onDestroy() {
         closeHandler.removeCallbacks(closeIfNotAnswered)
+        closeHandler.removeCallbacks(checkCallEnded)
+        activeCallId = null
         super.onDestroy()
     }
 }

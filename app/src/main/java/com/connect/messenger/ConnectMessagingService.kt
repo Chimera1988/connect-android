@@ -25,6 +25,14 @@ class ConnectMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val prefs = ConnectNotifications.preferences(this)
+        // The caller can hang up while this device is locked and its WebView is suspended.
+        // A data-only FCM end event closes the native full-screen Activity without opening the app.
+        if (message.data["kind"] == "call-ended") {
+            val callId = message.data["callId"] ?: return
+            if (callId.matches(Regex("[0-9a-fA-F-]{36}")))
+                ConnectNotifications.dismissCall(this, callId)
+            return
+        }
         if (message.data["kind"] == "read") {
             val id = message.data["conversationId"] ?: return
             val at = message.data["readAt"] ?: return
@@ -86,6 +94,8 @@ class ConnectMessagingService : FirebaseMessagingService() {
 
     private fun showCall(data: Map<String, String>) {
         val callId = data["callId"]?.takeIf { it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: return
+        // A delayed incoming FCM must not reopen a call after an earlier call-ended FCM.
+        if (ConnectNotifications.preferences(this).getBoolean("call_closed_$callId", false)) return
         val conversationId = data["conversationId"]
         val caller = data["body"]?.take(120) ?: "Собеседник"
         val request = callId.hashCode()
