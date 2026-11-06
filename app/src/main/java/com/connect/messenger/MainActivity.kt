@@ -22,10 +22,33 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private var chooser: ValueCallback<Array<Uri>>? = null
     private var audioRequest: PermissionRequest? = null
-    private val site = "https://connect-messenger-mu.vercel.app/"
+    private val site = "https://connect-chat.duckdns.org/"
     private val chooserCode = 1001
     private val micCode = 1002
     private val notificationCode = 1003
+    private var loadErrorVisible = false
+
+    // Errors used to appear as a blank screen. Make the failure visible and retryable.
+    private fun showLoadError(details: String) {
+        if (loadErrorVisible || isFinishing || isDestroyed) return
+        loadErrorVisible = true
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Connect не загрузился")
+                .setMessage("$details\n\nПроверьте интернет или повторите попытку.")
+                .setPositiveButton("Повторить") { _, _ ->
+                    loadErrorVisible = false
+                    web.loadUrl(site)
+                }
+                .setNeutralButton("Открыть в браузере") { _, _ ->
+                    loadErrorVisible = false
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(site))) } catch (_: Exception) { }
+                }
+                .setNegativeButton("Закрыть") { _, _ -> loadErrorVisible = false }
+                .show()
+        }
+    }
 
     inner class AndroidBridge {
         @JavascriptInterface
@@ -99,8 +122,20 @@ class MainActivity : Activity() {
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
-                if (uri.scheme == "https" && (uri.host == "connect-messenger-mu.vercel.app" || uri.host?.endsWith(".supabase.co") == true)) return false
+                if (uri.scheme == "https" && (uri.host == "connect-chat.duckdns.org" || uri.host == "connect-messenger-mu.vercel.app" || uri.host?.endsWith(".supabase.co") == true)) return false
                 return try { startActivity(Intent(Intent.ACTION_VIEW, uri)); true } catch (_: Exception) { false }
+            }
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    showLoadError("Ошибка сети: ${error?.description ?: "соединение недоступно"}")
+                }
+            }
+            override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+                super.onReceivedHttpError(view, request, errorResponse)
+                if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) {
+                    showLoadError("Сервер вернул код ${errorResponse?.statusCode ?: 0}.")
+                }
             }
         }
         web.webChromeClient = object : WebChromeClient() {
