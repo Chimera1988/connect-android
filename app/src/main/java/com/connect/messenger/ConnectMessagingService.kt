@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
+import androidx.core.app.Person
 import androidx.core.content.ContextCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -74,6 +76,7 @@ class ConnectMessagingService : FirebaseMessagingService() {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSilent(ConnectNotifications.isSilent(this, "message"))
             .setGroup("connect-messages")
             .build()
         // One notification per chat: multiple new messages update, rather than pile up.
@@ -85,24 +88,37 @@ class ConnectMessagingService : FirebaseMessagingService() {
     private fun showCall(data: Map<String, String>) {
         val callId = data["callId"]?.takeIf { it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: return
         val conversationId = data["conversationId"]
+        val caller = data["body"]?.take(120) ?: "Собеседник"
         val request = callId.hashCode()
         val open = openApp("open", callId, conversationId, request)
         val answer = openApp("accept", callId, conversationId, request xor 0x1212)
         val decline = openApp("decline", callId, conversationId, request xor 0x3434)
+        // Important: Android must open the dedicated lock-screen Activity, not the WebView.
+        val fullScreenIntent = Intent(this, IncomingCallActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("connect_call_id", callId)
+            putExtra("connect_caller_name", caller)
+            if (!conversationId.isNullOrBlank()) putExtra("connect_chat_id", conversationId)
+        }
+        val fullScreen = PendingIntent.getActivity(
+            this, request xor 0x5151, fullScreenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val person = Person.Builder().setName(caller).build()
         val notification = NotificationCompat.Builder(this, ConnectNotifications.channel(this, "call"))
             .setSmallIcon(R.drawable.connect_icon)
-            .setContentTitle(data["title"]?.take(100) ?: "Входящий аудиозвонок")
-            .setContentText(data["body"]?.take(120) ?: "Звонок в Connect")
+            .setContentTitle("Входящий аудиозвонок · Connect")
+            .setContentText(caller)
             .setContentIntent(open)
-            .setFullScreenIntent(open, true)
+            .setFullScreenIntent(fullScreen, true)
+            .setStyle(NotificationCompat.CallStyle.forIncomingCall(person, decline, answer))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setSilent(ConnectNotifications.isSilent(this, "call"))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setOngoing(true)
             .setTimeoutAfter(65_000)
-            .addAction(android.R.drawable.sym_action_call, "Принять", answer)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отклонить", decline)
             .build()
         ConnectNotifications.manager(this).notify("call:$callId", ConnectNotifications.CALL_ID, notification)
     }

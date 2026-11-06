@@ -26,12 +26,18 @@ object ConnectNotifications {
         return Uri.parse("content://$SOUND_AUTHORITY/$name")
     }
 
+    fun isSilent(context: Context, kind: String): Boolean {
+        val prefs = preferences(context)
+        if (prefs.getBoolean("mute_$kind", false)) return true
+        return kind == "message" && customUri(context, kind) == null && prefs.getString("sound", "soft") == "silent"
+    }
+
     /** Android notification channels are immutable. A different sound uses a different ID. */
     fun channel(context: Context, kind: String): String {
         val prefs = preferences(context)
         val custom = customUri(context, kind)
         val builtin = prefs.getString("sound", "soft") ?: "soft"
-        val silent = prefs.getBoolean("mute_$kind", false) || (kind == "message" && builtin == "silent")
+        val silent = isSilent(context, kind)
         val vibrate = prefs.getBoolean("vibrate", true)
         val sound = custom ?: if (kind == "call") Settings.System.DEFAULT_RINGTONE_URI else {
             val name = if (builtin in setOf("soft", "gentle", "bright")) builtin else "soft"
@@ -43,7 +49,7 @@ object ConnectNotifications {
             kind == "call" -> "system"
             else -> builtin
         }
-        val channelId = "connect_${kind}_${identifier}_${if (vibrate) "v" else "s"}_v4"
+        val channelId = "connect_${kind}_${identifier}_${if (vibrate) "v" else "s"}_v6"
         val manager = manager(context)
         if (manager.getNotificationChannel(channelId) == null) {
             val isCall = kind == "call"

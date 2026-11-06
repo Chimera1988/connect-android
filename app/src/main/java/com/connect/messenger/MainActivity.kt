@@ -14,6 +14,8 @@ import android.media.AudioDeviceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -61,6 +63,19 @@ class MainActivity : Activity() {
     private var pendingCallAction: JSONObject? = null
     private var pendingChatId: String? = null
     private var previewPlayer: MediaPlayer? = null
+    private val previewTimeout = Handler(Looper.getMainLooper())
+    private val endPreview = Runnable { stopPreview() }
+
+    /** Stop the previous clip before leaving the app or changing sound settings. */
+    private fun stopPreview() {
+        previewTimeout.removeCallbacks(endPreview)
+        val player = previewPlayer
+        previewPlayer = null
+        if (player != null) {
+            try { if (player.isPlaying) player.stop() } catch (_: Exception) {}
+            try { player.release() } catch (_: Exception) {}
+        }
+    }
 
     private fun validUuid(value: String): Boolean = Regex("[0-9a-fA-F-]{36}").matches(value)
     private fun validKind(value: String) = value == "message" || value == "call"
@@ -172,6 +187,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun resetSound(kind: String) {
             if (!validKind(kind)) return
+            runOnUiThread { stopPreview() }
             ConnectNotifications.preferences(this@MainActivity).edit()
                 .remove("custom_$kind").remove("label_$kind").apply()
             notifyWeb("connect:android-sound-selected", JSONObject().put("kind", kind).put("settings", JSONObject(getSoundSettings())))
@@ -180,6 +196,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setSilent(kind: String, muted: Boolean) {
             if (!validKind(kind)) return
+            if (muted) runOnUiThread { stopPreview() }
             ConnectNotifications.preferences(this@MainActivity).edit()
                 .putBoolean("mute_$kind", muted).apply()
             notifyWeb("connect:android-sound-selected", JSONObject().put("kind", kind)
@@ -191,7 +208,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 try {
                     val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    audio.mode = if (enabled) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
+                    audio.mode = AudioManager.MODE_IN_COMMUNICATION
                     if (Build.VERSION.SDK_INT >= 31) {
                         if (enabled) {
                             val speaker = audio.availableCommunicationDevices.firstOrNull {
@@ -210,17 +227,42 @@ class MainActivity : Activity() {
         fun previewSound(kind: String) {
             if (!validKind(kind)) return
             runOnUiThread {
-                previewPlayer?.release(); previewPlayer = null
+                stopPreview()
+                if (ConnectNotifications.isSilent(this@MainActivity, kind)) return@runOnUiThread
                 val uri = ConnectNotifications.customUri(this@MainActivity, kind)
-                    ?: if (kind == "call") Settings.System.DEFAULT_RINGTONE_URI else null
-                if (uri != null) try {
-                    previewPlayer = MediaPlayer().apply {
-                        setDataSource(this@MainActivity, uri)
-                        setOnCompletionListener { it.release(); if (previewPlayer === it) previewPlayer = null }
-                        prepare(); start()
+                    ?: if (kind == "call") Settings.System.DEFAULT_RINGTONE_URI
+                    else {
+                        val name = ConnectNotifications.preferences(this@MainActivity).getString("sound", "soft")
+                            ?.takeIf { it in setOf("soft", "bright", "gentle") } ?: "soft"
+                        Uri.parse("android.resource://$packageName/raw/connect_$name")
                     }
-                } catch (_: Exception) { previewPlayer?.release(); previewPlayer = null }
+                try {
+                    val player = MediaPlayer()
+                    previewPlayer = player
+                    player.setDataSource(this@MainActivity, uri)
+                    player.setOnCompletionListener { finished ->
+                        if (previewPlayer === finished) stopPreview()
+                        else try { finished.release() } catch (_: Exception) {}
+                    }
+                    player.prepare()
+                    player.start()
+                    // Never play a full-length song indefinitely as a preview.
+                    previewTimeout.postDelayed(endPreview, 10_000)
+                } catch (_: Exception) {
+                    stopPreview()
+                    Toast.makeText(this@MainActivity, "Не удалось воспроизвести мелодию", Toast.LENGTH_SHORT).show()
+                }
             }
+        }
+
+        @JavascriptInterface
+        fun stopPreviewSound() {
+            runOnUiThread { stopPreview() }
+        }
+
+        @JavascriptInterface
+        fun canShowFullScreenCalls(): Boolean {
+            return Build.VERSION.SDK_INT < 34 || ConnectNotifications.manager(this@MainActivity).canUseFullScreenIntent()
         }
 
         @JavascriptInterface
@@ -240,6 +282,11 @@ class MainActivity : Activity() {
             if (validUuid(callId) && state != "ringing") {
                 ConnectNotifications.dismissCall(this@MainActivity, callId)
                 runOnUiThread {
+                    if (state == "ended" || state == "failed" || state == "declined" || state == "missed") {
+                        val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice()
+                        audio.mode = AudioManager.MODE_NORMAL
+                    }
                     if (Build.VERSION.SDK_INT >= 27) {
                         setShowWhenLocked(false); setTurnScreenOn(false)
                     } else {
@@ -310,7 +357,7 @@ class MainActivity : Activity() {
             allowFileAccess = false
             allowContentAccess = true
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString += " ConnectAndroid/1.3"
+            userAgentString += " ConnectAndroid/1.3.2"
         }
         web.addJavascriptInterface(AndroidBridge(), "ConnectAndroid")
         web.webViewClient = object : WebViewClient() {
@@ -429,8 +476,11 @@ class MainActivity : Activity() {
                     if (total < 100) throw IllegalArgumentException("Пустой аудиофайл")
                 }
             } ?: throw IllegalArgumentException("Нет доступа к файлу")
+            val mime = contentResolver.getType(uri)?.takeIf { it.startsWith("audio/") } ?: "audio/mpeg"
             ConnectNotifications.preferences(this).edit()
-                .putString("custom_$kind", name).putString("label_$kind", label).apply()
+                .putString("custom_$kind", name).putString("label_$kind", label)
+                .putString("mime_$name", mime)
+                .putBoolean("mute_$kind", false).apply()
             notifyWeb("connect:android-sound-selected", JSONObject().put("kind", kind)
                 .put("settings", JSONObject(AndroidBridge().getSoundSettings())))
             Toast.makeText(this, "Мелодия выбрана: $label", Toast.LENGTH_SHORT).show()
@@ -452,6 +502,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        stopPreview()
         ConnectAppPresence.visible = false
         ConnectAppPresence.activeConversation = ""
         super.onPause()
@@ -471,7 +522,7 @@ class MainActivity : Activity() {
     @Deprecated("Back navigation")
     override fun onBackPressed() { if (web.canGoBack()) web.goBack() else super.onBackPressed() }
     override fun onDestroy() {
-        previewPlayer?.release(); previewPlayer = null
+        stopPreview()
         ConnectAppPresence.visible = false
         ConnectAppPresence.activeConversation = ""
         web.destroy()
