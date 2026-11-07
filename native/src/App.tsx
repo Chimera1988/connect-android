@@ -13,6 +13,7 @@ import { palettes, themeNames, type Palette, type ThemeName } from './theme';
 import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
+import {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoice';
 import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 
@@ -53,6 +54,7 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  const voice=useConnectNativeVoice(ownId,profiles);
   const fetchCounter=useRef(0);
 
   useEffect(()=>{
@@ -95,7 +97,7 @@ function AppMain(){
     if(!pushDestination||!ownId)return;
     if(pushDestination.kind==='call'){
       setScreen({kind:'tab'});setTab('calls');
-      setNotice('Поступил звонок. Нативное соединение WebRTC ещё в разработке.');
+      void voice.checkIncoming(pushDestination.callId);
       setPushDestination(null);return;
     }
     const chat=conversations.find(c=>c.id===pushDestination.conversationId);
@@ -150,7 +152,7 @@ function AppMain(){
       avatarUrl={avatars[screen.peer.id]} colors={colors}
       onBack={()=>setScreen({kind:'tab'})}
       onOpenProfile={()=>setScreen({kind:'profile',profile:screen.peer})}
-      onCall={()=>Alert.alert('Аудиозвонки','Нативный WebRTC + Android Telecom в работе. Пока звонить можно из действующего APK.')} />;
+      onCall={()=>void voice.dial(screen.conversation.id,screen.peer.id,screen.peer.display_name)} />;
     if(screen.kind==='media')return <ConnectNativeMedia key={`${screen.profile.id}:${screen.mediaKind}`}
       ownerId={screen.profile.id} owner={screen.profile.id===ownId} kind={screen.mediaKind}
       colors={colors} onBack={()=>setScreen({kind:'profile',profile:screen.profile})}/>;
@@ -182,7 +184,8 @@ function AppMain(){
       <Text style={[s.subtitle,{marginTop:22}]}>Звуки, разрешения, управление камерой и микрофоном перейдут в нативные настройки при подключении соответствующих модулей.</Text>
       <Pressable style={[s.mainAction,{backgroundColor:colors.elevated,marginTop:32}]} onPress={()=>void logout()}><Text style={s.actionText}>Выйти из аккаунта</Text></Pressable>
     </ScrollView>;
-    if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}/>;
+    if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}
+      onDial={(conversationId,peer)=>void voice.dial(conversationId,peer.id,peer.display_name)}/>;
     if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><Text style={[s.entryTitle,{flex:1}]}>{item.display_name}</Text><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
     return <FlatList data={chats.filter(x=>x.peer.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.conversation.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Чаты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Поиск по контактам" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} ListEmptyComponent={<Text style={s.subtitle}>Нет переписок. Открой раздел «Контакты».</Text>}
       renderItem={({item})=><Pressable style={s.entry} onPress={()=>setScreen({kind:'chat',conversation:item.conversation,peer:item.peer})}><Avatar name={item.peer.display_name} url={avatars[item.peer.id]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{item.peer.display_name}</Text><Text style={s.subtitle}>Открыть переписку</Text></View><Ionicons name="chevron-forward" size={18} color={colors.muted}/></Pressable>}/>;
@@ -195,6 +198,7 @@ function AppMain(){
       {tabButton('calls','call-outline','Звонки')}
       {tabButton('settings','settings-outline','Настройки')}
     </View>}
+    <ConnectNativeVoicePanel voice={voice} colors={colors}/>
     {!!notice&&<Pressable style={s.toast} onPress={()=>setNotice('')}><Text style={{color:colors.text}}>{notice}</Text><Ionicons name="close" color={colors.text} size={15}/></Pressable>}
   </View>;
 }

@@ -17,7 +17,7 @@ function callDescription(row:Call,selfId:string){
 const Btn=({icon,label,colors,onPress,disabled}:{icon:keyof typeof Ionicons.glyphMap;label:string;colors:Palette;onPress:()=>void;disabled?:boolean})=><Pressable
   disabled={disabled} onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{padding:9,opacity:disabled ? 0.4 : 1}}>
   <Ionicons name={icon} color={colors.accent} size={23}/></Pressable>;
-export default function ConnectNativeCalls({ownerId,profiles,avatars,colors}:{ownerId:string;profiles:Profile[];avatars:Record<string,string>;colors:Palette}) {
+export default function ConnectNativeCalls({ownerId,profiles,avatars,colors,onDial}:{ownerId:string;profiles:Profile[];avatars:Record<string,string>;colors:Palette;onDial?:(conversationId:string,peer:Profile)=>void}) {
   const [rows,setRows]=useState<Call[]>([]);
   const [setting,setSetting]=useState<JournalSetting>({owner_id:ownerId,cleared_before:null,hidden_ids:[]});
   const [selected,setSelected]=useState<string[]>([]);
@@ -105,7 +105,7 @@ export default function ConnectNativeCalls({ownerId,profiles,avatars,colors}:{ow
         const peer=profiles.find(p=>p.id===peerId);
         const checked=selected.includes(item.id);
         const avatar=avatars[peerId];
-        return <Pressable onPress={()=>{if(selecting)setSelected(x=>x.includes(item.id)?x.filter(y=>y!==item.id):[...x,item.id]);}}
+        return <Pressable onPress={()=>{if(selecting)setSelected(x=>x.includes(item.id)?x.filter(y=>y!==item.id):[...x,item.id]);else if(peer&&onDial)onDial(item.conversation_id,peer);}}
           style={{flexDirection:'row',alignItems:'center',gap:11,borderRadius:16,padding:11,borderWidth:checked?2:1,
             borderColor:checked?colors.accent:colors.line,backgroundColor:colors.surface}}>
           {selecting&&<Ionicons name={checked?'checkbox':'square-outline'} size={24} color={colors.accent}/>}

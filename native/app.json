@@ -13,7 +13,11 @@
         "INTERNET",
         "POST_NOTIFICATIONS",
         "RECORD_AUDIO",
-        "CAMERA"
+        "CAMERA",
+        "ACCESS_NETWORK_STATE",
+        "CHANGE_NETWORK_STATE",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH_CONNECT"
       ],
       "googleServicesFile": "../app/google-services.json"
     },

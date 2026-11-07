@@ -43,3 +43,11 @@
 - Native Android channels for messages and calls; data-only FCM handling and tap navigation.
 - Uses existing Firebase app `com.connect.messenger` for future release only; do not install over WebView APK until fully tested and signed.
 - WebRTC, Telecom, native incoming-call UI and lock-screen call acceptance are not implemented by this workflow.
+
+## Native audio calls (foreground)
+- Audio WebRTC calls use existing Connect `connect_calls` RPC and `connect_call_ice` tables.
+- Callers notify the existing Connect server via `/api/push/call`; TURN credentials come from authenticated `/api/calls/ice`.
+- Android mic, earpiece/speaker routing, mute and audio focus use react-native-webrtc and react-native-incall-manager. No WebView.
+- Incoming calls appear while the native application is open; FCM taps resync pending calls.
+- Android Telecom / ConnectionService, full-screen locked-phone incoming UI, background media services, ringtone selection and real-device network testing remain necessary before replacement of the old APK.
+- Audio RTC is not a replacement for Android's system volume APIs; hardware volume controls remain authoritative.
