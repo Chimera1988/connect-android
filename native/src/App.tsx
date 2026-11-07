@@ -14,6 +14,7 @@ import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
 import type { MediaKind } from './nativeMediaUtils';
+import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
 type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile} | {kind:'media'; profile:Profile; mediaKind: MediaKind};
@@ -50,6 +51,7 @@ function AppMain(){
   const [conversations,setConversations]=useState<Conversation[]>([]);
   const [search,setSearch]=useState('');
   const [notice,setNotice]=useState('');
+  const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
   const fetchCounter=useRef(0);
 
@@ -85,6 +87,29 @@ function AppMain(){
     return()=>clearInterval(id);
   },[ownId,loadDirectory]);
 
+  useEffect(()=>{
+    if(!ownId)return;
+    return subscribeNativePush(ownId,setPushDestination,setNotice);
+  },[ownId]);
+  useEffect(()=>{
+    if(!pushDestination||!ownId)return;
+    if(pushDestination.kind==='call'){
+      setScreen({kind:'tab'});setTab('calls');
+      setNotice('Поступил звонок. Нативное соединение WebRTC ещё в разработке.');
+      setPushDestination(null);return;
+    }
+    const chat=conversations.find(c=>c.id===pushDestination.conversationId);
+    if(!chat)return;
+    const peerId=chat.user_a===ownId?chat.user_b:chat.user_a;
+    const peer=profiles.find(p=>p.id===peerId);
+    if(!peer)return;
+    setScreen({kind:'chat',conversation:chat,peer});setTab('chats');setPushDestination(null);
+    void dismissChatPush(chat.id);
+  },[pushDestination,ownId,conversations,profiles]);
+  useEffect(()=>{
+    if(screen.kind==='chat')void dismissChatPush(screen.conversation.id);
+  },[screen]);
+
   const chats=useMemo(()=>conversations.map(c=>({conversation:c,peer:profiles.find(p=>p.id===(c.user_a===ownId?c.user_b:c.user_a))})).filter(x=>x.peer && !x.peer.is_blocked) as {conversation:Conversation;peer:Profile}[],[conversations,profiles,ownId]);
   async function login(){if(!email.trim()||!password)return;
     setAuthBusy(true);setNotice('');
@@ -100,7 +125,7 @@ function AppMain(){
     }
     setSearch('');setScreen({kind:'chat',conversation:chat,peer:person});
   }
-  async function logout(){await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}
+  async function logout(){await disableNativePush();await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}
   const own=profiles.find(p=>p.id===ownId);
   const s=makeStyles(colors);
   if(initializing)return <View style={[s.root,s.center]}><ActivityIndicator color={colors.accent}/></View>;

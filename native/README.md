@@ -37,3 +37,9 @@
 - Публичный SDK ключ идёт в мобильное приложение, а серверные secrets остаются на сервере.
 - UI нативный: прямое копирование JSX/HTML/CSS из PWA не заменяет переноса поведения компонентов.
 - При релизе использовать постоянную подпись и `applicationId=com.connect.messenger`, только после миграции и тестов.
+
+## Native FCM notifications (source integration)
+- Authenticated registration and removal of device tokens with Connect server.
+- Native Android channels for messages and calls; data-only FCM handling and tap navigation.
+- Uses existing Firebase app `com.connect.messenger` for future release only; do not install over WebView APK until fully tested and signed.
+- WebRTC, Telecom, native incoming-call UI and lock-screen call acceptance are not implemented by this workflow.

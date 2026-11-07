@@ -7,14 +7,15 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.connect.messenger.native",
-      "versionCode": 1,
+      "package": "com.connect.messenger",
+      "versionCode": 8,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
         "RECORD_AUDIO",
         "CAMERA"
-      ]
+      ],
+      "googleServicesFile": "../app/google-services.json"
     },
     "plugins": [
       "expo-secure-store",
@@ -27,7 +28,19 @@
           "enableBackgroundRecording": false
         }
       ],
-      "expo-video"
+      "expo-video",
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraMavenRepos": [
+              "$rootDir/../node_modules/@notifee/react-native/android/libs"
+            ]
+          }
+        }
+      ]
     ]
   }
 }
