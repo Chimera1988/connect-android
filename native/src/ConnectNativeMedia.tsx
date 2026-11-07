@@ -89,6 +89,8 @@ export function ConnectNativeAttachment({message,colors}:{message:Message;colors
   const k=message.attachment_kind;
   const name=message.attachment_name||'Вложение';
   if(!url)return <Text style={{color:colors.muted}}>Загружаем вложение…</Text>;
+  if(k==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(name))
+    return <Image source={{uri:url}} resizeMode="contain" style={{width:150,height:150}} accessibilityLabel="Стикер из клавиатуры"/>;
   if(k==='image')return <><Pressable accessibilityRole="button" accessibilityLabel={`Открыть фото ${name}`} onPress={()=>setView(true)}>
       <Image source={{uri:url}} resizeMode="cover" style={{width:230,height:205,borderRadius:13}}/>
     </Pressable>{view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;

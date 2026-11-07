@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,FlatList,Image,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
+import {Alert,FlatList,Image,Keyboard,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -10,6 +10,7 @@ import {randomUUID} from 'expo-crypto';
 import {db,MESSAGE_COLUMNS,type Conversation,type Message,type Profile} from './backend';
 import {ConnectNativeAttachment} from './ConnectNativeMedia';
 import ConnectNativeVideoNote from './ConnectNativeVideoNote';
+import ConnectNativeStickerPicker,{ConnectNativeStickerBubble,parseStickerReference} from './ConnectNativeStickers';
 import {uploadFile,type LocalUpload} from './nativeMediaUtils';
 import type {Palette} from './theme';
 
@@ -55,6 +56,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [forwardBusy,setForwardBusy]=useState(false);
   const [uploading,setUploading]=useState(false);
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
+  const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState=useAudioRecorderState(recorder);
@@ -137,6 +139,18 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       return true;
     }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;}
     finally{setUploading(false);}
+  }
+  async function sendSticker(body:string):Promise<void>{
+    if(busy||uploading||!parseStickerReference(body))return;
+    setBusy(true);
+    try{
+      const result=await db.from('messages').insert({
+        conversation_id:id,sender_id:ownerId,body,reply_to:reply?.id||null,
+      });
+      if(result.error)throw result.error;
+      setReply(null);setStickerPickerOpen(false);await load();
+    }catch(e){setNotice('Стикер не отправлен: '+(e instanceof Error?e.message:String(e)));}
+    finally{setBusy(false);}
   }
   async function attachMedia(fromCamera=false){
     try{
@@ -233,14 +247,18 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       renderItem={({item})=>{
         const own=item.sender_id===ownerId;
         const f=forwardMeta(item.body||'');
+        const sticker=parseStickerReference(f.text);
+        const keyboardSticker=item.attachment_kind==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(item.attachment_name||'');
+        const standalone=Boolean(sticker||keyboardSticker)&&!item.deleted_at;
         const isSelected=selected.includes(item.id);
-        return <Pressable onLongPress={()=>action(item)} onPress={()=>{if(selectionMode)action(item);}} style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:10,borderRadius:17,
-          borderWidth:isSelected?2:1,borderColor:isSelected?colors.accent:own?colors.accent:colors.line,backgroundColor:own?colors.elevated:colors.surface}}>
+        return <Pressable onLongPress={()=>action(item)} onPress={()=>{if(selectionMode)action(item);}} style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
+          borderWidth:isSelected?2:standalone?0:1,borderColor:isSelected?colors.accent:own?colors.accent:colors.line,backgroundColor:standalone?'transparent':own?colors.elevated:colors.surface}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
             {item.reply_to&&<Text style={{fontSize:10,color:colors.accent,marginBottom:4}}>↩ Ответ на сообщение</Text>}
             {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors}/>}
-            {Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Стикер или альбом · формат будет перенесён':f.text}</Text>}
+            {sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
+              Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':f.text}</Text>}
           </>}
           <Text style={{color:mutedColor,fontSize:10,textAlign:'right',marginTop:5}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
         </Pressable>;
@@ -249,7 +267,11 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Text numberOfLines={1} style={{flex:1,color:colors.accent,fontSize:12}}>{edit?'Редактирование':`Ответ: ${reply?.body||reply?.attachment_name||'вложение'}`}</Text>
       <Btn name="close" colors={colors} label="Отмена" onPress={()=>{setReply(null);setEdit(null);setDraft('');}}/>
     </View>}
+    {stickerPickerOpen&&<ConnectNativeStickerPicker colors={colors} ownerId={ownerId} busy={busy||uploading}
+      onClose={()=>setStickerPickerOpen(false)} onEmoji={emoji=>setDraft(text=>text+emoji)} onSend={sendSticker}/>}
     <View style={{flexDirection:'row',alignItems:'center',padding:8,borderTopWidth:.6,borderTopColor:colors.line,gap:2}}>
+      <Btn name="happy-outline" colors={colors} label="Стикеры и эмодзи" disabled={uploading||recorderState.isRecording}
+        onPress={()=>{Keyboard.dismiss();setStickerPickerOpen(open=>!open);}}/>
       <Btn name="attach-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={uploading||busy}/>
       <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={uploading||busy||recorderState.isRecording}/>
       <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение'} placeholderTextColor={mutedColor}
