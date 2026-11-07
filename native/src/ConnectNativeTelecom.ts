@@ -10,7 +10,7 @@ import {db} from './backend';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHANNEL='connect-native-calls-v1';
 const PENDING='connect-native-telecom-action-v1';
-export type TelecomAction='answer'|'end';
+export type TelecomAction='answer'|'end'|'mute'|'unmute';
 type SavedAction={action:TelecomAction;callId:string;time:number};
 let initialized:Promise<boolean>|null=null;
 let installed=false;
@@ -33,6 +33,9 @@ export function installTelecomEventHandlers(){
   if(installed||Platform.OS!=='android')return;
   installed=true;
   RNCallKeep.addEventListener('answerCall',({callUUID})=>dispatch('answer',callUUID));
+  RNCallKeep.addEventListener('didPerformSetMutedCallAction',({callUUID,muted})=>{
+    if(openCalls.has(callUUID))dispatch(muted?'mute':'unmute',callUUID);
+  });
   RNCallKeep.addEventListener('endCall',({callUUID})=>{
     if(ignoredEnd.delete(callUUID))return;
     openCalls.delete(callUUID);dispatch('end',callUUID);
@@ -55,7 +58,13 @@ async function setup():Promise<boolean>{
       await RNCallKeep.setup({
         ios:{appName:'Connect'},
         android:{alertTitle:'Телефонные вызовы Connect',alertDescription:'Разрешите Connect управлять аудиозвонками.',
-          cancelButton:'Отмена',okButton:'Разрешить',additionalPermissions:[],selfManaged:true},
+          cancelButton:'Отмена',okButton:'Разрешить',additionalPermissions:[],selfManaged:true,
+          // Keep an established VoIP call visible to the OS while the app
+          // moves to the background. Android may still restrict cold starts.
+          foregroundService:{channelId:'connect-native-ongoing-v1',
+            channelName:'Connect · Активный вызов',
+            notificationTitle:'Connect · Идёт аудиозвонок',
+            notificationIcon:'ic_launcher'}},
       });
       RNCallKeep.setAvailable(true);
       return true;

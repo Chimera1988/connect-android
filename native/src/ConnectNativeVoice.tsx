@@ -1,8 +1,9 @@
 import React, {useCallback,useEffect,useRef,useState} from 'react';
-import {ActivityIndicator,Pressable,Text,View} from 'react-native';
+import {ActivityIndicator,Alert,Pressable,Text,View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {mediaDevices,RTCPeerConnection,RTCSessionDescription,RTCIceCandidate} from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
+import RNCallKeep from 'react-native-callkeep';
 import {showIncomingSystemCall,showOutgoingSystemCall,answerSystemCall,activeSystemCall,endSystemCall} from './ConnectNativeTelecom';
 import {db} from './backend';
 import type {Profile} from './backend';
@@ -20,6 +21,25 @@ type IceRow={id:number;call_id:string;sender_id:string;candidate:{candidate:stri
 const CALL_SELECT='id,conversation_id,caller_id,callee_id,status,offer,answer,created_at,answered_at,ended_at';
 const FALLBACK_ICE=[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302']}];
 const RING_MS=60000;
+// Audio output is managed by Android Telecom; do not hard-force the earpiece
+// while a Bluetooth or wired headset might be available.
+type RouteInfo = {name:string;type:string;selected?:boolean};
+function routeTitle(route:RouteInfo):string{
+  const kind=route.type.toLowerCase();
+  if(kind.includes('bluetooth'))return 'Bluetooth';
+  if(kind.includes('headset')||kind.includes('wired'))return 'Проводная гарнитура';
+  if(kind.includes('speaker'))return 'Динамик';
+  return 'Телефон';
+}
+async function readCallRoutes():Promise<RouteInfo[]>{
+  try{
+    // CallKeep 4.6.1 runtime returns AudioRoute[], while its declarations
+    // still incorrectly type getAudioRoutes() as void.
+    const value=await RNCallKeep.getAudioRoutes() as unknown;
+    if(!Array.isArray(value))return [];
+    return value.filter((r):r is RouteInfo=>Boolean(r)&&typeof r==='object'&&typeof r.name==='string'&&typeof r.type==='string');
+  }catch(e){console.warn('Connect available audio outputs:',e);return [];}
+}
 const isLive=(s:string)=>s==='ringing'||s==='active';
 const errText=(e:unknown)=>e instanceof Error?e.message:String(e);
 const serverUrl=(path:string)=>`${(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'')}${path}`;
@@ -41,6 +61,7 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
   const [remoteName,setRemoteName]=useState('Собеседник');
   const [muted,setMuted]=useState(false);
   const [speaker,setSpeaker]=useState(false);
+  const [audioOutput,setAudioOutput]=useState('Автоматически');
   const [error,setError]=useState('');
   const [elapsed,setElapsed]=useState(0);
   const call=useRef<CallRow|null>(null);
@@ -53,6 +74,10 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
   const fetching=useRef(false);
   const statusFetching=useRef(false);
   const accepting=useRef(false);
+  const micMutedRef=useRef(false);
+  const routeBusy=useRef(false);
+  const preferredRoute=useRef('');
+  const manualRoute=useRef(false);
   const profilesRef=useRef(profiles);
   useEffect(()=>{profilesRef.current=profiles;},[profiles]);
 
@@ -68,6 +93,8 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     try{InCallManager.stop();}catch{}
     call.current=null;iceSent.current=[];icePending.current=[];knownIce.current=new Set();
     fetching.current=false;statusFetching.current=false;accepting.current=false;
+    micMutedRef.current=false;routeBusy.current=false;preferredRoute.current='';manualRoute.current=false;
+    setAudioOutput('Автоматически');
     setPhase('idle');setShown(null);setMuted(false);setSpeaker(false);setElapsed(0);
   },[]);
 
@@ -123,7 +150,10 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     }catch{}
     const peer=new RTCPeerConnection({iceServers:servers,bundlePolicy:'max-bundle'});
     pc.current=peer;
-    audio.getAudioTracks().forEach(track=>peer.addTrack(track,audio));
+    audio.getAudioTracks().forEach(track=>{
+      track.enabled=!micMutedRef.current;
+      peer.addTrack(track,audio);
+    });
     peer.addEventListener('icecandidate',event=>{
       const candidate=event.candidate;
       if(!candidate)return;
@@ -144,7 +174,9 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
         void finish('failed');
       }
     });
-    try{InCallManager.start({media:'audio'});InCallManager.setForceSpeakerphoneOn(false);}catch{}
+    // MODE_IN_COMMUNICATION selects Android's voice-call volume stream;
+    // automatic routing preserves Bluetooth / wired headset priorities.
+    try{InCallManager.start({media:'audio',auto:true});}catch(e){console.warn('Connect audio session:',e);}
     return peer;
   },[finish,flushLocal]);
 
@@ -236,14 +268,86 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     finally{accepting.current=false;}
   },[createPeer,finish,flushLocal,flushRemote,remoteIce,userId]);
 
-  const toggleMute=useCallback(()=>{
-    const next=!muted;mic.current?.getAudioTracks().forEach(track=>{track.enabled=!next;});setMuted(next);
-  },[muted]);
-  const toggleSpeaker=useCallback(()=>{
-    const next=!speaker;
-    try{InCallManager.setForceSpeakerphoneOn(next);InCallManager.setSpeakerphoneOn(next);}catch{}
-    setSpeaker(next);
-  },[speaker]);
+  const setMicMuted=useCallback((next:boolean)=>{
+    micMutedRef.current=next;
+    mic.current?.getAudioTracks().forEach(track=>{track.enabled=!next;});
+    setMuted(next);
+  },[]);
+  const toggleMute=useCallback(()=>setMicMuted(!micMutedRef.current),[setMicMuted]);
+
+  const applyAudioOutput=useCallback(async(output:RouteInfo,manual:boolean)=>{
+    const callId=call.current?.id;
+    if(!callId||routeBusy.current)return;
+    routeBusy.current=true;
+    try{
+      // Some Android/CallKeep versions leave this promise pending when Telecom
+      // has not finished creating the connection. Never wedge route polling.
+      await Promise.race([
+        RNCallKeep.setAudioRoute(callId,output.name),
+        new Promise<void>((_resolve,reject)=>setTimeout(()=>reject(new Error('Audio route timed out')),1800)),
+      ]);
+      if(call.current?.id!==callId)return;
+      manualRoute.current=manual;
+      preferredRoute.current=output.name;
+      setAudioOutput(routeTitle(output));
+      setSpeaker(output.type.toLowerCase().includes('speaker'));
+    }catch(e){console.warn('Connect audio output switching:',e);}
+    finally{routeBusy.current=false;}
+  },[]);
+
+  const refreshAudioOutputs=useCallback(async()=>{
+    const callId=call.current?.id;
+    if(!callId||routeBusy.current)return;
+    const routes=await readCallRoutes();
+    if(call.current?.id!==callId||!routes.length)return;
+    if(manualRoute.current){
+      if(routes.some(r=>r.name===preferredRoute.current))return;
+      // A manually selected headset was disconnected: return to automatic.
+      manualRoute.current=false;preferredRoute.current='';
+    }
+    const chosen=routes.find(r=>r.type.toLowerCase().includes('bluetooth'))
+      ||routes.find(r=>/headset|wired/.test(r.type.toLowerCase()))
+      ||routes.find(r=>r.selected)
+      ||routes.find(r=>/phone|earpiece/.test(r.type.toLowerCase()))
+      ||routes[0];
+    if(chosen.name!==preferredRoute.current)void applyAudioOutput(chosen,false);
+  },[applyAudioOutput]);
+
+  const chooseAudioOutput=useCallback(async()=>{
+    const routes=await readCallRoutes();
+    if(!call.current?.id||!routes.length){
+      Alert.alert('Аудиовыход','Подключите разговор и повторите попытку.');return;
+    }
+    // Native Android Alert supports at most three action buttons. Show the
+    // headset (Bluetooth preferred), speaker and phone. Closing the dialog
+    // does not alter the current route. Automatic choice remains the default.
+    const external=routes.find(r=>r.type.toLowerCase().includes('bluetooth'))
+      ||routes.find(r=>/wired|headset/.test(r.type.toLowerCase()));
+    const outputSpeaker=routes.find(r=>r.type.toLowerCase().includes('speaker'));
+    const handset=routes.find(r=>/phone|earpiece/.test(r.type.toLowerCase()));
+    const buttons=[external,outputSpeaker,handset].filter((r):r is RouteInfo=>Boolean(r))
+      .slice(0,3).map(r=>({text:routeTitle(r),onPress:()=>{void applyAudioOutput(r,true);}}));
+    if(buttons.length<3)buttons.push({text:'Отмена',onPress:()=>{}});
+    Alert.alert('Вывод звука','Выберите устройство для разговора',buttons,{cancelable:true});
+  },[applyAudioOutput,refreshAudioOutputs]);
+
+  useEffect(()=>{
+    if(phase!=='active'||!shown?.id)return;
+    void refreshAudioOutputs();
+    // Poll available devices: Android changes output lists when a Bluetooth
+    // headset is connected or disconnected during a call.
+    const timer=setInterval(()=>{void refreshAudioOutputs();},2800);
+    const subscription=RNCallKeep.addEventListener('didChangeAudioRoute',event=>{
+      if(event.callUUID!==shown.id)return;
+      const output=(event.output||'').toLowerCase();
+      setSpeaker(output.includes('speaker'));
+      if(output.includes('bluetooth'))setAudioOutput('Bluetooth');
+      else if(output.includes('speaker'))setAudioOutput('Динамик');
+      else if(output.includes('headset')||output.includes('wired'))setAudioOutput('Проводная гарнитура');
+      else if(output)setAudioOutput('Телефон');
+    });
+    return()=>{clearInterval(timer);subscription.remove();};
+  },[phase,shown?.id,refreshAudioOutputs]);
 
   useEffect(()=>{
     if(!userId){release();return;}
@@ -278,7 +382,7 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     tick();const timer=setInterval(tick,1000);return()=>clearInterval(timer);
   },[phase,shown?.answered_at]);
 
-  return {phase,shown,remoteName,error,muted,speaker,elapsed,dial,accept,finish,toggleMute,toggleSpeaker,checkIncoming};
+  return {phase,shown,remoteName,error,muted,speaker,audioOutput,elapsed,dial,accept,finish,toggleMute,setMicMuted,chooseAudioOutput,checkIncoming};
 }
 
 export type VoiceController=ReturnType<typeof useConnectNativeVoice>;
@@ -314,7 +418,7 @@ export function ConnectNativeVoicePanel({voice,colors}:{voice:VoiceController;co
       </>:<>
         {iconBtn(voice.muted?'mic-off':'mic',voice.muted?'Включить микрофон':'Выключить микрофон',voice.toggleMute,colors.elevated)}
         {iconBtn('call','Завершить звонок',()=>void voice.finish(),'#ba3448')}
-        {iconBtn(voice.speaker?'volume-high':'volume-medium',voice.speaker?'Отключить громкую связь':'Включить громкую связь',voice.toggleSpeaker,colors.elevated)}
+        {iconBtn(voice.speaker?'volume-high':'volume-medium','Аудиовыход: '+voice.audioOutput,voice.chooseAudioOutput,colors.elevated)}
       </>}
     </View>
     <Text style={{color:colors.muted,fontSize:12,textAlign:'center'}}>Connect · нативный аудиозвонок</Text>

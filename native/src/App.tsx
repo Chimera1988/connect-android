@@ -63,6 +63,9 @@ function AppMain(){
     return subscribeSystemTelecom((action,callId)=>{
       if(action==='answer'){
         void voiceRef.current.checkIncoming(callId).then(()=>voiceRef.current.accept());
+      }else if(action==='mute'||action==='unmute'){
+        if(voiceRef.current.shown?.id===callId)
+          voiceRef.current.setMicMuted(action==='mute');
       }else{
         if(voiceRef.current.shown?.id===callId)
           void voiceRef.current.finish(voiceRef.current.phase==='incoming'?'decline':'hangup');
