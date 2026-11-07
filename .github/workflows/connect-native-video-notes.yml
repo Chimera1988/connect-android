@@ -1,0 +1,154 @@
+name: Connect Native - in-chat video notes and PWA compatibility
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-video-notes.yml
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-video-notes
+  cancel-in-progress: false
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install video notes with guarded source edits
+        shell: bash
+        run: |
+          python3 - <<'PY_VIDEO_NOTES'
+          from pathlib import Path
+          import base64, hashlib, json, zlib
+
+          root = Path('native')
+          filename = root / 'src/ConnectNativeVideoNote.tsx'
+          # Asset replaced at packaging time, and checksum checked before installation.
+          ENCODED_ASSET = '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'
+          EXPECTED_SHA256 = 'b327f5bf4bd9ae5d905e9401ceefa1414175e3be2bb03f6cb066fc8347c41918'
+          asset = zlib.decompress(base64.b64decode(ENCODED_ASSET))
+          if hashlib.sha256(asset).hexdigest() != EXPECTED_SHA256:
+              raise SystemExit('Video note component checksum mismatch')
+          if filename.exists() and filename.read_bytes() != asset:
+              raise SystemExit('Refusing to replace a modified video-note component')
+          filename.parent.mkdir(parents=True, exist_ok=True)
+          filename.write_bytes(asset)
+
+          def once(src,old,new,description):
+              if new in src:
+                  print('Already installed:',description)
+                  return src
+              if src.count(old)!=1:
+                  raise SystemExit(f'{description}: expected one anchor, got {src.count(old)}')
+              return src.replace(old,new,1)
+
+          chat=root/'src/ConnectNativeChat.tsx'
+          s=chat.read_text('utf-8')
+          s=once(s,"import {ConnectNativeAttachment} from './ConnectNativeMedia';",
+           "import {ConnectNativeAttachment} from './ConnectNativeMedia';\nimport ConnectNativeVideoNote from './ConnectNativeVideoNote';",'video note import')
+          s=once(s,"  const [uploading,setUploading]=useState(false);",
+           "  const [uploading,setUploading]=useState(false);\n  const [videoNoteOpen,setVideoNoteOpen]=useState(false);",'video note modal state')
+          s=once(s,"  async function sendAttachment(file:LocalUpload,kind?:'image'|'video'|'file'|'audio'){\n    if(uploading||busy)return;",
+           "  async function sendAttachment(file:LocalUpload,kind?:'image'|'video'|'file'|'audio'):Promise<boolean>{\n    if(uploading||busy)return false;",'upload result type')
+          s=once(s,"      setReply(null);await load();\n    }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));}\n    finally{setUploading(false);}",
+           "      setReply(null);await load();\n      return true;\n    }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;}\n    finally{setUploading(false);}",'upload success reporting')
+          s=once(s,"      <Btn name=\"attach-outline\" colors={colors} label=\"Прикрепить\" onPress={showAttachmentMenu} disabled={uploading||busy}/>",
+           "      <Btn name=\"attach-outline\" colors={colors} label=\"Прикрепить\" onPress={showAttachmentMenu} disabled={uploading||busy}/>\n      <Btn name=\"radio-button-on-outline\" colors={colors} label=\"Записать видеокружок\" onPress={()=>setVideoNoteOpen(true)} disabled={uploading||busy||recorderState.isRecording}/>",'chat video-note button')
+          s=once(s,'    <Modal visible={Boolean(actionMessage)} onRequestClose={()=>setActionMessage(null)} animationType="fade" transparent>',
+           "    <ConnectNativeVideoNote visible={videoNoteOpen} colors={colors} onClose={()=>setVideoNoteOpen(false)}\n      onSend={file=>sendAttachment(file,'video')}/>\n    <Modal visible={Boolean(actionMessage)} onRequestClose={()=>setActionMessage(null)} animationType=\"fade\" transparent>",'chat video note modal')
+          chat.write_text(s,'utf-8')
+
+          media=root/'src/ConnectNativeMedia.tsx'
+          s=media.read_text('utf-8')
+          helper='''
+          /** Circular playable video note, matching the PWA's filename contract. */
+          function VideoNoteBubble({uri,colors}:{uri:string;colors:Palette}) {
+            const player=useVideoPlayer(uri,instance=>{instance.loop=false;});
+            const [playing,setPlaying]=useState(false);
+            return <Pressable accessibilityRole="button" accessibilityLabel={playing?'Пауза видеокружка':'Воспроизвести видеокружок'}
+              onPress={()=>{if(playing)player.pause();else player.play();setPlaying(!playing);}}
+              style={{width:208,height:208,borderRadius:104,overflow:'hidden',backgroundColor:'#081421',borderWidth:2,borderColor:colors.accent}}>
+              <VideoView player={player} nativeControls={false} contentFit="cover" surfaceType="textureView" style={{width:'100%',height:'100%'}} />
+              {!playing&&<View pointerEvents="none" style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center',backgroundColor:'#06101b44'}}>
+                <Ionicons name="play-circle" size={52} color="#fff"/>
+              </View>}
+            </Pressable>;
+          }
+          '''
+          s=once(s,'export function ConnectNativeMediaViewer(',helper+'\nexport function ConnectNativeMediaViewer(','video note bubble component')
+          s=once(s,"  if(k==='video')return <><IconButton name=\"play-circle\"",
+           "  if(k==='video'&&/^connect-video-note-\\d+\\.(?:mp4|webm)$/i.test(name))return <VideoNoteBubble uri={url} colors={colors}/>;\n  if(k==='video')return <><IconButton name=\"play-circle\"",'recognize PWA-compatible video notes')
+          media.write_text(s,'utf-8')
+
+          pkg=root/'package.json'
+          data=json.loads(pkg.read_text('utf-8'))
+          deps=data.setdefault('dependencies',{})
+          if 'expo-camera' in deps and deps['expo-camera'] != '~58.0.14':
+              raise SystemExit('Unexpected expo-camera version; review before updating')
+          deps['expo-camera']='~58.0.14'
+          pkg.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n','utf-8')
+
+          cfg=root/'app.json'
+          data=json.loads(cfg.read_text('utf-8'))
+          plugins=data['expo'].setdefault('plugins',[])
+          name='expo-camera'
+          if not any((p if isinstance(p,str) else p[0])==name for p in plugins):
+              plugins.append(['expo-camera',{'recordAudioAndroid':True,'cameraPermission':'Камера нужна для записи видеокружков Connect.','microphonePermission':'Микрофон нужен для записи видеокружков Connect.'}])
+          cfg.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n','utf-8')
+          print('Native video notes added. Old app/ untouched. Run npm install, typecheck and Gradle before commit.')
+          PY_VIDEO_NOTES
+      - name: Install dependencies and TypeScript check
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+      - name: Expo native Android prebuild
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Android SDK 37 (same as previous green native build)
+        run: |
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+      - name: Compile native debug APK for CI validation only
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Commit native sources after all checks pass
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/ConnectNativeVideoNote.tsx native/src/ConnectNativeChat.tsx native/src/ConnectNativeMedia.tsx native/app.json native/package.json native/package-lock.json
+          if git diff --cached --quiet; then echo 'Video notes already present'; exit 0; fi
+          git commit -m 'feat(native): in-chat PWA-compatible video notes'
+          git push origin HEAD:main
