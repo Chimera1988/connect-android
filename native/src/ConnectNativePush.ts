@@ -4,12 +4,14 @@ import notifee, {AndroidCategory, AndroidImportance, AndroidVisibility, EventTyp
 import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
 import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
+import {getConnectSoundChannel} from './ConnectNativeSoundSettings';
 
 const API=(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'');
 const DEVICE_ACTIVE_KEY='connect-native-fcm-authorized-v1';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MESSAGES='connect-native-messages-v1';
 const CALLS='connect-native-calls-v1';
+const READ_KEY='connect-native-read-marker-v1:';
 
 type Data=Record<string,string|undefined>;
 export type NativePushDestination={kind:'chat';conversationId:string}|{kind:'call';callId:string;conversationId:string|null};
@@ -33,16 +35,28 @@ function deliverOpen(raw:Record<string,unknown>|undefined){
 }
 
 async function ensureChannels(){
-  await Promise.all([
-    notifee.createChannel({id:MESSAGES,name:'Connect · Сообщения',importance:AndroidImportance.HIGH,sound:'default',vibration:true}),
-    notifee.createChannel({id:CALLS,name:'Connect · Аудиозвонки',importance:AndroidImportance.HIGH,sound:'default',vibration:true}),
-  ]);
+  await Promise.all([getConnectSoundChannel('messages'),getConnectSoundChannel('calls')]);
+}
+/** A local read marker stops delayed FCM messages from resurrecting read alerts. */
+export async function rememberReadAt(conversationId:string,iso:string){
+  if(!UUID.test(conversationId)||!Number.isFinite(Date.parse(iso)))return;
+  const key=READ_KEY+conversationId;
+  const old=await SecureStore.getItemAsync(key);
+  if(!old||Date.parse(iso)>Date.parse(old))await SecureStore.setItemAsync(key,iso);
 }
 /** Handles the data-only FCM payloads already sent by the Connect server. */
 export async function handleNativePush(data:Data|undefined){
   if(!data)return;
   if(data.kind==='read'){
-    if(data.conversationId&&UUID.test(data.conversationId))await notifee.cancelNotification('chat:'+data.conversationId);
+    if(data.conversationId&&UUID.test(data.conversationId)){
+      if(data.readAt)await rememberReadAt(data.conversationId,data.readAt);
+      // Older read receipts must not hide a notification for a newer message.
+      const shown=await notifee.getDisplayedNotifications().catch(()=>[]);
+      const later=shown.some(item=>item.notification?.id==='chat:'+data.conversationId &&
+        data.readAt && item.notification?.data?.createdAt &&
+        Date.parse(String(item.notification.data.createdAt))>Date.parse(data.readAt));
+      if(!later)await dismissChatPush(data.conversationId);
+    }
     return;
   }
   if(data.kind==='call-ended'){
@@ -57,12 +71,15 @@ export async function handleNativePush(data:Data|undefined){
   }
   if((data.kind==='message'||data.kind==='chat'||(!data.kind && data.messageId))&&data.conversationId&&UUID.test(data.conversationId)){
     if(data.conversationId===visibleConversation)return;
-    await ensureChannels();
+    const lastRead=await SecureStore.getItemAsync(READ_KEY+data.conversationId);
+    if(data.createdAt&&lastRead&&Number.isFinite(Date.parse(data.createdAt))&&
+      Date.parse(data.createdAt)<=Date.parse(lastRead))return;
+    const channelId=await getConnectSoundChannel('messages');
     await notifee.displayNotification({
       id:'chat:'+data.conversationId,
       title:'Connect · Новое сообщение',body:'Откройте переписку, чтобы прочитать сообщение',
-      data:{kind:'message',conversationId:data.conversationId},
-      android:{channelId:MESSAGES,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
+      data:{kind:'message',conversationId:data.conversationId,createdAt:data.createdAt||''},
+      android:{channelId,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
         visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true},
     });
   }
@@ -123,7 +140,12 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
 }
 
 export async function dismissChatPush(conversationId:string){
-  if(UUID.test(conversationId))await notifee.cancelNotification('chat:'+conversationId);
+  if(!UUID.test(conversationId))return;
+  await notifee.cancelNotification('chat:'+conversationId);
+  // Clean any duplicates or grouped children left by older builds.
+  const displayed=await notifee.getDisplayedNotifications().catch(()=>[]);
+  await Promise.all(displayed.filter(item=>item.notification?.data?.conversationId===conversationId &&
+    typeof item.notification?.id==='string').map(item=>notifee.cancelNotification(item.notification!.id!)));
 }
 
 /** Do not keep showing personal notifications after account sign-out. */

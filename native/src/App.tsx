@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView,
+  ActivityIndicator, Alert, AppState, FlatList, Image, KeyboardAvoidingView,
   Modal, Platform, Pressable, ScrollView, StatusBar as AndroidStatusBar,
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
@@ -17,6 +17,7 @@ import {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoic
 import {subscribeSystemTelecom} from './ConnectNativeTelecom';
 import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
+import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
 type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile} | {kind:'media'; profile:Profile; mediaKind: MediaKind};
@@ -131,7 +132,14 @@ function AppMain(){
     void dismissChatPush(chat.id);
   },[pushDestination,ownId,conversations,profiles]);
   useEffect(()=>{
-    if(screen.kind==='chat')void dismissChatPush(screen.conversation.id);
+    const sync=(status:string)=>{
+      const visible=status==='active' && screen.kind==='chat'?screen.conversation.id:null;
+      setVisibleConversation(visible);
+      if(visible)void dismissChatPush(visible);
+    };
+    sync(AppState.currentState ?? 'background');
+    const sub=AppState.addEventListener('change',sync);
+    return()=>{sub.remove();setVisibleConversation(null);};
   },[screen]);
 
   const chats=useMemo(()=>conversations.map(c=>({conversation:c,peer:profiles.find(p=>p.id===(c.user_a===ownId?c.user_b:c.user_a))})).filter(x=>x.peer && !x.peer.is_blocked) as {conversation:Conversation;peer:Profile}[],[conversations,profiles,ownId]);
@@ -203,7 +211,7 @@ function AppMain(){
       <View style={s.colorGrid}>{themeNames.map(item=><Pressable key={item.id} onPress={()=>setTheme(item.id)} style={[s.colorChip,{borderColor:theme===item.id?colors.accent:colors.line,backgroundColor:palettes[item.id].surface}]}>
         <View style={{width:10,height:10,borderRadius:5,backgroundColor:palettes[item.id].accent}}/><Text style={{color:theme===item.id?colors.text:colors.muted,fontSize:12}}>{item.name}</Text>
       </Pressable>)}</View>
-      <Text style={[s.subtitle,{marginTop:22}]}>Звуки, разрешения, управление камерой и микрофоном перейдут в нативные настройки при подключении соответствующих модулей.</Text>
+      <ConnectNativeSoundSettings colors={colors}/>
       <Pressable style={[s.mainAction,{backgroundColor:colors.elevated,marginTop:32}]} onPress={()=>void logout()}><Text style={s.actionText}>Выйти из аккаунта</Text></Pressable>
     </ScrollView>;
     if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}

@@ -6,6 +6,7 @@ import RNCallKeep from 'react-native-callkeep';
 import notifee,{AndroidCategory,AndroidImportance,AndroidVisibility} from '@notifee/react-native';
 import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
+import {getConnectSoundChannel} from './ConnectNativeSoundSettings';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHANNEL='connect-native-calls-v1';
@@ -92,8 +93,7 @@ export function subscribeSystemTelecom(onAction:(action:TelecomAction,callId:str
 }
 
 async function ensureCallChannel(){
-  await notifee.createChannel({id:CHANNEL,name:'Connect · Аудиозвонки',importance:AndroidImportance.HIGH,
-    sound:'default',vibration:true});
+  return getConnectSoundChannel('calls');
 }
 
 export async function showIncomingSystemCall(callId:string,callerName:string,conversationId:string|null){
@@ -105,11 +105,11 @@ export async function showIncomingSystemCall(callId:string,callerName:string,con
       openCalls.add(callId);
     }catch(e){console.warn('Connect Telecom incoming:',e);}
   }
-  await ensureCallChannel();
+  const channelId=await ensureCallChannel();
   await notifee.displayNotification({
     id:'call:'+callId,title:'Connect · Входящий звонок',body:`Звонит ${callerName}`,
     data:{kind:'incoming-call',callId,conversationId:conversationId||''},
-    android:{channelId:CHANNEL,category:AndroidCategory.CALL,importance:AndroidImportance.HIGH,
+    android:{channelId,category:AndroidCategory.CALL,importance:AndroidImportance.HIGH,
       visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},
       fullScreenAction:{id:'default'},onlyAlertOnce:true,timeoutAfter:65000,
       actions:[

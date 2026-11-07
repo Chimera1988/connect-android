@@ -53,7 +53,8 @@
           "cameraPermission": "Камера нужна для записи видеокружков Connect.",
           "microphonePermission": "Микрофон нужен для записи видеокружков Connect."
         }
-      ]
+      ],
+      "./plugins/withConnectSounds"
     ]
   }
 }

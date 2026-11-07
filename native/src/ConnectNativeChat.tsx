@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,FlatList,Image,Keyboard,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
+import {Alert,AppState,FlatList,Image,Keyboard,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -10,6 +10,7 @@ import {randomUUID} from 'expo-crypto';
 import {db,MESSAGE_COLUMNS,type Conversation,type Message,type Profile} from './backend';
 import {ConnectNativeAttachment} from './ConnectNativeMedia';
 import ConnectNativeVideoNote from './ConnectNativeVideoNote';
+import {dismissChatPush,rememberReadAt} from './ConnectNativePush';
 import ConnectNativeAlbum,{parseAlbumReference} from './ConnectNativeAlbum';
 import ConnectNativeStickerPicker,{ConnectNativeStickerBubble,parseStickerReference} from './ConnectNativeStickers';
 import {uploadFile,type LocalUpload} from './nativeMediaUtils';
@@ -62,16 +63,42 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
+  const lastSyncedRead=useRef<Record<string,string>>({});
+  const seenIncoming=useRef<Record<string,string>>({});
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState=useAudioRecorderState(recorder);
   const id=conversation.id;
   const textColor=colors.text;
   const mutedColor=colors.muted;
+  const markChatRead=useCallback(async(iso:string)=>{
+    if(!ownerId||AppState.currentState!=='active')return;
+    if(lastSyncedRead.current[id] && lastSyncedRead.current[id]>=iso)return;
+    lastSyncedRead.current[id]=iso;
+    const saved=await db.from('conversation_user_state').upsert(
+      {conversation_id:id,user_id:ownerId,last_read_at:iso},{onConflict:'conversation_id,user_id'});
+    if(saved.error){delete lastSyncedRead.current[id];return;}
+    await dismissChatPush(id).catch(()=>{});
+    await rememberReadAt(id,iso).catch(()=>{});
+    try{
+      const {data:{session}}=await db.auth.getSession();
+      if(!session?.access_token)return;
+      void fetch((process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'')+'/api/push/read',{
+        method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+        body:JSON.stringify({conversationId:id,readAt:iso}),
+      }).catch(()=>{});
+    }catch{}
+  },[id,ownerId]);
   const load=useCallback(async()=>{
     const result=await db.from('messages').select(MESSAGE_COLUMNS).eq('conversation_id',id).order('created_at',{ascending:false}).limit(300);
     if(result.error){setNotice('Сообщения: '+result.error.message);return;}
-    setMessages(((result.data||[]) as Message[]).reverse());
-  },[id]);
+    const rows=((result.data||[]) as Message[]).reverse();
+    setMessages(rows);
+    const latest=[...rows].reverse().find(m=>!m.deleted_at&&m.sender_id!==ownerId);
+    if(latest && latest.created_at>(seenIncoming.current[id]||'')){
+      seenIncoming.current[id]=latest.created_at;
+      if(AppState.currentState==='active')void markChatRead(new Date().toISOString());
+    }
+  },[id,ownerId,markChatRead]);
   useEffect(()=>{
     let alive=true;
     void load();
@@ -81,12 +108,12 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   },[load]);
   useEffect(()=>{
     if(!ownerId)return;
-    void db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,last_read_at:new Date().toISOString()},{onConflict:'conversation_id,user_id'});
-    const timer=setInterval(()=>{
-      void db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,last_read_at:new Date().toISOString()},{onConflict:'conversation_id,user_id'});
-    },13000);
-    return()=>clearInterval(timer);
-  },[id,ownerId]);
+    void markChatRead(new Date().toISOString());
+    const subscription=AppState.addEventListener('change',state=>{
+      if(state==='active')void markChatRead(new Date().toISOString());
+    });
+    return()=>subscription.remove();
+  },[id,ownerId,markChatRead]);
   useEffect(()=>{
     if(!ownerId||!recorderState.isRecording)return;
     // Keep the existing PWA "recording_until" indicator alive during long recordings.
