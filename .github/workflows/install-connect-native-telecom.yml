@@ -1,0 +1,148 @@
+name: Connect Native - Android Telecom and lock screen calls
+on:
+  workflow_dispatch: null
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/install-connect-native-telecom.yml
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-telecom
+  cancel-in-progress: false
+jobs:
+  install-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+    - name: Checkout Connect Android
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: true
+    - name: Node.js 24
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+    - name: Android SDK
+      uses: android-actions/setup-android@v4
+      with:
+        packages: platform-tools
+    - name: Install Connect Telecom source and lock-screen plugin
+      shell: bash
+      run: "python3 - <<'PYTELECOM'\nfrom pathlib import Path\nimport base64,hashlib,json,zlib\nroot=Path('native')\nif not (root/'src/ConnectNativeVoice.tsx').exists()\
+        \ or not (root/'src/ConnectNativePush.ts').exists():\n    raise SystemExit('Install the successful WebRTC voice workflow first')\n\
+        \nassets=[('native/src/ConnectNativeTelecom.ts', '19c43ebde0e8093bbacca6b4fd4bab23709772267b5950d0d929ae457de7d1fc', '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'),\
+        \ ('native/plugins/withConnectTelecom.js', '35cc75b752ed868eada28678e166b859bb1ca033e1b804cf7136c7bb2c48a23e', 'eNqVVd9v2jAQfu9f4UloIVVr9gxKK5alHRokE9D2gaEoTY5iNbEz2yntIP/7nMSBtEpR+8KP89193919Z/dOT9EUzkMOgYQI3b8g5zllKOVwn5E46iMaSPIEaEgjzkiE5hBDyBL0FcUsfBQqDihKAkpWICRGp72TkFEh0XZD5FoHTfRxbnH4mxEOXQMUSE95rsjDeRpnD4QKwxycJCzKYsDFKZfCWmU0lIRRVCSzGaUQSk2gWwWb2xOEOMiMV05vELXXWfVlXRTeCFUME6uyYgU6BZHFUuC6kEHplyyMTIA4T4EnRAhFxFhabcbdbrEcNFJHIFSVkbUobQgZQUULH4Lwzczxr27GY39mTx3H9Ufu3HHnxtmRkMnQHV47vnfn+vZwPJ4ddb7yps711Ltxf/gzZ3o7sp1Puvu/f3quUyJ9NnIysqdeGX408m74y/HHnv1Le+kerhjvVn1MEVvVzTS3OhNZdb+0DQELlkD32bp4xp1LvKgB+zRIQM3NslLTbI1LM7Hubjv97euQfprnZsUob8w2SFMrweozJmFQiFNhfdPMC2rqxJRrzjaIwgY5nKtqDK3d/fZUklfLxfaL1choaFhlwgL4EwnBavw+qC0GiVoc8IrQ6FgnDMLwJvjHcBjE8SNAim+ZitMsFYNZlagmUtSlc5vbGrClYx/Om+eDJt9yAjXAoOp2fdaxthjvPTtne8jGDPtt6vo+UoqcO2PH9ia+7bmuY89HnvvuNvSrWwcilU7yDIwDlFIkPHCW0UgXMH9Ji3LTNaNgq1p3CQk5K/8a+aDJf2EQKoHK8xWJJXDV/sU2KHvRX7R1sC5EVkrBbb1b5q9umyLdE5EERCkC/ffl7aVU262D/14ovT/4chIQOtQ+nZ4ioK7PVgHtdoZhNpRRJ/647JtQagekWnnV273s9QnuHJDFmm3u1kDH6tFRE1pa1YjeDyhehFn5Onn0jbt+LqrbvzAVa66m9h8ZSmG2')]\n\
+        for name,sha,encoded in assets:\n    path=Path(name)\n    data=zlib.decompress(base64.b64decode(encoded))\n    if hashlib.sha256(data).hexdigest()!=sha:raise\
+        \ SystemExit('Embedded asset checksum mismatch: '+name)\n    if path.exists() and path.read_bytes()!=data:raise SystemExit('Refusing\
+        \ to overwrite manually changed: '+name)\n    path.parent.mkdir(parents=True,exist_ok=True)\n    path.write_bytes(data)\n\n\
+        def one(s,old,new,label):\n    if new in s:print('Already updated:',label);return s\n    if s.count(old)!=1:raise SystemExit(f'{label}:\
+        \ expected one anchor, found {s.count(old)}')\n    return s.replace(old,new,1)\n\nvoice=root/'src/ConnectNativeVoice.tsx'\n\
+        s=voice.read_text('utf-8')\ns=one(s,\"import InCallManager from 'react-native-incall-manager';\",\n \"import InCallManager from\
+        \ 'react-native-incall-manager';\\nimport {showIncomingSystemCall,showOutgoingSystemCall,answerSystemCall,activeSystemCall,endSystemCall}\
+        \ from './ConnectNativeTelecom';\",'voice telecom imports')\ns=one(s,\"  const release=useCallback(()=>{\\n    generation.current++;\"\
+        ,\n \"  const release=useCallback(()=>{\\n    const nativeId=call.current?.id;\\n    if(nativeId)void endSystemCall(nativeId);\\\
+        n    generation.current++;\",'cleanup system call')\ns=one(s,\"      if(peer.connectionState==='connected'){\\n        setPhase('active');setError('');\"\
+        ,\n \"      if(peer.connectionState==='connected'){\\n        if(call.current?.id)void activeSystemCall(call.current.id);\\\
+        n        setPhase('active');setError('');\",'mark telecom connected')\ns=one(s,\"    // Foreground-only incoming UI. FCM + Telecom\
+        \ will be wired for lock-screen handling separately.\",\n \"    void showIncomingSystemCall(row.id,profilesRef.current.find(p=>p.id===row.caller_id)?.display_name||'Собеседник',row.conversation_id);\"\
+        ,'register incoming with telecom')\ns=one(s,\"      call.current=data as CallRow;setShown(data as CallRow);setPhase('ringing');\"\
+        ,\n \"      call.current=data as CallRow;setShown(data as CallRow);setPhase('ringing');\\n      void showOutgoingSystemCall(data.id,peerName);\"\
+        ,'register outgoing with telecom')\ns=one(s,\"    accepting.current=true;\\n    const op=generation.current;\",\n \"    accepting.current=true;\\\
+        n    void answerSystemCall(row.id);\\n    const op=generation.current;\",'answer telecom')\nvoice.write_text(s,encoding='utf-8')\n\
+        \npush=root/'src/ConnectNativePush.ts'\ns=push.read_text('utf-8')\ns=one(s,\"import {db} from './backend';\",\n \"import {db}\
+        \ from './backend';\\nimport {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';\"\
+        ,'push telecom imports')\ns=one(s,\"if(data.callId&&UUID.test(data.callId))await notifee.cancelNotification('call:'+data.callId);\"\
+        ,\n \"if(data.callId&&UUID.test(data.callId))await endSystemCall(data.callId);\",'call ended transport')\nold=\"\"\"    await\
+        \ notifee.displayNotification({\n      id:'call:'+data.callId,\n      title:'Входящий аудиозвонок · Connect',\n      body:'Открыть\
+        \ Connect для просмотра вызова',\n      data:{kind:'incoming-call',callId:data.callId,conversationId:data.conversationId||''},\n\
+        \      android:{channelId:CALLS,category:AndroidCategory.CALL,importance:AndroidImportance.HIGH,\n        visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true,timeoutAfter:65000},\n\
+        \    });\"\"\"\ns=one(s,old,\"    await showIncomingSystemCall(data.callId,data.callerName||'Собеседник',data.conversationId||null);\"\
+        ,'lockscreen incoming notification')\nold=\"\"\"  notifee.onBackgroundEvent(async ({type})=>{\n    // Android launches the app\
+        \ on press. The initial notification is read after boot.\n    if(type===EventType.PRESS||type===EventType.ACTION_PRESS)return;\n\
+        \  });\"\"\"\nnew=\"\"\"  notifee.onBackgroundEvent(async ({type,detail})=>{\n    if(type===EventType.ACTION_PRESS)\n      await\
+        \ handleCallNotificationAction(detail.pressAction?.id,detail.notification?.data);\n  });\"\"\"\ns=one(s,old,new,'background\
+        \ answer and decline')\nold=\"\"\"  const presses=notifee.onForegroundEvent(({type,detail})=>{\n    if(type===EventType.PRESS||type===EventType.ACTION_PRESS)deliverOpen(detail.notification?.data);\n\
+        \  });\"\"\"\nnew=\"\"\"  const presses=notifee.onForegroundEvent(({type,detail})=>{\n    if(type===EventType.ACTION_PRESS &&\
+        \ detail.pressAction?.id?.startsWith('connect-')){\n      void handleCallNotificationAction(detail.pressAction.id,detail.notification?.data);\n\
+        \      return;\n    }\n    if(type===EventType.PRESS||type===EventType.ACTION_PRESS)deliverOpen(detail.notification?.data);\n\
+        \  });\"\"\"\ns=one(s,old,new,'foreground notification call actions')\nold=\"\"\"      const initial=await notifee.getInitialNotification();\n\
+        \      if(alive&&initial?.notification?.data)deliverOpen(initial.notification.data);\"\"\"\nnew=\"\"\"      const initial=await\
+        \ notifee.getInitialNotification();\n      if(alive&&initial?.notification?.data){\n        if(initial.pressAction?.id==='connect-answer')\n\
+        \          await handleCallNotificationAction('connect-answer',initial.notification.data);\n        deliverOpen(initial.notification.data);\n\
+        \      }\"\"\"\ns=one(s,old,new,'cold-start call action')\npush.write_text(s,encoding='utf-8')\n\napp=root/'src/App.tsx'\ns=app.read_text('utf-8')\n\
+        s=one(s,\"import {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoice';\",\n \"import {useConnectNativeVoice,ConnectNativeVoicePanel}\
+        \ from './ConnectNativeVoice';\\nimport {subscribeSystemTelecom} from './ConnectNativeTelecom';\",'app telecom imports')\nold=\"\
+        \  const voice=useConnectNativeVoice(ownId,profiles);\"\nnew=\"\"\"  const voice=useConnectNativeVoice(ownId,profiles);\n  const\
+        \ voiceRef=useRef(voice);\n  voiceRef.current=voice;\n  useEffect(()=>{\n    if(!ownId)return;\n    return subscribeSystemTelecom((action,callId)=>{\n\
+        \      if(action==='answer'){\n        void voiceRef.current.checkIncoming(callId).then(()=>voiceRef.current.accept());\n  \
+        \    }else{\n        if(voiceRef.current.shown?.id===callId)\n          void voiceRef.current.finish(voiceRef.current.phase==='incoming'?'decline':'hangup');\n\
+        \      }\n    });\n  },[ownId]);\"\"\"\ns=one(s,old,new,'connect Telecom actions to active WebRTC controller')\napp.write_text(s,encoding='utf-8')\n\
+        \nentry=root/'index.js'\ns=entry.read_text('utf-8')\ns=one(s,\"import App from './src/App';\",\n \"import App from './src/App';\\\
+        nimport {installTelecomEventHandlers} from './src/ConnectNativeTelecom';\\ninstallTelecomEventHandlers();\",'register native\
+        \ Telecom at entrypoint')\nentry.write_text(s,encoding='utf-8')\n\ncfg=root/'app.json'\ndata=json.loads(cfg.read_text('utf-8'))\n\
+        plugins=data['expo'].setdefault('plugins',[])\nplugin='./plugins/withConnectTelecom'\nif not any((x if isinstance(x,str) else\
+        \ x[0])==plugin for x in plugins):plugins.append(plugin)\ncfg.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\\n','utf-8')\n\
+        \npkg=root/'package.json'\ndata=json.loads(pkg.read_text('utf-8'))\ndeps=data.setdefault('dependencies',{})\nif 'react-native-callkeep'\
+        \ in deps and deps['react-native-callkeep']!='4.6.1':\n    raise SystemExit('Existing react-native-callkeep version requires\
+        \ manual review')\ndeps['react-native-callkeep']='4.6.1'\npkg.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\\n','utf-8')\n\
+        \nreadme=root/'README.md'\ns=readme.read_text('utf-8')\nif '## Android Telecom / lock-screen calls' not in s:\n    s+='\\n##\
+        \ Android Telecom / lock-screen calls\\n- Self-managed ConnectionService (react-native-callkeep): Connect draws its own voice\
+        \ call interface.\\n- High-priority Notifee incoming call notifications with Answer/Decline and a best-effort full-screen intent.\\\
+        n- User/device must permit full-screen call notifications on Android 14+. An active foreground call uses system audio focus.\\\
+        n- Incoming FCM and foreground polling both feed the same Supabase/WebRTC call; no duplicate server calls.\\n- Background/killed-app\
+        \ acceptance, Bluetooth/headset and lock-screen presentation require tests on real devices.\\n'\n    readme.write_text(s,encoding='utf-8')\n\
+        print('Connect Native Telecom integrated; legacy app/ remains unchanged')\n\nPYTELECOM"
+    - name: Install CallKeep and verify TypeScript
+      working-directory: native
+      env:
+        CI: '1'
+        EXPO_NO_TELEMETRY: '1'
+      run: 'npm install --no-audit --no-fund
+
+        npm run typecheck'
+    - name: Generate native Android and verify Telecom manifest
+      working-directory: native
+      env:
+        CI: '1'
+        EXPO_NO_TELEMETRY: '1'
+      run: "npx expo prebuild --platform android --no-install --clean\npython3 - <<'PYMANIFEST'\nfrom pathlib import Path\ns=Path('android/app/src/main/AndroidManifest.xml').read_text()\n\
+        for key in ['io.wazo.callkeep.VoiceConnectionService','android.telecom.ConnectionService','android.permission.USE_FULL_SCREEN_INTENT','android:showWhenLocked=\"\
+        true\"','android:turnScreenOn=\"true\"']:\n    assert key in s, 'Missing Android Telecom manifest element: '+key\nassert Path('android/app/google-services.json').stat().st_size>0\n\
+        print('Connect native lock-screen manifest validated')\nPYMANIFEST"
+    - name: Install Android preview SDK 37
+      run: 'sdkmanager --channel=3 --install ''platforms;android-37.0'' ''build-tools;37.0.0'' ''platform-tools''
+
+        test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"'
+    - name: Compile native Connect Android APK (CI only)
+      working-directory: native/android
+      env:
+        CI: '1'
+        EXPO_NO_TELEMETRY: '1'
+      run: 'chmod +x gradlew
+
+        ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+        test -s app/build/outputs/apk/debug/app-debug.apk'
+    - name: Commit only after real native compilation
+      shell: bash
+      run: 'git diff --check
+
+        git config user.name ''github-actions[bot]''
+
+        git config user.email ''41898282+github-actions[bot]@users.noreply.github.com''
+
+        git add native/src/ConnectNativeTelecom.ts native/plugins/withConnectTelecom.js native/src/ConnectNativeVoice.tsx native/src/ConnectNativePush.ts
+        native/src/App.tsx native/index.js native/app.json native/package.json native/package-lock.json native/README.md
+
+        if git diff --cached --quiet; then echo ''Telecom already installed'';exit 0;fi
+
+        git commit -m ''feat(native): self-managed Android Telecom and Connect incoming-call UI''
+
+        git push origin HEAD:main'
