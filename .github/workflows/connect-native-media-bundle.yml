@@ -1,0 +1,122 @@
+name: Connect Native - Media 100MB, TUS upload and voice status
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-media-bundle.yml
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-media-bundle
+  cancel-in-progress: false
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Wait for albums workflow and sync latest main
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 48); do
+            git fetch origin main
+            if git cat-file -e origin/main:native/src/ConnectNativeAlbum.tsx 2>/dev/null; then
+              git checkout -B main origin/main
+              echo 'Albums are installed. Starting combined media update.'
+              exit 0
+            fi
+            echo "Waiting for albums integration: $attempt / 48"
+            sleep 15
+          done
+          echo 'Albums not installed. Check the albums workflow before retrying.' >&2
+          exit 1
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Integrate TUS uploads and Android chat polish
+        shell: bash
+        run: |
+          python3 - <<'PY_MEDIA_BUNDLE'
+          from pathlib import Path
+          import base64,hashlib,zlib,subprocess,runpy
+          
+          # Require the previous green album integration. Nothing touches legacy app/.
+          if not Path('native/src/ConnectNativeAlbum.tsx').exists():
+              raise SystemExit('Complete the PWA-compatible albums workflow first (green).')
+          
+          media=Path('native/src/nativeMediaUtils.ts')
+          actual=subprocess.check_output(['git','hash-object',str(media)],text=True).strip()
+          if actual not in ('ef32732a887b2b2e691a86855110d04849ee6308','2501fcbdc1230b0b0695b7c1587d92631fb0450e'):
+              raise SystemExit('nativeMediaUtils.ts was changed; refusing to overwrite unreviewed edits: '+actual)
+          
+          assets=[
+              ('native/src/nativeMediaUtils.ts','7a1808159aebaf3995818893738459ccf6373e8b57b622b23d0633c3e0a8ef3e','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'),
+              ('native/.connect_media_bundle_patch.py','ea72e97b7a66132ec9613e94c957ee988a190c5b7fb7307da2502deb51295863','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'),
+          ]
+          for target,expected,packed in assets:
+              data=zlib.decompress(base64.b64decode(packed))
+              if hashlib.sha256(data).hexdigest()!=expected:
+                  raise SystemExit('Embedded content checksum failure: '+target)
+              dest=Path(target)
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              if dest.exists() and target.endswith('_patch.py') and dest.read_bytes()!=data:
+                  raise SystemExit('Refusing to overwrite unexpected installer script: '+target)
+              dest.write_bytes(data)
+          try:
+              runpy.run_path('native/.connect_media_bundle_patch.py',run_name='__main__')
+          finally:
+              Path('native/.connect_media_bundle_patch.py').unlink(missing_ok=True)
+          print('100 MB TUS + chat/media progress + voice indicator integrated')
+          PY_MEDIA_BUNDLE
+      - name: Install pinned TUS client and check TypeScript
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npm install tus-js-client@4.3.1 --save-exact --no-audit --no-fund
+          npm run typecheck
+      - name: Generate native Android source
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Install Android SDK 37
+        run: |
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+      - name: Compile native Android for validation only
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Commit sources only after passing TypeScript and Android build
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/nativeMediaUtils.ts native/src/ConnectNativeChat.tsx native/src/ConnectNativeMedia.tsx native/package.json native/package-lock.json
+          if git diff --cached --quiet; then echo 'Media bundle already integrated'; exit 0; fi
+          git commit -m 'feat(native): combined 100MB TUS uploads, progress and voice indicators'
+          git push origin HEAD:main
