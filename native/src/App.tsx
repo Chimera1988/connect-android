@@ -8,11 +8,15 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { Session } from '@supabase/supabase-js';
-import { configured, db, mediaUrl, MESSAGE_COLUMNS, type Call, type Conversation, type Message, type Profile } from './backend';
+import { configured, db, mediaUrl, type Conversation, type Message, type Profile } from './backend';
 import { palettes, themeNames, type Palette, type ThemeName } from './theme';
+import ConnectNativeChat from './ConnectNativeChat';
+import ConnectNativeCalls from './ConnectNativeCalls';
+import ConnectNativeMedia from './ConnectNativeMedia';
+import type { MediaKind } from './nativeMediaUtils';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
-type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile};
+type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile} | {kind:'media'; profile:Profile; mediaKind: MediaKind};
 const pad = (x:number)=>x<10?'0'+x:''+x;
 const time = (v:string) => {const d=new Date(v);return Number.isNaN(d.getTime())?'':`${pad(d.getHours())}:${pad(d.getMinutes())}`;};
 function textOf(message:Message){
@@ -44,16 +48,9 @@ function AppMain(){
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [avatars,setAvatars]=useState<Record<string,string>>({});
   const [conversations,setConversations]=useState<Conversation[]>([]);
-  const [messages,setMessages]=useState<Message[]>([]);
-  const [calls,setCalls]=useState<Call[]>([]);
-  const [draft,setDraft]=useState('');
   const [search,setSearch]=useState('');
-  const [loading,setLoading]=useState(false);
-  const [sending,setSending]=useState(false);
   const [notice,setNotice]=useState('');
-  const listRef=useRef<FlatList<Message>>(null);
   const ownId=session?.user.id||'';
-  const actualChat=screen.kind==='chat'?screen:null;
   const fetchCounter=useRef(0);
 
   useEffect(()=>{
@@ -81,34 +78,12 @@ function AppMain(){
     if(generation===fetchCounter.current)setAvatars(Object.fromEntries(photos));
   },[ownId]);
 
-  const loadMessages=useCallback(async(chatId:string)=>{
-    if(!ownId)return;
-    const {data,error}=await db.from('messages').select(MESSAGE_COLUMNS).eq('conversation_id',chatId).order('created_at',{ascending:false}).limit(300);
-    if(error){setNotice('Не удалось открыть переписку: '+error.message);return;}
-    setMessages(((data||[]) as Message[]).reverse());
-  },[ownId]);
-
-  const loadCalls=useCallback(async()=>{
-    if(!ownId)return;
-    const {data,error}=await db.from('connect_calls').select('id,conversation_id,caller_id,callee_id,status,created_at,answered_at,ended_at')
-      .or(`caller_id.eq.${ownId},callee_id.eq.${ownId}`).order('created_at',{ascending:false}).limit(150);
-    if(!error)setCalls((data||[]) as Call[]);
-  },[ownId]);
-
   useEffect(()=>{
-    if(!ownId){setProfiles([]);setConversations([]);setCalls([]);return;}
-    void loadDirectory();void loadCalls();
+    if(!ownId){setProfiles([]);setConversations([]);return;}
+    void loadDirectory();
     const id=setInterval(()=>{void loadDirectory();},14000);
     return()=>clearInterval(id);
-  },[ownId,loadDirectory,loadCalls]);
-  useEffect(()=>{
-    if(!actualChat)return;
-    const id=actualChat.conversation.id;
-    void loadMessages(id);
-    const poll=setInterval(()=>{void loadMessages(id);},4500);
-    return()=>clearInterval(poll);
-  },[actualChat?.conversation.id,loadMessages]);
-  useEffect(()=>{if(tab!=='calls'||screen.kind!=='tab')return;void loadCalls();const poll=setInterval(()=>void loadCalls(),12000);return()=>clearInterval(poll);},[tab,screen.kind,loadCalls]);
+  },[ownId,loadDirectory]);
 
   const chats=useMemo(()=>conversations.map(c=>({conversation:c,peer:profiles.find(p=>p.id===(c.user_a===ownId?c.user_b:c.user_a))})).filter(x=>x.peer && !x.peer.is_blocked) as {conversation:Conversation;peer:Profile}[],[conversations,profiles,ownId]);
   async function login(){if(!email.trim()||!password)return;
@@ -123,12 +98,7 @@ function AppMain(){
       if(result.error||!result.data){setNotice(result.error?.message||'Не удалось начать чат');return;}
       chat=result.data as Conversation;setConversations(old=>[chat!,...old]);
     }
-    setSearch('');setMessages([]);setScreen({kind:'chat',conversation:chat,peer:person});
-  }
-  async function send(){if(!actualChat||!ownId||!draft.trim()||sending)return;
-    const text=draft.trim();setSending(true);setDraft('');
-    const {error}=await db.from('messages').insert({conversation_id:actualChat.conversation.id,sender_id:ownId,body:text});
-    setSending(false);if(error){setDraft(text);setNotice(error.message);}else await loadMessages(actualChat.conversation.id);
+    setSearch('');setScreen({kind:'chat',conversation:chat,peer:person});
   }
   async function logout(){await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}
   const own=profiles.find(p=>p.id===ownId);
@@ -150,26 +120,32 @@ function AppMain(){
     </Pressable>;
   }
   function content(){
-    if(screen.kind==='chat')return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
-      <View style={s.top}><Btn icon="chevron-back" colors={colors} onPress={()=>setScreen({kind:'tab'})}/>
-        <Pressable style={{flex:1}} onPress={()=>setScreen({kind:'profile',profile:screen.peer})}>
-          <Text style={s.title}>{screen.peer.display_name}</Text><Text style={s.subtitle}>Connect · личный чат</Text>
-        </Pressable><Btn icon="call-outline" colors={colors} onPress={()=>Alert.alert('Аудиозвонки','Нативный WebRTC и Android Telecom пока не подключены. Старый APK продолжает работать.')} />
-      </View>
-      <FlatList ref={listRef} data={messages} keyExtractor={x=>x.id} contentContainerStyle={{padding:15,gap:9,paddingBottom:20}} onContentSizeChange={()=>listRef.current?.scrollToEnd({animated:false})}
-        renderItem={({item})=>{const mine=item.sender_id===ownId;return <View style={[s.bubble,{alignSelf:mine?'flex-end':'flex-start',backgroundColor:mine?colors.elevated:colors.surface,borderColor:mine?colors.accent:colors.line}]}> 
-          <Text style={{color:colors.text,fontSize:15}}>{textOf(item)}</Text><Text style={{textAlign:'right',color:colors.muted,fontSize:10,marginTop:4}}>{time(item.created_at)}</Text>
-        </View>;}}/>
-      <View style={s.compose}><TextInput multiline value={draft} onChangeText={setDraft} style={s.composeInput} placeholder="Сообщение" placeholderTextColor={colors.muted}/>
-        <Btn icon="send" label="Отправить сообщение" colors={colors} disabled={!draft.trim()||sending} onPress={()=>void send()}/>
-      </View>
-    </KeyboardAvoidingView>;
+    if(screen.kind==='chat')return <ConnectNativeChat key={screen.conversation.id}
+      conversation={screen.conversation} peer={screen.peer} ownerId={ownId} profiles={profiles}
+      avatarUrl={avatars[screen.peer.id]} colors={colors}
+      onBack={()=>setScreen({kind:'tab'})}
+      onOpenProfile={()=>setScreen({kind:'profile',profile:screen.peer})}
+      onCall={()=>Alert.alert('Аудиозвонки','Нативный WebRTC + Android Telecom в работе. Пока звонить можно из действующего APK.')} />;
+    if(screen.kind==='media')return <ConnectNativeMedia key={`${screen.profile.id}:${screen.mediaKind}`}
+      ownerId={screen.profile.id} owner={screen.profile.id===ownId} kind={screen.mediaKind}
+      colors={colors} onBack={()=>setScreen({kind:'profile',profile:screen.profile})}/>;
     if(screen.kind==='profile')return <View style={{flex:1}}>
       <View style={s.top}><Btn icon="chevron-back" colors={colors} onPress={()=>setScreen({kind:'tab'})}/><Text style={s.title}>Профиль</Text></View>
-      <View style={s.center}><Avatar name={screen.profile.display_name} url={avatars[screen.profile.id]} colors={colors} size={90}/>
-        <Text style={[s.title,{fontSize:23,marginTop:12}]}>{screen.profile.display_name}</Text><Text style={s.subtitle}>{screen.profile.bio||'Информация о себе не указана'}</Text>
+      <ScrollView contentContainerStyle={{padding:18,alignItems:'center',gap:12}}>
+        <Avatar name={screen.profile.display_name} url={avatars[screen.profile.id]} colors={colors} size={90}/>
+        <Text style={[s.title,{fontSize:23}]}>{screen.profile.display_name}</Text>
+        <Text style={s.subtitle}>{screen.profile.bio||'Информация о себе не указана'}</Text>
         {screen.profile.id!==ownId&&<Pressable style={s.mainAction} onPress={()=>void openPerson(screen.profile)}><Text style={s.actionText}>Написать сообщение</Text></Pressable>}
-      </View>
+        <View style={{width:'100%',gap:10,marginTop:15}}>
+          {([{kind:'photos',title:'Фото',icon:'images-outline'}, {kind:'videos',title:'Видео',icon:'videocam-outline'}, {kind:'music',title:'Музыка',icon:'musical-notes-outline'}] as const).map(m=><Pressable key={m.kind}
+            onPress={()=>setScreen({kind:'media',profile:screen.profile,mediaKind:m.kind})}
+            style={[s.entry,{width:'100%'}]} accessibilityRole="button">
+            <Ionicons name={m.icon} size={24} color={colors.accent}/>
+            <Text style={[s.entryTitle,{flex:1}]}>{m.title}</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.muted}/>
+          </Pressable>)}
+        </View>
+      </ScrollView>
     </View>;
     if(tab==='settings')return <ScrollView style={{flex:1}} contentContainerStyle={s.pad}>
       <Text style={s.title}>Настройки</Text>
@@ -181,13 +157,10 @@ function AppMain(){
       <Text style={[s.subtitle,{marginTop:22}]}>Звуки, разрешения, управление камерой и микрофоном перейдут в нативные настройки при подключении соответствующих модулей.</Text>
       <Pressable style={[s.mainAction,{backgroundColor:colors.elevated,marginTop:32}]} onPress={()=>void logout()}><Text style={s.actionText}>Выйти из аккаунта</Text></Pressable>
     </ScrollView>;
-    if(tab==='calls')return <FlatList data={calls} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:6}]} ListHeaderComponent={<Text style={[s.title,{marginBottom:14}]}>Звонки</Text>} ListEmptyComponent={<Label colors={colors} muted>История звонков пуста</Label>} renderItem={({item})=>{
-      const peerId=item.caller_id===ownId?item.callee_id:item.caller_id;const peer=profiles.find(p=>p.id===peerId);return <View style={s.entry}><Avatar name={peer?.display_name||'Собеседник'} url={avatars[peerId]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{peer?.display_name||'Собеседник'}</Text>
-        <Text style={s.subtitle}>{item.caller_id===ownId?'Исходящий':'Входящий'} · {item.status} · {time(item.created_at)}</Text></View></View>;
-    }}/>
+    if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}/>;
     if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><Text style={[s.entryTitle,{flex:1}]}>{item.display_name}</Text><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
     return <FlatList data={chats.filter(x=>x.peer.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.conversation.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Чаты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Поиск по контактам" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} ListEmptyComponent={<Text style={s.subtitle}>Нет переписок. Открой раздел «Контакты».</Text>}
-      renderItem={({item})=><Pressable style={s.entry} onPress={()=>{setMessages([]);setScreen({kind:'chat',conversation:item.conversation,peer:item.peer});}}><Avatar name={item.peer.display_name} url={avatars[item.peer.id]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{item.peer.display_name}</Text><Text style={s.subtitle}>Открыть переписку</Text></View><Ionicons name="chevron-forward" size={18} color={colors.muted}/></Pressable>}/>;
+      renderItem={({item})=><Pressable style={s.entry} onPress={()=>setScreen({kind:'chat',conversation:item.conversation,peer:item.peer})}><Avatar name={item.peer.display_name} url={avatars[item.peer.id]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{item.peer.display_name}</Text><Text style={s.subtitle}>Открыть переписку</Text></View><Ionicons name="chevron-forward" size={18} color={colors.muted}/></Pressable>}/>;
   }
   return <View style={s.root}><StatusBar style="light"/>
     <View style={{flex:1}}>{content()}</View>

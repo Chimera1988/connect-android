@@ -9,8 +9,25 @@
     "android": {
       "package": "com.connect.messenger.native",
       "versionCode": 1,
-      "permissions": ["INTERNET", "POST_NOTIFICATIONS"]
+      "permissions": [
+        "INTERNET",
+        "POST_NOTIFICATIONS",
+        "RECORD_AUDIO",
+        "CAMERA"
+      ]
     },
-    "plugins": ["expo-secure-store"]
+    "plugins": [
+      "expo-secure-store",
+      "expo-image-picker",
+      "expo-document-picker",
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false
+        }
+      ],
+      "expo-video"
+    ]
   }
 }
