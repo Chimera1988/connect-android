@@ -10,6 +10,7 @@ import {randomUUID} from 'expo-crypto';
 import {db,MESSAGE_COLUMNS,type Conversation,type Message,type Profile} from './backend';
 import {ConnectNativeAttachment} from './ConnectNativeMedia';
 import ConnectNativeVideoNote from './ConnectNativeVideoNote';
+import ConnectNativeAlbum,{parseAlbumReference} from './ConnectNativeAlbum';
 import ConnectNativeStickerPicker,{ConnectNativeStickerBubble,parseStickerReference} from './ConnectNativeStickers';
 import {uploadFile,type LocalUpload} from './nativeMediaUtils';
 import type {Palette} from './theme';
@@ -55,6 +56,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [forwardItems,setForwardItems]=useState<Message[]>([]);
   const [forwardBusy,setForwardBusy]=useState(false);
   const [uploading,setUploading]=useState(false);
+  const [albumProgress,setAlbumProgress]=useState('');
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
@@ -152,6 +154,42 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     }catch(e){setNotice('Стикер не отправлен: '+(e instanceof Error?e.message:String(e)));}
     finally{setBusy(false);}
   }
+  async function sendAlbum(files:LocalUpload[]){
+    if(uploading||busy||files.length<2||files.length>20)return;
+    setUploading(true);setAlbumProgress('Подготавливаем альбом…');
+    const created:string[]=[];
+    try{
+      // Existing native upload is bounded to 20 MB per file. The whole album is
+      // also capped to avoid a long blocked screen before resumable upload lands.
+      const total=files.reduce((sum,f)=>sum+(f.size??new File(f.uri).size),0);
+      if(total>80*1024*1024)throw new Error('Альбом больше 80 МБ. Выберите меньше файлов.');
+      const items:{path:string;name:string;kind:'image'|'video'}[]=[];
+      for(let i=0;i<files.length;i++){
+        const f=files[i];
+        const kind=f.mime.startsWith('video/')?'video':f.mime.startsWith('image/')?'image':null;
+        if(!kind)throw new Error('Альбом поддерживает только фото и видео.');
+        setAlbumProgress(`Загружаем ${i+1} из ${files.length}…`);
+        const path=`${id}/${ownerId}/${randomUUID()}`;
+        await uploadFile('connect-attachments',path,f);
+        created.push(path);
+        items.push({path,name:f.name.slice(0,240),kind});
+      }
+      const result=await db.from('messages').insert({
+        conversation_id:id,sender_id:ownerId,
+        body:'[[connect-album:'+JSON.stringify(items)+']]',
+        reply_to:reply?.id||null,
+      });
+      if(result.error)throw result.error;
+      setReply(null);
+      await load();
+    }catch(e){
+      if(created.length){
+        try{await db.storage.from('connect-attachments').remove(created);}catch{/* best effort */}
+      }
+      setNotice('Альбом: '+(e instanceof Error?e.message:String(e)));
+    }finally{setUploading(false);setAlbumProgress('');}
+  }
+
   async function attachMedia(fromCamera=false){
     try{
       if(fromCamera){
@@ -161,7 +199,20 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         if(!result.canceled)for(const a of result.assets){await sendAttachment({uri:a.uri,name:a.fileName||`camera-${Date.now()}.jpg`,mime:a.mimeType||'image/jpeg',size:a.fileSize});}
       }else{
         const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsMultipleSelection:true,quality:0.92});
-        if(!result.canceled)for(const a of result.assets){await sendAttachment({uri:a.uri,name:a.fileName||`${a.type||'media'}-${Date.now()}.${a.type==='video'?'mp4':'jpg'}`,mime:a.mimeType||(a.type==='video'?'video/mp4':'image/jpeg'),size:a.fileSize});}
+        if(!result.canceled){
+          const files:LocalUpload[]=result.assets.map((a,index)=>({
+            uri:a.uri,name:a.fileName||`${a.type||'media'}-${Date.now()}-${index}.${a.type==='video'?'mp4':'jpg'}`,
+            mime:a.mimeType||(a.type==='video'?'video/mp4':'image/jpeg'),size:a.fileSize,
+          }));
+          if(files.length===1)await sendAttachment(files[0]);
+          else if(files.length>1){
+            if(files.length>20){setNotice('В альбоме может быть максимум 20 файлов.');return;}
+            Alert.alert('Отправить альбом?',`${files.length} фото и видео будут отправлены одним сообщением.`,[
+              {text:'Отмена',style:'cancel'},
+              {text:'Отправить',onPress:()=>void sendAlbum(files)},
+            ]);
+          }
+        }
       }
     }catch(e){setNotice('Камера/галерея: '+(e instanceof Error?e.message:String(e)));}
   }
@@ -248,6 +299,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const own=item.sender_id===ownerId;
         const f=forwardMeta(item.body||'');
         const sticker=parseStickerReference(f.text);
+        const album=parseAlbumReference(f.text);
         const keyboardSticker=item.attachment_kind==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(item.attachment_name||'');
         const standalone=Boolean(sticker||keyboardSticker)&&!item.deleted_at;
         const isSelected=selected.includes(item.id);
@@ -257,7 +309,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
             {item.reply_to&&<Text style={{fontSize:10,color:colors.accent,marginBottom:4}}>↩ Ответ на сообщение</Text>}
             {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors}/>}
-            {sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
+            {album?<ConnectNativeAlbum items={album} colors={colors}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
               Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':f.text}</Text>}
           </>}
           <Text style={{color:mutedColor,fontSize:10,textAlign:'right',marginTop:5}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
@@ -280,6 +332,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
         label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} onPress={()=>void toggleRecord()}/>}
     </View>
+    {albumProgress!==''&&<Text style={{color:colors.accent,textAlign:'center',padding:5}}>{albumProgress}</Text>}
     {recorderState.isRecording&&<Text style={{color:colors.danger,textAlign:'center',padding:5}}>● Идёт запись — нажми Стоп для отправки</Text>}
     {Boolean(notice)&&<Pressable onPress={()=>setNotice('')} style={{padding:10,backgroundColor:colors.elevated}}><Text style={{color:colors.danger}}>{notice} ×</Text></Pressable>}
     <ConnectNativeVideoNote visible={videoNoteOpen} colors={colors} onClose={()=>setVideoNoteOpen(false)}

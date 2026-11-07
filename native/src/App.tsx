@@ -24,6 +24,11 @@ const pad = (x:number)=>x<10?'0'+x:''+x;
 const time = (v:string) => {const d=new Date(v);return Number.isNaN(d.getTime())?'':`${pad(d.getHours())}:${pad(d.getMinutes())}`;};
 function textOf(message:Message){
   if(message.deleted_at)return 'Сообщение удалено';
+  if(message.body?.startsWith('[[connect-album:')&&message.body.endsWith(']]')){
+    try{const items:unknown=JSON.parse(message.body.slice('[[connect-album:'.length,-2));
+      if(Array.isArray(items)&&items.length>=1&&items.length<=20)return `Альбом (${items.length})`;
+    }catch{/* malformed album */}
+  }
   if(message.body?.startsWith('[['))return 'Стикер или вложение';
   if(message.attachment_name)return message.attachment_kind==='audio'?'🎤 Голосовое сообщение':'📎 '+message.attachment_name;
   return message.body || 'Вложение';
