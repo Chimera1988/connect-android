@@ -1,0 +1,97 @@
+name: Connect Native - stickers and emoji compatible with PWA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-stickers.yml
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-stickers
+  cancel-in-progress: false
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install PWA-compatible sticker picker and message renderer
+        shell: bash
+        run: |
+          python3 - <<'PY_STICKERS'
+          from pathlib import Path
+          import base64, hashlib, zlib
+          
+          assets=[
+              ('native/src/ConnectNativeStickers.tsx','975a9a3c37b58271e7209d674af9fc2b25847599ef28b682f6ce6decf4895160','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'),
+          ]
+          for name, expected_sha, encoded in assets:
+              data=zlib.decompress(base64.b64decode(encoded))
+              if hashlib.sha256(data).hexdigest()!=expected_sha:
+                  raise SystemExit('Asset checksum mismatch: '+name)
+              destination=Path(name)
+              if destination.exists() and destination.read_bytes()!=data:
+                  raise SystemExit('Existing sticker component has manual changes. Refusing overwrite: '+name)
+              destination.parent.mkdir(parents=True,exist_ok=True)
+              destination.write_bytes(data)
+          
+          patch=zlib.decompress(base64.b64decode('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'))
+          if hashlib.sha256(patch).hexdigest()!='f951777ad7191b028e9002300fa5f0c53014d01eba9ff6a73bebc3d75e358d54':
+              raise SystemExit('Installer checksum mismatch')
+          exec(compile(patch,'apply_stickers.py','exec'),{'__name__':'__main__'})
+          PY_STICKERS
+      - name: Install packages and compatible react-native-svg version
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npm install --no-audit --no-fund
+          npx expo install react-native-svg --npm
+          npm run typecheck
+      - name: Generate Android native project
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Android SDK 37 (same as last green native build)
+        run: |
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+      - name: Compile native Android debug APK for validation only
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Commit source only after successful native compilation
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/ConnectNativeStickers.tsx native/src/ConnectNativeChat.tsx native/src/ConnectNativeMedia.tsx native/package.json native/package-lock.json
+          if git diff --cached --quiet; then echo 'Stickers already installed'; exit 0; fi
+          git commit -m 'feat(native): PWA-compatible stickers and emoji picker'
+          git push origin HEAD:main
