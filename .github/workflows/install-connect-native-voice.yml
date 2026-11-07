@@ -1,0 +1,143 @@
+name: Connect Native - WebRTC audio calls and Android audio routing
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/install-connect-native-voice.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-voice
+  cancel-in-progress: false
+
+jobs:
+  install-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Use Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Add Connect voice signaling and native audio UI
+        shell: bash
+        run: |
+          python3 - <<'PYVOICE'
+          from pathlib import Path
+          import base64,json,zlib
+          root=Path('native')
+          file=root/'src/ConnectNativeVoice.tsx'
+          source=zlib.decompress(base64.b64decode('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')).decode('utf-8')
+          if not (root/'src/App.tsx').exists() or not (root/'src/ConnectNativePush.ts').exists():
+              raise RuntimeError('Connect Native with FCM must be installed first')
+          if file.exists() and file.read_text(encoding='utf-8')!=source:
+              raise RuntimeError('Voice module already has manual edits; refusing to overwrite')
+          file.write_text(source,encoding='utf-8')
+          
+          def replace_one(s,old,new,label):
+              if new in s:
+                  print('Already installed:',label);return s
+              if s.count(old)==1:return s.replace(old,new,1)
+              raise RuntimeError(f'Cannot safely patch {label}: expected one original anchor, found {s.count(old)}')
+          
+          app=root/'src/App.tsx'
+          s=app.read_text(encoding='utf-8')
+          s=replace_one(s,"import ConnectNativeMedia from './ConnectNativeMedia';", "import ConnectNativeMedia from './ConnectNativeMedia';\nimport {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoice';", 'voice import')
+          s=replace_one(s,"  const ownId=session?.user.id||'';", "  const ownId=session?.user.id||'';\n  const voice=useConnectNativeVoice(ownId,profiles);",'voice controller')
+          s=replace_one(s,"      setNotice('Поступил звонок. Нативное соединение WebRTC ещё в разработке.');", "      void voice.checkIncoming(pushDestination.callId);",'incoming call FCM route')
+          s=replace_one(s,"      onCall={()=>Alert.alert('Аудиозвонки','Нативный WebRTC + Android Telecom в работе. Пока звонить можно из действующего APK.')} />;", "      onCall={()=>void voice.dial(screen.conversation.id,screen.peer.id,screen.peer.display_name)} />;",'outgoing chat call')
+          s=replace_one(s,"    if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}/>;", "    if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}\n      onDial={(conversationId,peer)=>void voice.dial(conversationId,peer.id,peer.display_name)}/>;",'call history dial')
+          s=replace_one(s,"    {!!notice&&<Pressable style={s.toast}", "    <ConnectNativeVoicePanel voice={voice} colors={colors}/>\n    {!!notice&&<Pressable style={s.toast}", 'call screen overlay')
+          app.write_text(s,encoding='utf-8')
+          
+          journal=root/'src/ConnectNativeCalls.tsx'
+          s=journal.read_text(encoding='utf-8')
+          s=replace_one(s, "export default function ConnectNativeCalls({ownerId,profiles,avatars,colors}:{ownerId:string;profiles:Profile[];avatars:Record<string,string>;colors:Palette}) {",
+           "export default function ConnectNativeCalls({ownerId,profiles,avatars,colors,onDial}:{ownerId:string;profiles:Profile[];avatars:Record<string,string>;colors:Palette;onDial?:(conversationId:string,peer:Profile)=>void}) {",'history callback declaration')
+          s=replace_one(s,"return <Pressable onPress={()=>{if(selecting)setSelected(x=>x.includes(item.id)?x.filter(y=>y!==item.id):[...x,item.id]);}}",
+           "return <Pressable onPress={()=>{if(selecting)setSelected(x=>x.includes(item.id)?x.filter(y=>y!==item.id):[...x,item.id]);else if(peer&&onDial)onDial(item.conversation_id,peer);}}",'history callback wiring')
+          journal.write_text(s,encoding='utf-8')
+          
+          cfg_path=root/'app.json'
+          cfg=json.loads(cfg_path.read_text(encoding='utf-8'))
+          android=cfg['expo']['android']
+          for permission in ('ACCESS_NETWORK_STATE','CHANGE_NETWORK_STATE','MODIFY_AUDIO_SETTINGS','BLUETOOTH_CONNECT'):
+              if permission not in android['permissions']:android['permissions'].append(permission)
+          cfg_path.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          
+          pkg_path=root/'package.json'
+          pkg=json.loads(pkg_path.read_text(encoding='utf-8'))
+          for key,value in {'react-native-webrtc':'155.0.1','react-native-incall-manager':'4.3.0'}.items():
+              current=pkg['dependencies'].get(key)
+              if current is not None and current!=value:raise RuntimeError(f'Unexpected {key} version {current}')
+              pkg['dependencies'][key]=value
+          pkg_path.write_text(json.dumps(pkg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          
+          readme=root/'README.md'
+          text=readme.read_text(encoding='utf-8')
+          if '## Native audio calls (foreground)' not in text:
+              text+="""\n## Native audio calls (foreground)\n- Audio WebRTC calls use existing Connect `connect_calls` RPC and `connect_call_ice` tables.\n- Callers notify the existing Connect server via `/api/push/call`; TURN credentials come from authenticated `/api/calls/ice`.\n- Android mic, earpiece/speaker routing, mute and audio focus use react-native-webrtc and react-native-incall-manager. No WebView.\n- Incoming calls appear while the native application is open; FCM taps resync pending calls.\n- Android Telecom / ConnectionService, full-screen locked-phone incoming UI, background media services, ringtone selection and real-device network testing remain necessary before replacement of the old APK.\n- Audio RTC is not a replacement for Android's system volume APIs; hardware volume controls remain authoritative.\n"""
+              readme.write_text(text,encoding='utf-8')
+          print('Native Connect foreground WebRTC voice modules prepared; old app/ unchanged')
+          PYVOICE
+      - name: Install native voice dependencies and typecheck
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+      - name: Generate native Android sources
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npx expo prebuild --platform android --no-install --clean
+          grep -q 'com.connect.messenger' android/app/build.gradle
+          test -s android/app/google-services.json
+      - name: Install preview Android SDK
+        shell: bash
+        run: |
+          # Expo SDK 58 compiles against Android 17 preview (API 37.0).
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+      - name: Compile native APK for CI only
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Commit only after successful native compilation
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/ConnectNativeVoice.tsx native/src/App.tsx native/src/ConnectNativeCalls.tsx native/app.json native/package.json native/package-lock.json native/README.md
+          if git diff --cached --quiet; then
+            echo 'Native voice modules already installed.'
+            exit 0
+          fi
+          git commit -m 'feat(native): Connect audio WebRTC with Android audio controls'
+          git push origin HEAD:main
