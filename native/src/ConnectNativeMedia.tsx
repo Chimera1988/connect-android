@@ -110,6 +110,7 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors}:{o
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<number|null>(null);
+  const [uploadProgress,setUploadProgress]=useState('');
   const style=useMemo(()=>c(colors),[colors]);
   const label={photos:'Фото',videos:'Видео',music:'Музыка'}[kind];
   const reload=useCallback(async()=>{
@@ -131,14 +132,17 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors}:{o
       }
       if(!files.length)return;
       setBusy(true);
-      for(const file of files){
+      for(let i=0;i<files.length;i++){
+        const file=files[i];
         if(!fileExtension(file.name))throw Error('Неизвестный формат файла');
         const path=`${ownerId}/${kind}/${nameForStorage(file.name)}`;
-        await uploadFile('connect-profile-media',path,file);
+        await uploadFile('connect-profile-media',path,file,(sent,total)=>{
+          setUploadProgress(`Загружаем ${i+1}/${files.length}: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
+        });
       }
       await reload();
     }catch(e){Alert.alert('Не удалось загрузить',e instanceof Error?e.message:String(e));}
-    finally{setBusy(false);}
+    finally{setBusy(false);setUploadProgress('');}
   }
   function deleteMedia(item:ListedMedia){
     if(!owner||busy)return;
@@ -157,6 +161,7 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors}:{o
       <View style={{flexDirection:'row',alignItems:'center',gap:5}}><IconButton name="chevron-back" label="Назад" onPress={onBack} colors={colors}/><Text style={style.title}>{label}</Text></View>
       {owner&&<Pressable style={style.action} onPress={()=>void addFile()} disabled={busy}><Text style={style.text}>+ Добавить</Text></Pressable>}
     </View>
+    {uploadProgress!==''&&<Text style={{fontSize:12,color:colors.accent,paddingHorizontal:16,paddingVertical:5}}>{uploadProgress}</Text>}
     {loading?<ActivityIndicator style={{marginTop:40}} color={colors.accent}/>:<ScrollView contentContainerStyle={{padding:14,paddingBottom:36}}>
       {Boolean(error)&&<Text style={{color:colors.danger,marginBottom:12}}>{error}</Text>}
       {!items.length?<Text style={style.muted}>Здесь пока нет файлов.</Text>:items.map((item,i)=><View key={item.path} style={[style.card,style.row]}>

@@ -57,6 +57,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [forwardBusy,setForwardBusy]=useState(false);
   const [uploading,setUploading]=useState(false);
   const [albumProgress,setAlbumProgress]=useState('');
+  const [uploadProgress,setUploadProgress]=useState('');
+  const [peerRecording,setPeerRecording]=useState(false);
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
@@ -85,6 +87,30 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     },13000);
     return()=>clearInterval(timer);
   },[id,ownerId]);
+  useEffect(()=>{
+    if(!ownerId||!recorderState.isRecording)return;
+    // Keep the existing PWA "recording_until" indicator alive during long recordings.
+    const refresh=()=>{
+      void db.from('conversation_user_state').upsert({
+        conversation_id:id,user_id:ownerId,recording_until:new Date(Date.now()+45000).toISOString(),
+      },{onConflict:'conversation_id,user_id'}).then(()=>{});
+    };
+    refresh();
+    const interval=setInterval(refresh,15000);
+    return()=>clearInterval(interval);
+  },[id,ownerId,recorderState.isRecording]);
+  useEffect(()=>{
+    let active=true;
+    const check=async()=>{
+      const response=await db.from('conversation_user_state').select('recording_until')
+        .eq('conversation_id',id).eq('user_id',peer.id).maybeSingle();
+      if(active)setPeerRecording(Boolean(response.data?.recording_until &&
+        Date.parse(response.data.recording_until)>Date.now()));
+    };
+    void check();
+    const interval=setInterval(()=>void check(),4000);
+    return()=>{active=false;clearInterval(interval);};
+  },[id,peer.id]);
   const shown=useMemo(()=>query.trim()?messages.filter(m=>
     (m.body||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU')) ||
     (m.attachment_name||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU'))):messages,[messages,query]);
@@ -127,11 +153,13 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   }
   async function sendAttachment(file:LocalUpload,kind?:'image'|'video'|'file'|'audio'):Promise<boolean>{
     if(uploading||busy)return false;
-    setUploading(true);
+    setUploading(true);setUploadProgress('Подготавливаем вложение…');
     const path=`${id}/${ownerId}/${randomUUID()}`;
     try{
       const type=kind||(file.mime.startsWith('image/')?'image':file.mime.startsWith('video/')?'video':'file');
-      const size=await uploadFile('connect-attachments',path,file);
+      const size=await uploadFile('connect-attachments',path,file,(sent,total)=>{
+        setUploadProgress(`Отправка: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
+      });
       const result=await db.from('messages').insert({
         conversation_id:id,sender_id:ownerId,body:'',attachment_path:path,attachment_name:file.name.slice(0,240),
         attachment_type:file.mime,attachment_size:size,attachment_kind:type,reply_to:reply?.id||null,
@@ -140,7 +168,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       setReply(null);await load();
       return true;
     }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;}
-    finally{setUploading(false);}
+    finally{setUploading(false);setUploadProgress('');}
   }
   async function sendSticker(body:string):Promise<void>{
     if(busy||uploading||!parseStickerReference(body))return;
@@ -162,7 +190,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       // Existing native upload is bounded to 20 MB per file. The whole album is
       // also capped to avoid a long blocked screen before resumable upload lands.
       const total=files.reduce((sum,f)=>sum+(f.size??new File(f.uri).size),0);
-      if(total>80*1024*1024)throw new Error('Альбом больше 80 МБ. Выберите меньше файлов.');
+      if(total>200*1024*1024)throw new Error('Альбом больше 200 МБ. Выберите меньше файлов.');
       const items:{path:string;name:string;kind:'image'|'video'}[]=[];
       for(let i=0;i<files.length;i++){
         const f=files[i];
@@ -170,7 +198,9 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         if(!kind)throw new Error('Альбом поддерживает только фото и видео.');
         setAlbumProgress(`Загружаем ${i+1} из ${files.length}…`);
         const path=`${id}/${ownerId}/${randomUUID()}`;
-        await uploadFile('connect-attachments',path,f);
+        await uploadFile('connect-attachments',path,f,(sent,total)=>{
+          setAlbumProgress(`Загружаем ${i+1} из ${files.length}: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
+        });
         created.push(path);
         items.push({path,name:f.name.slice(0,240),kind});
       }
@@ -315,6 +345,9 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
           <Text style={{color:mutedColor,fontSize:10,textAlign:'right',marginTop:5}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
         </Pressable>;
       }}/>
+    {peerRecording&&<View style={{paddingHorizontal:14,paddingVertical:5}}>
+      <Text style={{fontSize:12,color:colors.accent}}>● {peer.display_name} записывает голосовое…</Text>
+    </View>}
     {Boolean(reply||edit)&&<View style={{paddingHorizontal:12,paddingVertical:5,backgroundColor:colors.surface,flexDirection:'row',alignItems:'center',gap:8}}>
       <Text numberOfLines={1} style={{flex:1,color:colors.accent,fontSize:12}}>{edit?'Редактирование':`Ответ: ${reply?.body||reply?.attachment_name||'вложение'}`}</Text>
       <Btn name="close" colors={colors} label="Отмена" onPress={()=>{setReply(null);setEdit(null);setDraft('');}}/>
@@ -332,6 +365,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
         label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} onPress={()=>void toggleRecord()}/>}
     </View>
+    {uploadProgress!==''&&<Text style={{color:colors.accent,textAlign:'center',padding:5}}>{uploadProgress}</Text>}
     {albumProgress!==''&&<Text style={{color:colors.accent,textAlign:'center',padding:5}}>{albumProgress}</Text>}
     {recorderState.isRecording&&<Text style={{color:colors.danger,textAlign:'center',padding:5}}>● Идёт запись — нажми Стоп для отправки</Text>}
     {Boolean(notice)&&<Pressable onPress={()=>setNotice('')} style={{padding:10,backgroundColor:colors.elevated}}><Text style={{color:colors.danger}}>{notice} ×</Text></Pressable>}
