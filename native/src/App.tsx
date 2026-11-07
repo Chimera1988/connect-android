@@ -18,6 +18,8 @@ import {subscribeSystemTelecom} from './ConnectNativeTelecom';
 import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
+import * as SecureStore from 'expo-secure-store';
+import {useConnectNativeInbox} from './ConnectNativeInbox';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
 type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile} | {kind:'media'; profile:Profile; mediaKind: MediaKind};
@@ -30,6 +32,9 @@ function textOf(message:Message){
       if(Array.isArray(items)&&items.length>=1&&items.length<=20)return `Альбом (${items.length})`;
     }catch{/* malformed album */}
   }
+  if(message.body?.startsWith('[[connect-sticker:')||message.body?.startsWith('[[connect-custom-sticker:'))return 'Стикер';
+  if(message.attachment_kind==='video' && /^connect-video-note-\d+\.(?:mp4|webm)$/i.test(message.attachment_name||''))return 'Видеокружок';
+  if(message.attachment_kind==='image' && /^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(message.attachment_name||''))return 'Стикер';
   if(message.body?.startsWith('[['))return 'Стикер или вложение';
   if(message.attachment_name)return message.attachment_kind==='audio'?'🎤 Голосовое сообщение':'📎 '+message.attachment_name;
   return message.body || 'Вложение';
@@ -53,6 +58,17 @@ function AppMain(){
   const [authBusy,setAuthBusy]=useState(false);
   const [tab,setTab]=useState<Tab>('chats');const [screen,setScreen]=useState<Screen>({kind:'tab'});
   const [theme,setTheme]=useState<ThemeName>('waves');
+  const [themeLoaded,setThemeLoaded]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    void SecureStore.getItemAsync('connect-native-theme-v1').then(saved=>{
+      if(active&&themeNames.some(item=>item.id===saved))setTheme(saved as ThemeName);
+    }).catch(()=>{}).finally(()=>{if(active)setThemeLoaded(true);});
+    return()=>{active=false;};
+  },[]);
+  useEffect(()=>{
+    if(themeLoaded)void SecureStore.setItemAsync('connect-native-theme-v1',theme).catch(()=>{});
+  },[theme,themeLoaded]);
   const colors=palettes[theme];
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [avatars,setAvatars]=useState<Record<string,string>>({});
@@ -142,7 +158,14 @@ function AppMain(){
     return()=>{sub.remove();setVisibleConversation(null);};
   },[screen]);
 
+  const inbox=useConnectNativeInbox(ownId,conversations);
   const chats=useMemo(()=>conversations.map(c=>({conversation:c,peer:profiles.find(p=>p.id===(c.user_a===ownId?c.user_b:c.user_a))})).filter(x=>x.peer && !x.peer.is_blocked) as {conversation:Conversation;peer:Profile}[],[conversations,profiles,ownId]);
+  const orderedChats=useMemo(()=>[...chats].sort((a,b)=>{
+    const da=inbox[a.conversation.id]?.last?.created_at||a.conversation.created_at;
+    const db=inbox[b.conversation.id]?.last?.created_at||b.conversation.created_at;
+    return Date.parse(db)-Date.parse(da);
+  }),[chats,inbox]);
+  const unreadTotal=useMemo(()=>chats.reduce((sum,item)=>sum+(inbox[item.conversation.id]?.unread||0),0),[chats,inbox]);
   async function login(){if(!email.trim()||!password)return;
     setAuthBusy(true);setNotice('');
     const {error}=await db.auth.signInWithPassword({email:email.trim(),password});
@@ -173,7 +196,11 @@ function AppMain(){
 
   function tabButton(which:Tab,icon:keyof typeof Ionicons.glyphMap,title:string){const active=tab===which;
     return <Pressable onPress={()=>{setScreen({kind:'tab'});setTab(which);}} style={s.tab} accessibilityRole="tab" accessibilityState={{selected:active}}>
-      <Ionicons name={icon} size={23} color={active?colors.accent:colors.muted}/><Text style={[s.tabLabel,{color:active?colors.accent:colors.muted}]}>{title}</Text>
+      <Ionicons name={icon} size={23} color={active?colors.accent:colors.muted}/>
+      {which==='chats'&&unreadTotal>0&&<View style={{position:'absolute',top:-7,right:'20%',backgroundColor:colors.accent,borderRadius:10,minWidth:18,height:18,paddingHorizontal:4,alignItems:'center',justifyContent:'center'}}>
+        <Text style={{fontSize:10,color:colors.bg,fontWeight:'800'}}>{unreadTotal>99?'99+':unreadTotal}</Text>
+      </View>}
+      <Text style={[s.tabLabel,{color:active?colors.accent:colors.muted}]}>{title}</Text>
     </Pressable>;
   }
   function content(){
@@ -217,8 +244,35 @@ function AppMain(){
     if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}
       onDial={(conversationId,peer)=>void voice.dial(conversationId,peer.id,peer.display_name)}/>;
     if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><Text style={[s.entryTitle,{flex:1}]}>{item.display_name}</Text><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
-    return <FlatList data={chats.filter(x=>x.peer.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.conversation.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Чаты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Поиск по контактам" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} ListEmptyComponent={<Text style={s.subtitle}>Нет переписок. Открой раздел «Контакты».</Text>}
-      renderItem={({item})=><Pressable style={s.entry} onPress={()=>setScreen({kind:'chat',conversation:item.conversation,peer:item.peer})}><Avatar name={item.peer.display_name} url={avatars[item.peer.id]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{item.peer.display_name}</Text><Text style={s.subtitle}>Открыть переписку</Text></View><Ionicons name="chevron-forward" size={18} color={colors.muted}/></Pressable>}/>;
+    return <FlatList data={orderedChats.filter(item=>{
+      const q=search.trim().toLocaleLowerCase('ru-RU');
+      const last=inbox[item.conversation.id]?.last;
+      return !q||item.peer.display_name.toLocaleLowerCase('ru-RU').includes(q)||
+        (last&&textOf(last).toLocaleLowerCase('ru-RU').includes(q));
+    })} keyExtractor={x=>x.conversation.id} contentContainerStyle={[s.pad,{gap:7}]}
+      ListHeaderComponent={<><Text style={s.title}>Чаты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Поиск по контактам и последним сообщениям" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>}
+      ListEmptyComponent={<Text style={s.subtitle}>Нет подходящих переписок.</Text>}
+      renderItem={({item})=>{
+        const summary=inbox[item.conversation.id];
+        const last=summary?.last;
+        const unread=summary?.unread||0;
+        return <Pressable accessibilityRole="button" accessibilityLabel={item.peer.display_name+(unread?' · непрочитано: '+unread:'')}
+          style={[s.entry,{minHeight:78,paddingVertical:12}]} onPress={()=>{setSearch('');setScreen({kind:'chat',conversation:item.conversation,peer:item.peer});}}>
+          <Avatar name={item.peer.display_name} url={avatars[item.peer.id]} colors={colors} size={49}/>
+          <View style={{flex:1,gap:5}}>
+            <Text numberOfLines={1} style={s.entryTitle}>{item.peer.display_name}</Text>
+            <Text numberOfLines={1} style={[s.subtitle,{fontSize:13,color:unread?colors.text:colors.muted,fontWeight:unread?'600':'400'}]}>
+              {last?(last.sender_id===ownId?'Вы: ':'')+textOf(last):'Нет сообщений'}
+            </Text>
+          </View>
+          <View style={{alignItems:'flex-end',gap:7}}>
+            <Text style={[s.subtitle,{fontSize:10}]}>{time(last?.created_at||item.conversation.created_at)}</Text>
+            {unread>0?<View style={{backgroundColor:colors.accent,minWidth:23,height:23,borderRadius:12,paddingHorizontal:5,alignItems:'center',justifyContent:'center'}}>
+              <Text style={{color:colors.bg,fontWeight:'800',fontSize:11}}>{unread>99?'99+':unread}</Text>
+            </View>:<Ionicons name="chevron-forward" size={18} color={colors.muted}/>}
+          </View>
+        </Pressable>;
+      }}/>;
   }
   return <View style={s.root}><StatusBar style="light"/>
     <View style={{flex:1}}>{content()}</View>
