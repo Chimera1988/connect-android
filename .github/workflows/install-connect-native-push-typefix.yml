@@ -1,0 +1,160 @@
+name: Connect Native - fix FCM message data typing and validate Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/install-connect-native-push-typefix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-push-typefix
+  cancel-in-progress: false
+
+jobs:
+  install-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK without legacy tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Apply existing native FCM installer and correct message data types
+        shell: bash
+        run: |
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          import base64
+          import re
+          import subprocess
+          import textwrap
+          import zlib
+
+          original = Path('.github/workflows/install-connect-native-push.yml')
+          if not original.exists():
+              raise RuntimeError('Previous FCM installer is missing: ' + str(original))
+          workflow = original.read_text(encoding='utf-8')
+          encoded = re.search(
+              r"source\s*=\s*zlib\.decompress\(base64\.b64decode\('([A-Za-z0-9+/=]+)'\)\)\.decode\('utf-8'\)",
+              workflow,
+          )
+          if not encoded:
+              raise RuntimeError('Cannot find original compressed FCM module; refusing to guess its contents')
+          original_source = zlib.decompress(base64.b64decode(encoded.group(1))).decode('utf-8')
+          module_file = Path('native/src/ConnectNativePush.ts')
+          if not Path('native/src/App.tsx').exists():
+              raise RuntimeError('Native Connect sources are missing')
+
+          current = module_file.read_text(encoding='utf-8') if module_file.exists() else None
+          already_fixed = current is not None and 'function normalizeFcmData(' in current
+          if not already_fixed:
+              if current is not None and current != original_source:
+                  raise RuntimeError('FCM file has unexpected manual changes; not overwriting them')
+              begin = "          python3 - <<'PY'\n"
+              finish = "\n          PY"
+              if workflow.count(begin) != 1:
+                  raise RuntimeError('Original installer script structure changed')
+              script = workflow.split(begin, 1)[1].split(finish, 1)[0]
+              script = textwrap.dedent(script)
+              # Run the already-reviewed installer from this repository. It populates
+              # App.tsx, index.js, package.json and Expo configuration in native/.
+              subprocess.run(['python3', '-c', script], check=True)
+              source = module_file.read_text(encoding='utf-8')
+              if source != original_source:
+                  raise RuntimeError('Installed FCM module differs from expected source')
+              lines = source.splitlines(keepends=True)
+              for line_number in (79, 99):
+                  if line_number > len(lines) or lines[line_number-1].count('message.data') != 1:
+                      raise RuntimeError(f'Unexpected FCM data expression at line {line_number}; refusing unsafe patch')
+                  lines[line_number-1] = lines[line_number-1].replace(
+                      'message.data', 'normalizeFcmData(message.data)', 1
+                  )
+              source = ''.join(lines)
+              source += '''
+
+          /** Firebase permits object values, but Connect notification payloads must be strings. */
+          function normalizeFcmData(value: unknown): Record<string, string> | undefined {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+            const output = Object.create(null) as Record<string, string>;
+            for (const [key, item] of Object.entries(value)) {
+              if (typeof item === 'string') output[key] = item;
+              else if (item !== null && item !== undefined) {
+                try { const encoded = JSON.stringify(item); if (typeof encoded === 'string') output[key] = encoded; } catch { /* ignore invalid values */ }
+              }
+            }
+            return output;
+          }
+          '''
+              module_file.write_text(source, encoding='utf-8')
+              print('Corrected Firebase data conversion at lines 79 and 99')
+          else:
+              print('FCM module was already corrected; validating current sources')
+          PYFIX
+
+      - name: Install dependencies and strict TypeScript check
+        working-directory: native
+        shell: bash
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+
+      - name: Generate real native Android project
+        working-directory: native
+        shell: bash
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npx expo prebuild --platform android --no-install --clean
+          grep -q 'com.connect.messenger' android/app/build.gradle || (echo 'Android application ID mismatch' >&2; exit 1)
+          test -s android/app/google-services.json
+
+      - name: Compile native Android APK only for CI validation
+        working-directory: native
+        shell: bash
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools'
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Commit only tested native sources (keep existing WebView APK)
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/ConnectNativePush.ts native/src/App.tsx native/index.js native/app.json native/package.json native/package-lock.json native/README.md
+          if git diff --cached --quiet; then
+            echo 'Already installed. No source files changed.'
+            exit 0
+          fi
+          git commit -m 'fix(native): normalize FCM message data before Android notifications'
+          git push origin HEAD:main
