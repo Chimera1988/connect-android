@@ -1,0 +1,122 @@
+# Connect Native: chosen audio files + notification read sync. NEVER modifies legacy app/
+name: Connect Native - custom Android sounds and cross-device read sync
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/connect-native-alerts-sounds.yml
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-alerts-sounds
+  cancel-in-progress: false
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+    - name: Checkout Connect Android
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: true
+    - name: Sync latest main and verify previous integration
+      shell: bash
+      run: |-
+        set -euo pipefail
+        git fetch origin main
+        git checkout -B main origin/main
+        for p in native/src/ConnectNativeStickers.tsx native/src/ConnectNativeVideoNote.tsx native/src/ConnectNativeAlbum.tsx native/src/ConnectNativePush.ts; do
+          test -s "$p" || { echo "Missing required native feature: $p" >&2; exit 1; }
+        done
+        # Require the preceding combined upload improvements.
+        grep -q 'tus' native/src/nativeMediaUtils.ts || { echo 'Run media bundle integration first' >&2; exit 1; }
+    - name: Node.js 24
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+    - name: Android SDK
+      uses: android-actions/setup-android@v4
+      with:
+        packages: platform-tools
+    - name: Integrate Android sounds and safe notification read sync
+      shell: bash
+      run: |-
+        python3 - <<'PY_CONNECT_ALERTS'
+        from pathlib import Path
+        import base64,hashlib,zlib,subprocess
+        files=[
+            ('native/src/ConnectNativeSoundSettings.tsx','c122019928e3f25ba1504c5ff1be3422e9aed336a2362dd9a9c27ebf14114a08','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'),
+            ('native/plugins/withConnectSounds.js','02aad776d9224001fcc067d5359989eacc011e16ce949210a32445b880d38355','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'),
+            ('scripts/apply.py','0846745696247498997ff85a02c9cae5649da219820dc53c632cf9b210797889','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'),
+        ]
+        for target,sha,encoded in files:
+            raw=zlib.decompress(base64.b64decode(encoded))
+            if hashlib.sha256(raw).hexdigest()!=sha:
+                raise SystemExit('Corrupted installer payload: '+target)
+            if target=='scripts/apply.py':
+                # Build-script-only, not committed or deployed.
+                Path('/tmp/connect-native-sounds-apply.py').write_bytes(raw)
+                continue
+            path=Path(target)
+            if path.exists() and path.read_bytes()!=raw:
+                raise SystemExit('Cannot overwrite modified source file: '+target)
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_bytes(raw)
+        subprocess.run(['python3','/tmp/connect-native-sounds-apply.py'],check=True)
+
+        PY_CONNECT_ALERTS
+    - name: Verify TypeScript
+      working-directory: native
+      env:
+        CI: '1'
+        EXPO_NO_TELEMETRY: '1'
+      run: |-
+        npm ci --no-audit --no-fund
+        npm run typecheck
+    - name: Generate Android with native MediaStore sound module
+      working-directory: native
+      env:
+        CI: '1'
+        EXPO_NO_TELEMETRY: '1'
+      run: |-
+        npx expo prebuild --platform android --no-install --clean
+        python3 - <<'PY_CHECK'
+        from pathlib import Path
+        pkg=Path('android/app/src/main/java/com/connect/messenger')
+        app=(pkg/'MainApplication.kt').read_text()
+        assert 'add(ConnectSoundPackage())' in app, 'Native SoundPackage not registered in MainApplication'
+        assert (pkg/'ConnectSoundModule.kt').is_file(), 'Missing MediaStore bridge'
+        assert (pkg/'ConnectSoundPackage.kt').is_file(), 'Missing ReactPackage bridge'
+        print('Android sound selection MediaStore module installed')
+        PY_CHECK
+    - name: Install Android SDK 37 (as previous green native builds)
+      run: |-
+        sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+        test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+    - name: Compile native Android debug for CI verification ONLY
+      working-directory: native/android
+      env:
+        CI: '1'
+        EXPO_NO_TELEMETRY: '1'
+      run: |-
+        chmod +x gradlew
+        ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        test -s app/build/outputs/apk/debug/app-debug.apk
+    - name: Commit tested native sources only
+      shell: bash
+      run: |-
+        set -euo pipefail
+        git diff --check
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git add native/src/ConnectNativeSoundSettings.tsx native/plugins/withConnectSounds.js native/src/ConnectNativePush.ts native/src/ConnectNativeTelecom.ts native/src/App.tsx native/src/ConnectNativeChat.tsx native/app.json
+        if git diff --cached --quiet; then echo 'Native sound and read sync features already installed'; exit 0; fi
+        git commit -m 'feat(native): phone-selected notification sounds and read synchronization'
+        git push origin HEAD:main
