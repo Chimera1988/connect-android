@@ -33,6 +33,21 @@ function VideoClip({uri}:{uri:string}) {
   const player=useVideoPlayer(uri,instance=>{instance.loop=false;});
   return <VideoView player={player} style={{width:'100%',height:310,backgroundColor:'#000',borderRadius:14}} nativeControls contentFit="contain"/>;
 }
+
+/** Circular playable video note, matching the PWA's filename contract. */
+function VideoNoteBubble({uri,colors}:{uri:string;colors:Palette}) {
+  const player=useVideoPlayer(uri,instance=>{instance.loop=false;});
+  const [playing,setPlaying]=useState(false);
+  return <Pressable accessibilityRole="button" accessibilityLabel={playing?'Пауза видеокружка':'Воспроизвести видеокружок'}
+    onPress={()=>{if(playing)player.pause();else player.play();setPlaying(!playing);}}
+    style={{width:208,height:208,borderRadius:104,overflow:'hidden',backgroundColor:'#081421',borderWidth:2,borderColor:colors.accent}}>
+    <VideoView player={player} nativeControls={false} contentFit="cover" surfaceType="textureView" style={{width:'100%',height:'100%'}} />
+    {!playing&&<View pointerEvents="none" style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center',backgroundColor:'#06101b44'}}>
+      <Ionicons name="play-circle" size={52} color="#fff"/>
+    </View>}
+  </Pressable>;
+}
+
 export function ConnectNativeMediaViewer({url,kind,title,onClose,colors,onPrevious,onNext,count,index}:{
   url:string;kind:'photos'|'videos';title:string;onClose:()=>void;colors:Palette;onPrevious?:()=>void;onNext?:()=>void;count?:number;index?:number;
 }) {
@@ -77,6 +92,7 @@ export function ConnectNativeAttachment({message,colors}:{message:Message;colors
   if(k==='image')return <><Pressable accessibilityRole="button" accessibilityLabel={`Открыть фото ${name}`} onPress={()=>setView(true)}>
       <Image source={{uri:url}} resizeMode="cover" style={{width:230,height:205,borderRadius:13}}/>
     </Pressable>{view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
+  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <VideoNoteBubble uri={url} colors={colors}/>;
   if(k==='video')return <><IconButton name="play-circle" label={`Открыть видео ${name}`} colors={colors} onPress={()=>setView(true)}/>
     <Text numberOfLines={2} style={{color:colors.text}}>{name}</Text>
     {view&&<ConnectNativeMediaViewer url={url} kind="videos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;

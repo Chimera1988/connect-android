@@ -45,7 +45,15 @@
           }
         }
       ],
-      "./plugins/withConnectTelecom"
+      "./plugins/withConnectTelecom",
+      [
+        "expo-camera",
+        {
+          "recordAudioAndroid": true,
+          "cameraPermission": "Камера нужна для записи видеокружков Connect.",
+          "microphonePermission": "Микрофон нужен для записи видеокружков Connect."
+        }
+      ]
     ]
   }
 }

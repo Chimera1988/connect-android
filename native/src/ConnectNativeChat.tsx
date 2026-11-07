@@ -9,6 +9,7 @@ import {File} from 'expo-file-system';
 import {randomUUID} from 'expo-crypto';
 import {db,MESSAGE_COLUMNS,type Conversation,type Message,type Profile} from './backend';
 import {ConnectNativeAttachment} from './ConnectNativeMedia';
+import ConnectNativeVideoNote from './ConnectNativeVideoNote';
 import {uploadFile,type LocalUpload} from './nativeMediaUtils';
 import type {Palette} from './theme';
 
@@ -53,6 +54,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [forwardItems,setForwardItems]=useState<Message[]>([]);
   const [forwardBusy,setForwardBusy]=useState(false);
   const [uploading,setUploading]=useState(false);
+  const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState=useAudioRecorderState(recorder);
@@ -119,8 +121,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     if(selectionMode){setSelected(x=>x.includes(item.id)?x.filter(y=>y!==item.id):[...x,item.id]);return;}
     setActionMessage(item);
   }
-  async function sendAttachment(file:LocalUpload,kind?:'image'|'video'|'file'|'audio'){
-    if(uploading||busy)return;
+  async function sendAttachment(file:LocalUpload,kind?:'image'|'video'|'file'|'audio'):Promise<boolean>{
+    if(uploading||busy)return false;
     setUploading(true);
     const path=`${id}/${ownerId}/${randomUUID()}`;
     try{
@@ -132,7 +134,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       });
       if(result.error){await db.storage.from('connect-attachments').remove([path]);throw result.error;}
       setReply(null);await load();
-    }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));}
+      return true;
+    }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;}
     finally{setUploading(false);}
   }
   async function attachMedia(fromCamera=false){
@@ -248,6 +251,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     </View>}
     <View style={{flexDirection:'row',alignItems:'center',padding:8,borderTopWidth:.6,borderTopColor:colors.line,gap:2}}>
       <Btn name="attach-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={uploading||busy}/>
+      <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={uploading||busy||recorderState.isRecording}/>
       <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение'} placeholderTextColor={mutedColor}
         value={draft} onChangeText={setDraft} style={{backgroundColor:colors.surface,color:textColor,borderRadius:16,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
       {Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={busy} onPress={()=>void submit()}/>
@@ -256,6 +260,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     </View>
     {recorderState.isRecording&&<Text style={{color:colors.danger,textAlign:'center',padding:5}}>● Идёт запись — нажми Стоп для отправки</Text>}
     {Boolean(notice)&&<Pressable onPress={()=>setNotice('')} style={{padding:10,backgroundColor:colors.elevated}}><Text style={{color:colors.danger}}>{notice} ×</Text></Pressable>}
+    <ConnectNativeVideoNote visible={videoNoteOpen} colors={colors} onClose={()=>setVideoNoteOpen(false)}
+      onSend={file=>sendAttachment(file,'video')}/>
     <Modal visible={Boolean(actionMessage)} onRequestClose={()=>setActionMessage(null)} animationType="fade" transparent>
       <Pressable onPress={()=>setActionMessage(null)} style={{flex:1,justifyContent:'center',backgroundColor:'#020914bb'}}>
         <View style={menuStyle}>

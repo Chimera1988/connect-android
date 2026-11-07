@@ -33,7 +33,8 @@
     "react-native-url-polyfill": "2.0.0",
     "react-native-webrtc": "155.0.1",
     "react-native-incall-manager": "4.3.0",
-    "react-native-callkeep": "4.6.1"
+    "react-native-callkeep": "4.6.1",
+    "expo-camera": "~58.0.14"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
