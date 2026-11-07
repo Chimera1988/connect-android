@@ -5,13 +5,11 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/install-connect-native-push.yml'
-
 permissions:
   contents: write
 concurrency:
   group: install-connect-native-push
   cancel-in-progress: false
-
 jobs:
   install-and-validate:
     runs-on: ubuntu-latest
@@ -21,105 +19,95 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
-      - name: Node.js 22
+      - name: Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK (without removed legacy tools package)
+      - name: Android SDK without removed legacy tools package
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
-      - name: Install native FCM modules and keep WebView APK unchanged
+      - name: Inject fixed modular FCM source without touching old APK
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import base64, zlib, json
 
-          # The GitHub workflow injects this compressed source (not a user-defined dynamic command).
-          source = zlib.decompress(base64.b64decode('eNrFWX1v28YZ/9+f4gIUJplQVDpsw0ZNyVRZbdQltmE53oauM07kybqaJrXjUa4mEehSdN2QYRn2/4rtG7hZjTjJ6gH7BNQ32nMvpEhJ9pygwGBAonh3zz0vv+f3PHeu376N2lEYEo+jVuiziPooxJyOCXq//QhxhsN4FDHuoO0I/Zz0Dyg5RRFDvWSE+zgmKCZsTD1SY1EgfniM8NhBt+sb9ESsQyckjvERDY/QgEUnyPgpI9jjNbVHbUAZEWLqxTSjka8MI04HhNhoqhVrY06OIjaxc027ciIOPVK8OqAx7dOAcpjVGZOQ709GJM331iLrZR0WG95GOEY94iWM9HjEiF5FPh1FtVi+rsXi/WLF1O/nsp16H3vHJPRhdMOLwhj8udttmiMWeWCbQ8Kx0/nF7s7h7uP3Hnbbh+2d7e1Oe//w8d7D2cwYcj6K3XrdU6GoeUPMHT/xjv0wdiJ2ZFgOI6MAe8Ss/6r+Tt02DKuht9nqHHTbncNWe7970Dn8WeeXTSMXk3vZO6nhhA8jRn9L/Nr4XSNf+/hxd6tZ//VHd2s/xrXBx9MfpbXi+fs3eH73e+k7dZpLe9Tp9VofdHorCqjokri8dbv18OHqTA8HgZ62wSF0aAtz3NwjXsT8n8ScAUJs9TVLQp8MaEj8e40NESOIh1yxLSXtJvFwi8ScCsFR2Jwe09B3DeFYowGbjgmL5UjXd5XAdJbPAR1gDnwWY+tXzMIkCNLGRkA4isKdEQld0/QXm7prVbGa98aAVEuubooPJaGfDAaEEV/KWbtyecVYgD0g7ZJuZc30TO2bQRJ6YgYkKT9YXWjSilXWdI3wJvUb6UYhiEUJJybDp241Pkl4HEan4b1FhKxr7EHTDYTowLwFgixgj4SFSCmOkEJK1fdNmOdUX5WmyqCpKfKxoYSLFyK4zWbToKEXnYCeEmsG2tyUsIkG+WKYogyRYyJDHA46m2rYskAiQlrRMmJsNcFegkouvGrEYpPNzdIWlUnW/SVRGm7SoopJOr+M2az8VmLdKhv4FjqsNVcIXrJT6lUJXwkpPgkg+kwg+2Z4mRYRFenULJBmNQRSxDsNFe0NlX2W+pIpaDVIAOWpnFRN8V7otYHjSegtMoKEMZB7e4iBioLYlLvjU0w52gVupzFxILLmR9ITuoQ4UOigHOk15hSyJ2c/O8QnxDXyqvqfFyj7R3YJf1/P/5idZ99mF/Nnhk2L2uWuVDPnQfeDB3YcJcLZ4BKcBODvMe0zleOcJSS17P+hjyTYNcr8Zf559k12AQq9yJ7D57fZq+ziu1LoY0s4uA5dxQMc+gGJER8S5AOJ16IwmMimYoQnQYT9GOEAlPYnwEgh0N9ETs01FX0FYbKT0AS2FLShlL/gFVNs4opysYQjiRh4XUWMeFNkilDDkJMXY1V4lzNkzbBlKbwU0RBeC7bFL+opfpVZ4xp31q1ulJJMPKdrdBTsUoP+gqxqKnlnVUPNVzfQDGYWmqlVV2ikZJV6JOeI8C4nJy0RHHOlFbFugeYTEhvXOL/Kx5ubN7FJOUBps5y9jdJYbrVPY+ieJhWzlQzQRxN41QO2HuWUB5BA2V/nX0CufDN/Bkl8kb1E2dlKGl1mr0SCaQQbuYR+5E9AwFfzJ9mr+Wfzp/Mn8z8VMAcRr+fPUPbv+WfZ5fx32b/g8wk8n6Hs+fwpiL4E4WeFLIlxzcJVv+nq45ZNWCofa5AHraeR5sKxSnt36ilfdnMO8XTj7S414o4YvgFxaPlINSyyO3dX+nVnd6970Nrv2CMG1awlk9wVPFYQTmpDExu1JYAl5dicnhAoDa0BJ8z94Q/u3r2rjUmvAnAVeou6WU01Ud9mM0Ub8q0oovKHXiEwmCP1zXjiOpKBvdd0XaXU+U4hfyUdLUG/XDv+JvF4mZ0jwGqlpmXnhl1FOoy+hKdzAHd2Dj/P4fsClr2af26j+ZcwJJY/zbH/JQw+gawS2bFO+JoMyMN3A6BfB/KicF+Jcz3j/wj1Cq5T0cOIGvsogQ6JJSHCHH2Ix7jnMToS8OBsUhtFNOQ2ApoIEl8cwE+HJCwO+THHjEMJRkOofVCnoVDj+Lhcb4tKS6EPA0JZlNr34KR7xEQ3oIo80z1TcYg3LQdOGYtpj1Sg9GxTVXIdvea9qQLuSkHXExwRzlmpqDeUF3KgR+FiI3nk1/LNqWh7UzhuKdjX64XxAQbbhro5waMRnN6QjIWD9uENDSmnOFA76NxBNEaiTUBYkA2QesSdPJXFPpC7xX0DxBcAM5utvBeFcWf7UA6X0jqVTdNSfwNNkb9Hjig0ySp54bcMqT6m2eBAONIDaHZ3evvGzNjqPOzsdwwbwgfpSvzH0ELpuaV+eqoSKAZjQWiaNpXz/b4jbghEOe+pIcUqonnSc2cz/eAkINmhPtT28l4lg9RW4FAtfUC4NzRbu907Rh2PaH0E4a0zaRxhhq3io8yxBR4BUe5UEA8Hz9WE6wzXgDgFOhj1T+IoNOyWvtNQTajxHsEMQmPcyfXEnrh6OeTRMQl1AkmK+rC3s+0oz9DBxFQbC+KXnrw/Bd7kg4idwJ4KMOBU7fzUnRaPsuFNCzeBuU50bPEhi05Rh7GImQZ0/oL6novPRc2/FASZvZZNw0X2Gkly/KcgR1X757+H5z8jaDBgIXQIl9AWvNZM+BKZD/b3d8FKsR8kJk/iO4ZlFH33nnYrpHZMjyBfajREImLolPKhRDz5lIoz+FGhkYjHoU/ERV6sO29xe7WWDeKkHwPN9MuZCqc3woprETuSNyHy0HbtFYgdhdJPrknklwarvh9xTf0k4CGuO7A4RDYFGwqXq7NeU+ylI1A+61lTMVB91agcBuUhNS3ACvEmikOaZRqLQs1dK6QFFPvmxAXwhUQg1lRsGgXEOcUMGvA8Dvrmtcw7LmAPFiqYKVUlU0FuLQjw/UJ5RYCK+myfcEyDBQO+NVWVz+9KqFPW8b601GoU6aD0lHm3Rwag7nDJqfulIVPOAx3Hsi4t054ctVVq2hpolqMdCavEqURoZ2kwmT2JInCyLBRKISlahdAs3CEimHcFK+ea+Npzja0ONY3K8vVdWRE1wk6o5KVmtVFj5DcJpMZuMb5YCbYtljm4THc9mfkQsrvWqguM7O/ZWfZC8Mr8D7KvOl/LJnDyKEjpOYI3Z5qCoHUDhjqbf5GXTAeM1fyeVsxSwVMWlWMMhUQGuWLMLaVmuaHNnXezuFddquv0kj/FiVQNVHrfsh5Sjc1Nvf7+OjCXIa/nVaYtIA+gL9J6TSS+EhHIvhbuXEv02cUVRO8Cx5exLLNLmaHv2RZQVtQ4wEFMGgsmg8maK+CpnI25M4qbM8BRtLhAa+b3r6m8LVt//wLnCwFMgDuXpLf2hjy/gLn6evHG9yYrVya6B96KxGp0TMgIxcPoVNQ1SBpoEJY6uFi3btAVgHO4rI41qFHX3DGBjbhfofbS3eCbsEUYKbIoKOetmrE3zTlwvBa9uSnXWNfnWt5BLvV5itivL12u+nehkIOgfSsJh59QdKHqqkK2sXxOVSFvBZWoS/ZMN/4LOj2ZcA==')).decode('utf-8')
+          # Exact reviewed React Native Firebase modular FCM module.
+          source = zlib.decompress(base64.b64decode('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')).decode('utf-8')
           base = Path('native')
-          module = base/'src/ConnectNativePush.ts'
+          module = base / 'src/ConnectNativePush.ts'
           if not (base/'src/App.tsx').exists() or not (base/'app.json').exists():
-              raise RuntimeError('Native v2 source not found; install previous native workflows first')
+              raise RuntimeError('Native v2 foundation not found')
           if module.exists() and module.read_text(encoding='utf-8') != source:
-              raise RuntimeError('Push module already modified manually; will not overwrite')
+              raise RuntimeError('ConnectNativePush.ts was manually modified; refusing to overwrite')
           module.write_text(source, encoding='utf-8')
 
-          def once(source: str, old: str, new: str, label: str):
-              if old in source:
-                  if source.count(old) != 1:
-                      raise RuntimeError(f'{label}: expected one match; found {source.count(old)}')
-                  return source.replace(old, new, 1)
-              if new in source:
-                  print('Already installed:', label)
-                  return source
-              raise RuntimeError(f'{label}: source changed; refusing an unsafe edit')
+          def once(s, old, new, label):
+              if old in s:
+                  if s.count(old)!=1:raise RuntimeError(label+': expected one match')
+                  return s.replace(old,new,1)
+              if new in s:
+                  print('Already installed:',label)
+                  return s
+              raise RuntimeError(label+': current source not recognized; refusing unsafe patch')
 
-          entry = base/'index.js'
-          s = entry.read_text(encoding='utf-8')
-          s = once(s, "import App from './src/App';", "import App from './src/App';\nimport { installNativePushBackgroundHandlers } from './src/ConnectNativePush';\ninstallNativePushBackgroundHandlers();", 'native push entrypoint')
+          entry=base/'index.js'
+          s=entry.read_text(encoding='utf-8')
+          s=once(s,"import App from './src/App';","import App from './src/App';\nimport { installNativePushBackgroundHandlers } from './src/ConnectNativePush';\ninstallNativePushBackgroundHandlers();",'native FCM entrypoint')
           entry.write_text(s, encoding='utf-8')
 
-          app = base/'src/App.tsx'
-          s = app.read_text(encoding='utf-8')
-          s = once(s, "import type { MediaKind } from './nativeMediaUtils';", "import type { MediaKind } from './nativeMediaUtils';\nimport {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';", 'push imports')
-          s = once(s,"  const [notice,setNotice]=useState('');", "  const [notice,setNotice]=useState('');\n  const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);", 'push navigation state')
-          s = once(s,"  const chats=useMemo(()=>conversations.map(c=>", "  useEffect(()=>{\n    if(!ownId)return;\n    return subscribeNativePush(ownId,setPushDestination,setNotice);\n  },[ownId]);\n  useEffect(()=>{\n    if(!pushDestination||!ownId)return;\n    if(pushDestination.kind==='call'){\n      setScreen({kind:'tab'});setTab('calls');\n      setNotice('Поступил звонок. Нативное соединение WebRTC ещё в разработке.');\n      setPushDestination(null);return;\n    }\n    const chat=conversations.find(c=>c.id===pushDestination.conversationId);\n    if(!chat)return;\n    const peerId=chat.user_a===ownId?chat.user_b:chat.user_a;\n    const peer=profiles.find(p=>p.id===peerId);\n    if(!peer)return;\n    setScreen({kind:'chat',conversation:chat,peer});setTab('chats');setPushDestination(null);\n    void dismissChatPush(chat.id);\n  },[pushDestination,ownId,conversations,profiles]);\n  useEffect(()=>{\n    if(screen.kind==='chat')void dismissChatPush(screen.conversation.id);\n  },[screen]);\n\n  const chats=useMemo(()=>conversations.map(c=>", 'native notification navigation')
-          s = once(s,"  async function logout(){await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}", "  async function logout(){await disableNativePush();await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}", 'unregister push on sign-out')
+          app=base/'src/App.tsx'
+          s=app.read_text(encoding='utf-8')
+          s=once(s,"import type { MediaKind } from './nativeMediaUtils';","import type { MediaKind } from './nativeMediaUtils';\nimport {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';",'native notification imports')
+          s=once(s,"  const [notice,setNotice]=useState('');","  const [notice,setNotice]=useState('');\n  const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);",'push navigation state')
+          s=once(s,"  const chats=useMemo(()=>conversations.map(c=>", "  useEffect(()=>{\n    if(!ownId)return;\n    return subscribeNativePush(ownId,setPushDestination,setNotice);\n  },[ownId]);\n  useEffect(()=>{\n    if(!pushDestination||!ownId)return;\n    if(pushDestination.kind==='call'){\n      setScreen({kind:'tab'});setTab('calls');\n      setNotice('Поступил звонок. Нативное соединение WebRTC ещё в разработке.');\n      setPushDestination(null);return;\n    }\n    const chat=conversations.find(c=>c.id===pushDestination.conversationId);\n    if(!chat)return;\n    const peerId=chat.user_a===ownId?chat.user_b:chat.user_a;\n    const peer=profiles.find(p=>p.id===peerId);\n    if(!peer)return;\n    setScreen({kind:'chat',conversation:chat,peer});setTab('chats');setPushDestination(null);\n    void dismissChatPush(chat.id);\n  },[pushDestination,ownId,conversations,profiles]);\n  useEffect(()=>{\n    if(screen.kind==='chat')void dismissChatPush(screen.conversation.id);\n  },[screen]);\n\n  const chats=useMemo(()=>conversations.map(c=>",'native notification navigation')
+          s=once(s,"  async function logout(){await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}","  async function logout(){await disableNativePush();await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}",'FCM unregister on logout')
           app.write_text(s, encoding='utf-8')
 
           config_file=base/'app.json'
           cfg=json.loads(config_file.read_text(encoding='utf-8'))
-          expo=cfg['expo']
-          android=expo['android']
-          # Reuse the existing com.connect.messenger Firebase app registration. This is
-          # source for the future final APK; never auto-install over the current working APK.
-          old=android.get('package')
-          if old not in ('com.connect.messenger.native','com.connect.messenger'):
-              raise RuntimeError(f'Unexpected package name: {old}')
+          android=cfg['expo']['android']
+          if android.get('package') not in ('com.connect.messenger.native','com.connect.messenger'):
+              raise RuntimeError('Unexpected Android package name')
           android['package']='com.connect.messenger'
           android['versionCode']=max(8,int(android.get('versionCode',1)))
           android['googleServicesFile']='../app/google-services.json'
-          permission=android.setdefault('permissions',[])
-          for p in ('INTERNET','POST_NOTIFICATIONS'):
-              if p not in permission:permission.append(p)
-          plugins=expo.setdefault('plugins',[])
-          for p in ('@react-native-firebase/app','@react-native-firebase/messaging','@notifee/react-native'):
-              if p not in plugins:plugins.append(p)
+          permissions=android.setdefault('permissions',[])
+          for permission in ('INTERNET','POST_NOTIFICATIONS'):
+              if permission not in permissions:permissions.append(permission)
+          plugins=cfg['expo'].setdefault('plugins',[])
+          for plugin in ('@react-native-firebase/app','@react-native-firebase/messaging','@notifee/react-native'):
+              if plugin not in plugins:plugins.append(plugin)
           config_file.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
           pkg_file=base/'package.json'
           pkg=json.loads(pkg_file.read_text(encoding='utf-8'))
           deps=pkg.setdefault('dependencies',{})
-          for k,v in {
-              '@react-native-firebase/app':'27.1.0',
-              '@react-native-firebase/messaging':'27.1.0',
-              '@notifee/react-native':'9.1.8',
-          }.items():
-              if k in deps and deps[k]!=v:raise RuntimeError(f'Unexpected {k} version: {deps[k]}')
+          for k,v in {'@react-native-firebase/app':'27.1.0','@react-native-firebase/messaging':'27.1.0','@notifee/react-native':'9.1.8'}.items():
+              if k in deps and deps[k]!=v:raise RuntimeError(f'Unexpected {k} dependency version: {deps[k]}')
               deps[k]=v
           pkg_file.write_text(json.dumps(pkg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
           readme=base/'README.md'
           s=readme.read_text(encoding='utf-8')
-          addition='''
+          addition="""
           ## Native FCM notifications (source integration)
-          - A signed-in user registers their FCM token via the existing authenticated `/api/push/register` endpoint, and unregisters on logout.
-          - Android channels for messages and calls, data-only FCM background and foreground handling, cancellation on read/call-ended events, and notification tap navigation.
-          - The same Firebase Android application package `com.connect.messenger` is used as the existing configuration in `app/google-services.json`. This is a future replacement APK, not a side-by-side install. **Do not install it over the existing APK until it is tested and release-signed**.
-          - This does **not** yet implement WebRTC audio, the native incoming call accept/decline screen, Android Telecom, full-screen lock-screen handling, or real-device call routing. A call notification opens the Calls section but cannot accept the call yet.
-          - Channels follow Android system notification and silent-mode settings; user-selected custom ringtone settings are a separate integration.
-          '''
+          - Authenticated registration and removal of device tokens with Connect server.
+          - Native Android channels for messages and calls; data-only FCM handling and tap navigation.
+          - Uses existing Firebase app `com.connect.messenger` for future release only; do not install over WebView APK until fully tested and signed.
+          - WebRTC, Telecom, native incoming-call UI and lock-screen call acceptance are not implemented by this workflow.
+          """
           if '## Native FCM notifications' not in s:readme.write_text(s+addition,encoding='utf-8')
-          print('Connect Native: FCM setup prepared without changing old app/')
+          print('Connect Native push source injected with modular Firebase API; old APK untouched.')
           PY
-      - name: Resolve native dependencies and check TypeScript
+      - name: Resolve native dependencies and validate TypeScript
         working-directory: native
         shell: bash
         env:
@@ -136,9 +124,10 @@ jobs:
           EXPO_NO_TELEMETRY: '1'
         run: |
           npx expo prebuild --platform android --no-install --clean
-          grep -q 'com.connect.messenger' android/app/build.gradle || (echo 'Wrong Android app ID' >&2; exit 1)
+          # This is the native Expo app, never the old app/ WebView build.
+          grep -q 'com.connect.messenger' android/app/build.gradle || (echo 'Unexpected Android app ID' >&2; exit 1)
           test -s android/app/google-services.json
-      - name: Build new native Android client (CI validation only)
+      - name: Build native Android client for CI validation
         working-directory: native
         shell: bash
         env:
@@ -149,7 +138,7 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew :app:assembleDebug --no-daemon --stacktrace
-      - name: Commit native source only if all checks pass
+      - name: Commit native source only if every validation succeeds
         shell: bash
         run: |
           git diff --check
@@ -157,8 +146,8 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add native/src/ConnectNativePush.ts native/src/App.tsx native/index.js native/app.json native/package.json native/package-lock.json native/README.md
           if git diff --cached --quiet; then
-            echo 'Native push code already installed.'
+            echo 'Native FCM already installed.'
             exit 0
           fi
-          git commit -m 'feat(native): Android FCM notifications and native build validation'
+          git commit -m 'feat(native): integrate modular Firebase notifications and validate Android build'
           git push origin HEAD:main
