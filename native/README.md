@@ -51,3 +51,10 @@
 - Incoming calls appear while the native application is open; FCM taps resync pending calls.
 - Android Telecom / ConnectionService, full-screen locked-phone incoming UI, background media services, ringtone selection and real-device network testing remain necessary before replacement of the old APK.
 - Audio RTC is not a replacement for Android's system volume APIs; hardware volume controls remain authoritative.
+
+## Android Telecom / lock-screen calls
+- Self-managed ConnectionService (react-native-callkeep): Connect draws its own voice call interface.
+- High-priority Notifee incoming call notifications with Answer/Decline and a best-effort full-screen intent.
+- User/device must permit full-screen call notifications on Android 14+. An active foreground call uses system audio focus.
+- Incoming FCM and foreground polling both feed the same Supabase/WebRTC call; no duplicate server calls.
+- Background/killed-app acceptance, Bluetooth/headset and lock-screen presentation require tests on real devices.

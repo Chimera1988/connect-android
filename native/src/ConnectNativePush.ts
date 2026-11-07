@@ -3,6 +3,7 @@ import {getMessaging,getToken,onMessage,onTokenRefresh,setBackgroundMessageHandl
 import notifee, {AndroidCategory, AndroidImportance, AndroidVisibility, EventType} from '@notifee/react-native';
 import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
+import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
 
 const API=(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'');
 const DEVICE_ACTIVE_KEY='connect-native-fcm-authorized-v1';
@@ -45,20 +46,13 @@ export async function handleNativePush(data:Data|undefined){
     return;
   }
   if(data.kind==='call-ended'){
-    if(data.callId&&UUID.test(data.callId))await notifee.cancelNotification('call:'+data.callId);
+    if(data.callId&&UUID.test(data.callId))await endSystemCall(data.callId);
     return;
   }
   if(await SecureStore.getItemAsync(DEVICE_ACTIVE_KEY)!=='yes')return;
   if(data.kind==='incoming-call'&&data.callId&&UUID.test(data.callId)){
     await ensureChannels();
-    await notifee.displayNotification({
-      id:'call:'+data.callId,
-      title:'Входящий аудиозвонок · Connect',
-      body:'Открыть Connect для просмотра вызова',
-      data:{kind:'incoming-call',callId:data.callId,conversationId:data.conversationId||''},
-      android:{channelId:CALLS,category:AndroidCategory.CALL,importance:AndroidImportance.HIGH,
-        visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true,timeoutAfter:65000},
-    });
+    await showIncomingSystemCall(data.callId,data.callerName||'Собеседник',data.conversationId||null);
     return;
   }
   if((data.kind==='message'||data.kind==='chat'||(!data.kind && data.messageId))&&data.conversationId&&UUID.test(data.conversationId)){
@@ -77,9 +71,9 @@ export async function handleNativePush(data:Data|undefined){
 /** Must run at JavaScript entry-point, including when Android starts a headless task. */
 export function installNativePushBackgroundHandlers(){
   setBackgroundMessageHandler(getMessaging(), async message=>{await handleNativePush(normalizeFcmData(message.data)||undefined);});
-  notifee.onBackgroundEvent(async ({type})=>{
-    // Android launches the app on press. The initial notification is read after boot.
-    if(type===EventType.PRESS||type===EventType.ACTION_PRESS)return;
+  notifee.onBackgroundEvent(async ({type,detail})=>{
+    if(type===EventType.ACTION_PRESS)
+      await handleCallNotificationAction(detail.pressAction?.id,detail.notification?.data);
   });
 }
 async function sendRegistration(endpoint:string, method:'POST'|'DELETE',expectedUser:string){
@@ -98,6 +92,10 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
   if(bufferedOpen){open(bufferedOpen);bufferedOpen=null;}
   const foreground=onMessage(getMessaging(), async message=>{try{await handleNativePush(normalizeFcmData(message.data)||undefined);}catch(e){console.warn('Connect native notification:',e);}});
   const presses=notifee.onForegroundEvent(({type,detail})=>{
+    if(type===EventType.ACTION_PRESS && detail.pressAction?.id?.startsWith('connect-')){
+      void handleCallNotificationAction(detail.pressAction.id,detail.notification?.data);
+      return;
+    }
     if(type===EventType.PRESS||type===EventType.ACTION_PRESS)deliverOpen(detail.notification?.data);
   });
   const tokenRefresh=onTokenRefresh(getMessaging(), token=>{void sendRegistration(token,'POST',ownerId).catch(e=>{if(alive)onError(String(e));});});
@@ -111,7 +109,11 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
       if(!alive)return;
       await sendRegistration(token,'POST',ownerId);
       const initial=await notifee.getInitialNotification();
-      if(alive&&initial?.notification?.data)deliverOpen(initial.notification.data);
+      if(alive&&initial?.notification?.data){
+        if(initial.pressAction?.id==='connect-answer')
+          await handleCallNotificationAction('connect-answer',initial.notification.data);
+        deliverOpen(initial.notification.data);
+      }
     }catch(e){if(alive)onError('Ошибка регистрации уведомлений: '+String(e));}
   })();
   return ()=>{

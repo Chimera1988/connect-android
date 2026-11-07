@@ -3,6 +3,7 @@ import {ActivityIndicator,Pressable,Text,View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {mediaDevices,RTCPeerConnection,RTCSessionDescription,RTCIceCandidate} from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
+import {showIncomingSystemCall,showOutgoingSystemCall,answerSystemCall,activeSystemCall,endSystemCall} from './ConnectNativeTelecom';
 import {db} from './backend';
 import type {Profile} from './backend';
 import type {Palette} from './theme';
@@ -56,6 +57,8 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
   useEffect(()=>{profilesRef.current=profiles;},[profiles]);
 
   const release=useCallback(()=>{
+    const nativeId=call.current?.id;
+    if(nativeId)void endSystemCall(nativeId);
     generation.current++;
     try{pc.current?.close();}catch{}
     pc.current=null;
@@ -132,6 +135,7 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     peer.addEventListener('connectionstatechange',()=>{
       if(pc.current!==peer)return;
       if(peer.connectionState==='connected'){
+        if(call.current?.id)void activeSystemCall(call.current.id);
         setPhase('active');setError('');
         try{InCallManager.stopRingback();}catch{}
       }
@@ -165,7 +169,7 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     call.current=row;setShown(row);
     setRemoteName(profilesRef.current.find(p=>p.id===row.caller_id)?.display_name||'Собеседник');
     setPhase('incoming');setError('');
-    // Foreground-only incoming UI. FCM + Telecom will be wired for lock-screen handling separately.
+    void showIncomingSystemCall(row.id,profilesRef.current.find(p=>p.id===row.caller_id)?.display_name||'Собеседник',row.conversation_id);
   },[userId]);
 
   const checkIncoming=useCallback(async(callId?:string)=>{
@@ -200,6 +204,7 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
       if(rpcError||!data)throw new Error(rpcError?.message||'Сервер отклонил звонок');
       if(op!==generation.current){await db.rpc('connect_finish_audio_call',{p_call_id:data.id,p_reason:'hangup'});return;}
       call.current=data as CallRow;setShown(data as CallRow);setPhase('ringing');
+      void showOutgoingSystemCall(data.id,peerName);
       try{InCallManager.startRingback('_DEFAULT_');}catch{}
       void authorized('/api/push/call',{callId:data.id}).catch(()=>{});
       await flushLocal();await remoteIce();
@@ -210,6 +215,7 @@ export function useConnectNativeVoice(userId:string,profiles:Profile[]){
     const row=call.current;
     if(!row||row.callee_id!==userId||row.status!=='ringing'||accepting.current)return;
     accepting.current=true;
+    void answerSystemCall(row.id);
     const op=generation.current;
     setPhase('connecting');setError('');
     try{

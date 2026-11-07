@@ -14,6 +14,7 @@ import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
 import {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoice';
+import {subscribeSystemTelecom} from './ConnectNativeTelecom';
 import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 
@@ -55,6 +56,19 @@ function AppMain(){
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
   const voice=useConnectNativeVoice(ownId,profiles);
+  const voiceRef=useRef(voice);
+  voiceRef.current=voice;
+  useEffect(()=>{
+    if(!ownId)return;
+    return subscribeSystemTelecom((action,callId)=>{
+      if(action==='answer'){
+        void voiceRef.current.checkIncoming(callId).then(()=>voiceRef.current.accept());
+      }else{
+        if(voiceRef.current.shown?.id===callId)
+          void voiceRef.current.finish(voiceRef.current.phase==='incoming'?'decline':'hangup');
+      }
+    });
+  },[ownId]);
   const fetchCounter=useRef(0);
 
   useEffect(()=>{
