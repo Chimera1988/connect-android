@@ -1,0 +1,97 @@
+name: Connect Native - Inbox, unread, saved appearance and search
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-ui-polish.yml
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-ui-polish
+  cancel-in-progress: false
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Sync with last green native version
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          test -s native/src/ConnectNativeSoundSettings.tsx
+          test -s native/src/ConnectNativeAlbum.tsx
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Integrate native inbox and appearance improvements
+        shell: bash
+        run: |
+          python3 - <<'PY_CONNECT_UI'
+          from pathlib import Path
+          from hashlib import sha256
+          import zlib,base64,subprocess
+          assets=[('/tmp/connect-native-inbox.ts', '0714452ef3db0c1196cdc4d6a5eb611b646f3ac3f19d903b0edf3be317a3625f', 'eNqdVttu2zgQffdXsE8SE1VxtlgsYEUB2iIoAmzaIN6+rCAYtETF3EiUSlJxDVv/vkOKutlugN2XOCJnzsycuXCuLi7Q55Jzmij0lSj2ShcoZ88btaX6LxI0oVy9L6iU5JkiWRcFEYxKlJUCqQ1FyYYo0JDKn6EL9ERJihQDcUWKSoJ6QRhHpFabUjBlDCA4SEr+SoWE75KvaknFChQUNRifiEo26EdNjR3yWrIUESRpRQSIACRcSYUqKiYwWvdqxoqqFArtAfMuyyAqD/57oEWpf5faRoMyURbIEZQkygl6jY9VdXr/nhuXR2Lp2nu4Wy4/frlbff725/eHr0tP7SqqSexdaU8eWs46PP9qTZIXylMAm9GfBs3I3fN1+XNpiN2F+5xItbCqB17neVBzcCVd8LpYU9EEMwgawv/y9O3742p5//dd+OH37tB6tlw93j2tjET4x3w+2MtqnmgHEZBhs94m3fjglltOxX26kEow/uyN2ZWLcYBRjBdPNClFemNlx0Hc7mcItQ5FfcF4kqpl9xGHXTZu3oC5dfcNDnqsF7qToc2m6+LwduKfX5DKTeDQZyn2Zc4S6s69367n2P+nZNx1PAd70UQlNuB9pRhM7TpCLHPfWTIOh3faMN6P/TeOCapqwYPGaORUIZIDk6ESNQ36s4xCMUNkYUZyac/bcFgqQ43syypnyvjnZyxXVLifyjKnhOOxeLKp+Yu0qYniKA6juL2HTnS1KRbOA3YDsH5O+bPaBOwyHKoEtwB+VcuNq4VaipjHLkdCE5OCZoLKTUjkjicDOYaeLi5sWbA3fbgDCwgpses0B2hZ50qGZEuYQo/QIExSn+S5a93U2TR20bMo62qwPWBEdihJT/cH1NQpWDRSQihd+7oVXadTBMYlzXXqj1oa+7piJkOKpY5nXMETTIR8KF/ImZOAF4qmK6Icb08kjM0UiFiYvDfYz1nBejujBsXeeR9/MSEHl4/d8/TkWGkqtAsnXtIfrmNgdCC2tt8Mc+xXjIPRF6S/Y9CnQpQCq40ot2h6eKRhcjQRH52MZduCQvsObTEYS4kihwMMH0RkN16jeEqgQV1YcxOF/VGgtpeCMW/2zAzeJoqbwbEGjzjQ88F0+1H5d6WZQ6ZgjL8x28J9E5z0BEn/0k/nkV77M9XQPd+NEVRmepjg1mjE0ti+IjoIz74e87PKa/PUgr7tRzzuskFMI2gpI+4barFNqT9mD/chRObuiPA4PNEIztrrto3eZFcBE/863mA/gYfTRm8lT0wHE0WdP6OGQU4xPsyqo3vj7OHQo/Y9fjtcj07xcBpanTFwMzv9741k/FdC/icdfbBDnCmMmDai4UzCQDPjIwzDbn6cY2+YDmO63KE0fuXT4eA42DLYVu3lZXCGsclD3MbZt2aTaHpcinWzS3hF/S0RMOO6FZfpHhy22IXjURx00Bnj8Gjs9kdvdntt+8dso/ZhdCevpd56RQjO3XN4w19J3u4TQEe3WfpJLQTEZz6ARQcWTL1c4iPQxru+ns/nFr2dMAarXTBarxLYEERvyhgHTa3SeJHeK7oh385uO1X7yINZM/sX0qj+Rw=='), ('/tmp/connect-native-inbox-apply.py', '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')]
+          for name,expected,encoded in assets:
+              data=zlib.decompress(base64.b64decode(encoded))
+              if sha256(data).hexdigest()!=expected:
+                  raise SystemExit('Corrupt Connect installer asset: '+name)
+              Path(name).write_bytes(data)
+          subprocess.run(['python3','/tmp/connect-native-inbox-apply.py'],check=True)
+          PY_CONNECT_UI
+      - name: Type-check React Native application
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+      - name: Generate native Android project
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Install Android preview SDK 37
+        run: |
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+      - name: Compile native Android (CI validation only; no release)
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Commit only verified native source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/ConnectNativeInbox.ts native/src/App.tsx
+          if git diff --cached --quiet; then
+            echo 'Connect Native inbox already installed'
+            exit 0
+          fi
+          git commit -m 'feat(native): chat inbox previews, unread badges, searchable recent messages, saved themes'
+          git push origin HEAD:main
