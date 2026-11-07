@@ -30,8 +30,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Android SDK (without removed legacy tools package)
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
       - name: Install native FCM modules and keep WebView APK unchanged
         shell: bash
         run: |
