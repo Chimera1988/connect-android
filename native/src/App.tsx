@@ -14,6 +14,7 @@ import {useConnectNativeAppearance} from './ConnectNativeAppearance';
 import ConnectNativeSettings from './ConnectNativeSettings';
 import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
+import {useConnectNativeMissedCalls} from './ConnectNativeMissedCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
 import {ConnectNativeMusicProvider,ConnectNativeMusicMiniPlayer,ConnectNativeNowListening,useConnectNativeMusic} from './ConnectNativeMusic';
 import {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoice';
@@ -77,6 +78,7 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  const missedCalls=useConnectNativeMissedCalls(ownId,tab==='calls'&&screen.kind==='tab');
   const music=useConnectNativeMusic();
   useEffect(()=>{music.setUser(ownId);},[ownId,music.setUser]);
   useEffect(()=>{
@@ -247,6 +249,9 @@ function AppMain(){
       <Ionicons name={icon} size={23} color={active?colors.accent:colors.muted}/>
       {which==='chats'&&unreadTotal>0&&<View style={{position:'absolute',top:-7,right:'20%',backgroundColor:colors.accent,borderRadius:10,minWidth:18,height:18,paddingHorizontal:4,alignItems:'center',justifyContent:'center'}}>
         <Text style={{fontSize:10,color:colors.bg,fontWeight:'800'}}>{unreadTotal>99?'99+':unreadTotal}</Text>
+      </View>}
+      {which==='calls'&&missedCalls.count>0&&<View style={{position:'absolute',top:-7,right:'20%',backgroundColor:colors.accent,borderRadius:10,minWidth:18,height:18,paddingHorizontal:4,alignItems:'center',justifyContent:'center'}}>
+        <Text style={{fontSize:10,color:colors.bg,fontWeight:'800'}}>{missedCalls.count>99?'99+':missedCalls.count}</Text>
       </View>}
       <Text style={[s.tabLabel,{color:active?colors.accent:colors.muted}]}>{title}</Text>
     </Pressable>;
