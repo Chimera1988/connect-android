@@ -1,0 +1,181 @@
+# Connect Android — native compilation validation only.
+# This workflow MUST NOT run assemble, bundle, package, install or publish an APK/AAB.
+name: Connect Native - Kotlin Java Manifest compile check (NO APK)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-native-compile-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-native-compile-check-no-apk
+  cancel-in-progress: false
+
+jobs:
+  compile-only:
+    name: Check Expo prebuild and native Android compilation (NO APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+    steps:
+      - name: Check out current source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify Connect production identity and compile-only guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          app = json.loads(Path('native/app.json').read_text(encoding='utf-8'))['expo']
+          pkg = json.loads(Path('native/package.json').read_text(encoding='utf-8'))
+          assert app['name'] == 'Connect'
+          assert app['android']['package'] == 'com.connect.messenger'
+          assert app['icon'] == './assets/connect-icon.png'
+          assert 'expo' in pkg['dependencies']
+          assert 'react-native-webrtc' in pkg['dependencies']
+          for path in (
+              'native/plugins/withConnectTelecom.js',
+              'native/plugins/withConnectSounds.js',
+              'native/src/ConnectNativeVoice.tsx',
+              'native/src/ConnectNativeSoundSettings.tsx',
+              'native/google-services.json',
+          ):
+              assert Path(path).is_file(), f'Missing native dependency: {path}'
+          config = json.loads(Path('native/google-services.json').read_text(encoding='utf-8'))
+          clients = [c.get('client_info', {}).get('android_client_info', {}).get('package_name')
+                     for c in config.get('client', [])]
+          assert 'com.connect.messenger' in clients, 'Firebase package does not match Connect'
+          print('Identity and native source guards passed. No APK tasks are permitted.')
+          PY
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install pinned JS dependencies and check TypeScript
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Generate Android project with Expo config plugins (NO APK)
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install --clean
+          test -s android/app/src/main/AndroidManifest.xml
+          test -s android/app/build.gradle
+          test -s android/gradlew
+          test -s android/app/google-services.json
+
+      - name: Inspect generated Telecom, MediaStore sound bridge and AndroidManifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          root = Path('native/android/app/src/main')
+          manifest = (root / 'AndroidManifest.xml').read_text(encoding='utf-8')
+          pkg = root / 'java/com/connect/messenger'
+          main = pkg / 'MainApplication.kt'
+          sound = pkg / 'ConnectSoundModule.kt'
+          bridge = pkg / 'ConnectSoundPackage.kt'
+          for path in (main, sound, bridge):
+              if not path.is_file():
+                  raise SystemExit(f'Native module not generated: {path}')
+          for signature in ('ConnectSoundPackage()', 'PackageList(this)'):
+              assert signature in main.read_text(encoding='utf-8'), f'Missing registration: {signature}'
+          assert 'class ConnectSoundModule' in sound.read_text(encoding='utf-8')
+          assert 'class ConnectSoundPackage' in bridge.read_text(encoding='utf-8')
+          for permission in (
+              'android.permission.RECORD_AUDIO',
+              'android.permission.CAMERA',
+              'android.permission.MANAGE_OWN_CALLS',
+              'android.permission.FOREGROUND_SERVICE_PHONE_CALL',
+          ):
+              assert permission in manifest, f'Missing manifest permission: {permission}'
+          assert 'io.wazo.callkeep.VoiceConnectionService' in manifest, 'Telecom service missing'
+          assert 'android.telecom.ConnectionService' in manifest, 'Telecom service intent filter missing'
+          firebase = Path('native/android/app/google-services.json')
+          assert firebase.stat().st_size > 100, 'Missing Firebase client configuration'
+          print('Manifest permissions, Telecom and MediaStore sound bridge generated.')
+          PY
+
+      - name: Install Android SDK platform needed by Expo SDK 58
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+
+      - name: Compile Android manifest, Kotlin and Java only (NEVER assemble APK)
+        working-directory: native/android
+        shell: bash
+        env:
+          JAVA_TOOL_OPTIONS: '-Dfile.encoding=UTF-8'
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          # Manifest processing + Kotlin and Java compiler tasks are intentionally
+          # selected; :app:assemble*, bundle*, package* and install* are forbidden.
+          ./gradlew \
+            :app:processDebugMainManifest \
+            :app:compileDebugKotlin \
+            :app:compileDebugJavaWithJavac \
+            --no-daemon --stacktrace --max-workers=2 \
+            2>&1 | tee "$GITHUB_WORKSPACE/connect-native-compile.log"
+          # Defensive post-condition: no installable artifact may exist.
+          if find . -type f \( -name '*.apk' -o -name '*.aab' \) -print -quit | grep -q .; then
+            echo 'FORBIDDEN: an APK/AAB appeared during compile-only verification.' >&2
+            exit 1
+          fi
+          echo 'Android manifest, Kotlin and Java compiler tasks completed; no APK/AAB produced.'
+
+      - name: Upload compiler log only (no app binaries)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-native-compile-only-log
+          path: connect-native-compile.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Record compile-only results
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native — проверка компиляции без APK'
+            echo ''
+            echo '- Expo prebuild and native Android Kotlin/Java/Manifest checks: see individual job steps.'
+            echo '- No assemble, bundle, package, install or signed-release task was invoked.'
+            echo '- No APK/AAB has been uploaded.'
+            echo '- This job is **not** an installed-device test or final release approval.'
+            echo "- Job status: \`${{ job.status }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
