@@ -1,4 +1,4 @@
-name: Connect Native - Safe Android Test APK
+name: Connect Native - Safe Android Test APK (buildTypes fix)
 
 on:
   workflow_dispatch:
@@ -105,14 +105,40 @@ jobs:
           else:
               raise SystemExit('Android Gradle application file not generated')
           content=path.read_text()
-          hits=list(re.finditer(r'(?m)^([ \t]*)debug\s*\{',content))
+          # Android Gradle includes *two* debug blocks: signingConfigs.debug
+          # and buildTypes.debug. Only change the BUILD TYPE; never signing keys.
+          types=list(re.finditer(r'(?m)^[ \t]*buildTypes\s*\{',content))
+          if len(types)!=1:
+              raise SystemExit(f'Expected one buildTypes block, found {len(types)}')
+          begin=types[0].end()
+          depth=1
+          end=None
+          for pos in range(begin,len(content)):
+              if content[pos]=='{':
+                  depth+=1
+              elif content[pos]=='}':
+                  depth-=1
+                  if depth==0:
+                      end=pos
+                      break
+          if end is None:
+              raise SystemExit('Unclosed Android Gradle buildTypes section')
+          section=content[begin:end]
+          if path.suffix=='.kts':
+              matcher=r'(?m)^([ \t]*)(?:getByName\(\s*"debug"\s*\)|named\(\s*"debug"\s*\)|debug)\s*\{'
+          else:
+              matcher=r'(?m)^([ \t]*)debug\s*\{'
+          hits=list(re.finditer(matcher,section))
           if len(hits)!=1:
-              raise SystemExit(f'Expected one debug build-type block, found {len(hits)}')
+              raise SystemExit(f'Expected one buildTypes.debug block, found {len(hits)}')
           found=hits[0]
           indent=found.group(1)+'    '
-          updated=content[:found.end()]+'\n'+indent+insertion+content[found.end():]
+          insert_at=begin+found.end()
+          updated=content[:insert_at]+'\n'+indent+insertion+content[insert_at:]
+          if updated.count(insertion)!=1:
+              raise SystemExit('Duplicate Android TEST package suffix')
           path.write_text(updated)
-          assert updated.count(insertion)==1
+          print('Isolated buildTypes.debug; preserved signingConfigs.debug')
 
           # Google Services Gradle plugin matches applicationId; the existing
           # Firebase file has only the production client. Add a build-only
