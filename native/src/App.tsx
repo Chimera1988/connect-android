@@ -15,6 +15,7 @@ import ConnectNativeSettings from './ConnectNativeSettings';
 import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
+import {ConnectNativeMusicProvider,ConnectNativeMusicMiniPlayer,ConnectNativeNowListening,useConnectNativeMusic} from './ConnectNativeMusic';
 import {useConnectNativeVoice,ConnectNativeVoicePanel} from './ConnectNativeVoice';
 import {subscribeSystemTelecom} from './ConnectNativeTelecom';
 import type { MediaKind } from './nativeMediaUtils';
@@ -76,6 +77,8 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  const music=useConnectNativeMusic();
+  useEffect(()=>{music.setUser(ownId);},[ownId,music.setUser]);
   useEffect(()=>{
     let alive=true;
     setClearedChats({});setClearedReady(false);
@@ -221,7 +224,7 @@ function AppMain(){
       {text:'Удалить',style:'destructive',onPress:()=>void clearConversation(id)},
     ]);
   }
-  async function logout(){await disableNativePush();await db.auth.signOut();setClearedChats({});setScreen({kind:'tab'});setTab('chats');}
+  async function logout(){music.close();await disableNativePush();await db.auth.signOut();setClearedChats({});setScreen({kind:'tab'});setTab('chats');}
   const own=profiles.find(p=>p.id===ownId);
   const s=makeStyles(colors);
   if(initializing)return <View style={[s.root,s.center]}><ActivityIndicator color={colors.accent}/></View>;
@@ -267,6 +270,7 @@ function AppMain(){
         <Avatar name={screen.profile.display_name} url={avatars[screen.profile.id]} colors={colors} size={90}/>
         <Text style={[s.title,{fontSize:23}]}>{screen.profile.display_name}</Text>
         <Text style={s.subtitle}>{screen.profile.bio||'Информация о себе не указана'}</Text>
+        <ConnectNativeNowListening profileId={screen.profile.id} colors={colors}/>
         {screen.profile.id!==ownId&&<Pressable style={s.mainAction} onPress={()=>void openPerson(screen.profile)}><Text style={s.actionText}>Написать сообщение</Text></Pressable>}
         <View style={{width:'100%',gap:10,marginTop:15}}>
           {([{kind:'photos',title:'Фото',icon:'images-outline'}, {kind:'videos',title:'Видео',icon:'videocam-outline'}, {kind:'music',title:'Музыка',icon:'musical-notes-outline'}] as const).map(m=><Pressable key={m.kind}
@@ -342,6 +346,10 @@ function AppMain(){
   }
   return <View style={s.root}><ConnectNativeGlass colors={colors} theme={theme}/><StatusBar style={appearance.prefs.mode==='light'?'dark':'light'}/>
     <View style={{flex:1}}>{content()}</View>
+    <ConnectNativeMusicMiniPlayer colors={colors} onOpen={id=>{
+      const profile=profiles.find(p=>p.id===id);
+      if(profile)setScreen({kind:'media',profile,mediaKind:'music'});
+    }}/>
     {screen.kind==='tab'&&<View style={s.bottom}>
       {tabButton('chats','chatbubbles-outline','Чаты')}
       {tabButton('contacts','people-outline','Контакты')}
@@ -372,4 +380,4 @@ function makeStyles(p:Palette){return StyleSheet.create({
   colorChip:{flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:11,paddingVertical:11,borderWidth:1,borderColor:glassColor(p.text,.14),backgroundColor:glassColor(p.surface,.65),borderRadius:14},
   toast:{position:'absolute',bottom:87,left:15,right:15,padding:14,borderWidth:1,borderColor:p.danger,backgroundColor:p.elevated,borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
 });}
-export default function App(){return <SafeAreaProvider><SafeAreaView style={{flex:1,backgroundColor:'#07121b'}} edges={['top','bottom']}><AppMain/></SafeAreaView></SafeAreaProvider>;}
+export default function App(){return <SafeAreaProvider><SafeAreaView style={{flex:1,backgroundColor:'#07121b'}} edges={['top','bottom']}><ConnectNativeMusicProvider><AppMain/></ConnectNativeMusicProvider></SafeAreaView></SafeAreaProvider>;}
