@@ -27,6 +27,15 @@ const forwardMeta=(body:string):{from:string|null;text:string}=>{
   catch{return {from:null,text:body};}
 };
 const time=(value:string)=>new Date(value).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+// CONNECT_NATIVE_PWA_PHASE4_CHAT
+const dayKey=(value:string)=>new Date(value).toDateString();
+const dayLabel=(value:string)=>{
+  const day=new Date(value),today=new Date(),yesterday=new Date();
+  yesterday.setDate(today.getDate()-1);
+  if(day.toDateString()===today.toDateString())return 'Сегодня';
+  if(day.toDateString()===yesterday.toDateString())return 'Вчера';
+  return day.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+};
 function Btn({name,label,onPress,colors,disabled}:{name:keyof typeof Ionicons.glyphMap;label:string;onPress:()=>void;colors:Palette;disabled?:boolean}){
   return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} disabled={disabled} style={{padding:8,opacity:disabled ? 0.4 : 1}}>
     <Ionicons name={name} color={colors.accent} size={23}/>
@@ -42,8 +51,8 @@ function ChatAvatar({name,url,colors}:{name:string;url?:string;colors:Palette}){
     {url?<Image source={{uri:url}} style={{width:41,height:41}}/>:<Text style={{color:colors.text,fontWeight:'700'}}>{name.slice(0,1)}</Text>}
   </View>;
 }
-export default function ConnectNativeChat({conversation,peer,ownerId,profiles,avatarUrl,colors,onBack,onOpenProfile,onCall,wallpaperUri,enabledPacks}:{
-  conversation:Conversation;peer:Profile;ownerId:string;profiles:Profile[];avatarUrl?:string;colors:Palette;onBack:()=>void;onOpenProfile:()=>void;onCall:()=>void;wallpaperUri?:string|null;enabledPacks?:string[];
+export default function ConnectNativeChat({conversation,peer,ownerId,profiles,avatarUrl,colors,onBack,onOpenProfile,onCall,wallpaperUri,enabledPacks,clearedAt,onClearChat}:{
+  conversation:Conversation;peer:Profile;ownerId:string;profiles:Profile[];avatarUrl?:string;colors:Palette;onBack:()=>void;onOpenProfile:()=>void;onCall:()=>void;wallpaperUri?:string|null;enabledPacks?:string[];clearedAt?:string|null;onClearChat:()=>void;
 }) {
   const [messages,setMessages]=useState<Message[]>([]);
   const [draft,setDraft]=useState('');
@@ -55,6 +64,10 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [selected,setSelected]=useState<string[]>([]);
   const [selectionMode,setSelectionMode]=useState(false);
   const [searchOpen,setSearchOpen]=useState(false);
+  const [toolsOpen,setToolsOpen]=useState(false);
+  const [showJump,setShowJump]=useState(false);
+  const nearBottom=useRef(true);
+  const swipeStart=useRef<{id:string;x:number;y:number}|null>(null);
   const [query,setQuery]=useState('');
   const [forwardItems,setForwardItems]=useState<Message[]>([]);
   const [forwardBusy,setForwardBusy]=useState(false);
@@ -195,11 +208,11 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     const interval=setInterval(()=>void check(),4000);
     return()=>{active=false;clearInterval(interval);};
   },[id,peer.id]);
-  const visible=useMemo(()=>messages.filter(m=>!hidden.includes(m.id)),[messages,hidden]);
+  const visible=useMemo(()=>messages.filter(m=>!hidden.includes(m.id) && (!clearedAt || m.created_at>clearedAt)),[messages,hidden,clearedAt]);
   const shown=useMemo(()=>query.trim()?visible.filter(m=>
     (m.body||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU')) ||
     (m.attachment_name||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU'))):visible,[visible,query]);
-  const selectedMessages=messages.filter(x=>selected.includes(x.id));
+  const selectedMessages=visible.filter(x=>selected.includes(x.id));
   const confirmDelete=(items:Message[])=>{
     const own=items.filter(x=>x.sender_id===ownerId && !x.deleted_at);
     if(!own.length){setNotice('Удалить у обоих можно только свои сообщения.');return;}
@@ -396,8 +409,19 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         <Text numberOfLines={1} style={{color:textColor,fontSize:17,fontWeight:'700',flex:1}}>{peer.display_name}</Text>
       </Pressable>
       <Btn name="call-outline" label="Аудиозвонок" colors={colors} onPress={onCall}/>
-      <Btn name="ellipsis-vertical" label="Действия в чате" colors={colors} onPress={()=>setSearchOpen(!searchOpen)}/>
+      <Btn name="ellipsis-vertical" label="Действия в чате" colors={colors} onPress={()=>setToolsOpen(true)}/>
     </View>
+    <Modal visible={toolsOpen} transparent animationType="fade" onRequestClose={()=>setToolsOpen(false)}>
+      <View style={{flex:1,justifyContent:'center',backgroundColor:'#020914bb'}}>
+        <Pressable style={{position:'absolute',top:0,bottom:0,left:0,right:0}} onPress={()=>setToolsOpen(false)}/>
+        <View style={{margin:22,borderRadius:18,padding:9,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.line}}>
+          <LabelButton title="Найти в чате" colors={colors} onPress={()=>{setToolsOpen(false);setSearchOpen(true);}}/>
+          <LabelButton title="Выбрать сообщения" colors={colors} onPress={()=>{setToolsOpen(false);setSelectionMode(true);}}/>
+          <LabelButton title="Удалить переписку" colors={colors} danger onPress={()=>{setToolsOpen(false);onClearChat();}}/>
+          <LabelButton title="Закрыть" colors={colors} onPress={()=>setToolsOpen(false)}/>
+        </View>
+      </View>
+    </Modal>
     {searchOpen&&<View style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,gap:8}}>
       <TextInput value={query} onChangeText={setQuery} placeholder="Найти в чате" placeholderTextColor={mutedColor} style={{flex:1,color:textColor,padding:10}}/>
       <Btn name="checkbox-outline" label="Выбрать сообщения" colors={colors} onPress={()=>{setSelectionMode(true);setSearchOpen(false);}}/>
@@ -411,8 +435,16 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Btn name="close" label="Отмена" colors={colors} onPress={()=>{setSelectionMode(false);setSelected([]);}}/>
     </View>}
     <FlatList key={id} ref={listRef} data={shown} keyExtractor={m=>m.id}
-      contentContainerStyle={{padding:14,gap:7,paddingBottom:18}} onContentSizeChange={()=>listRef.current?.scrollToEnd({animated:false})}
-      renderItem={({item})=>{
+      contentContainerStyle={{padding:14,gap:7,paddingBottom:18}}
+      scrollEventThrottle={120}
+      onScroll={e=>{
+        const {contentOffset,contentSize,layoutMeasurement}=e.nativeEvent;
+        const bottom=contentOffset.y+layoutMeasurement.height>=contentSize.height-110;
+        nearBottom.current=bottom;
+        setShowJump(!bottom && contentSize.height>layoutMeasurement.height+130);
+      }}
+      onContentSizeChange={()=>{if(nearBottom.current)listRef.current?.scrollToEnd({animated:false});}}
+      renderItem={({item,index})=>{
         const own=item.sender_id===ownerId;
         const f=forwardMeta(item.body||'');
         const sticker=parseStickerReference(f.text);
@@ -420,11 +452,28 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const keyboardSticker=item.attachment_kind==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(item.attachment_name||'');
         const standalone=Boolean(sticker||keyboardSticker)&&!item.deleted_at;
         const isSelected=selected.includes(item.id);
-        return <Pressable onLongPress={()=>action(item)} onPress={()=>{if(selectionMode)action(item);}} style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
+        const dayBreak=index===0||dayKey(shown[index-1].created_at)!==dayKey(item.created_at);
+        const original=item.reply_to?messages.find(row=>row.id===item.reply_to):null;
+        const quoteText=!original?'Исходное сообщение':original.deleted_at?'Сообщение удалено':
+          original.attachment_name||forwardMeta(original.body||'').text||'Вложение';
+        return <View>
+          {dayBreak&&<View style={{alignItems:'center',marginVertical:10}}><Text style={{fontSize:11,color:colors.muted,backgroundColor:glassColor(colors.surface,.85),paddingHorizontal:14,paddingVertical:6,borderRadius:13}}>{dayLabel(item.created_at)}</Text></View>}
+          <Pressable onLongPress={()=>action(item)} onPress={()=>{if(selectionMode)action(item);}}
+          onTouchStart={e=>{const t=e.nativeEvent.touches[0];if(t)swipeStart.current={id:item.id,x:t.pageX,y:t.pageY};}}
+          onTouchEnd={e=>{const start=swipeStart.current;swipeStart.current=null;if(!start||start.id!==item.id||selectionMode)return;
+            const t=e.nativeEvent.changedTouches[0];if(!t)return;
+            const dx=t.pageX-start.x,dy=t.pageY-start.y;
+            if(dx>75&&Math.abs(dx)>Math.abs(dy)*1.5){setReply(item);setEdit(null);setActionMessage(null);}
+          }}
+          onTouchCancel={()=>{swipeStart.current=null;}}
+          style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
           borderWidth:isSelected?2:standalone?0:1,borderColor:isSelected?colors.accent:own?glassColor(colors.accent,.32):glassColor(colors.text,.15),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.84):glassColor(colors.surface,.82)}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
-            {item.reply_to&&<Text style={{fontSize:10,color:colors.accent,marginBottom:4}}>↩ Ответ на сообщение</Text>}
+            {item.reply_to&&<View style={{borderLeftWidth:3,borderLeftColor:colors.accent,paddingLeft:8,marginBottom:6}}>
+              <Text style={{fontSize:11,color:colors.accent,fontWeight:'700'}}>{original?.sender_id===ownerId?'Вы':peer.display_name}</Text>
+              <Text numberOfLines={2} style={{fontSize:12,color:colors.muted}}>{quoteText}</Text>
+            </View>}
             {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors}/>}
             {album?<ConnectNativeAlbum items={album} colors={colors}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
               Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':f.text}</Text>}
@@ -433,8 +482,14 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             <Text style={{color:mutedColor,fontSize:10}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
             {own&&!item.deleted_at&&<Text accessibilityLabel={peerReceipts.read&&peerReceipts.read>=item.created_at?'Прочитано':peerReceipts.delivered&&peerReceipts.delivered>=item.created_at?'Доставлено':'Отправлено'} style={{fontSize:11,color:peerReceipts.read&&peerReceipts.read>=item.created_at?colors.accent:mutedColor}}>{peerReceipts.read&&peerReceipts.read>=item.created_at?'✓✓':peerReceipts.delivered&&peerReceipts.delivered>=item.created_at?'✓✓':'✓'}</Text>}
           </View>
-        </Pressable>;
+          </Pressable>
+        </View>;
       }}/>
+    {showJump&&<Pressable accessibilityRole="button" accessibilityLabel="К последнему сообщению"
+      onPress={()=>{nearBottom.current=true;listRef.current?.scrollToEnd({animated:true});setShowJump(false);}}
+      style={{alignSelf:'flex-end',flexDirection:'row',alignItems:'center',gap:6,marginRight:18,marginBottom:5,paddingHorizontal:13,paddingVertical:8,borderRadius:18,backgroundColor:glassColor(colors.surface,.92),borderWidth:1,borderColor:colors.line}}>
+      <Ionicons name="arrow-down" size={18} color={colors.accent}/><Text style={{fontSize:12,color:colors.text}}>Вниз</Text>
+    </Pressable>}
     {(peerRecording||peerTyping)&&<View style={{paddingHorizontal:14,paddingVertical:5}}>
       <Text style={{fontSize:12,color:colors.accent}}>{peerRecording?`● ${peer.display_name} записывает голосовое…`:`${peer.display_name} печатает…`}</Text>
     </View>}

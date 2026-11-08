@@ -21,6 +21,7 @@ import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
 import ConnectNativeGlass,{glassColor} from './ConnectNativeGlass';
+import * as SecureStore from 'expo-secure-store';
 import ConnectNativeInvites,{hasInviteAdminAccess,type InvitationMode} from './ConnectNativeInvites';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
 
@@ -68,10 +69,29 @@ function AppMain(){
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [avatars,setAvatars]=useState<Record<string,string>>({});
   const [conversations,setConversations]=useState<Conversation[]>([]);
+  // CONNECT_NATIVE_PWA_PHASE4_HISTORY: local clear state belongs to the signed-in user.
+  const [clearedChats,setClearedChats]=useState<Record<string,string>>({});
+  const [clearedReady,setClearedReady]=useState(false);
   const [search,setSearch]=useState('');
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  useEffect(()=>{
+    let alive=true;
+    setClearedChats({});setClearedReady(false);
+    if(!ownId){setClearedReady(true);return()=>{alive=false;};}
+    void SecureStore.getItemAsync('connect-native-cleared-chats:'+ownId).then(raw=>{
+      if(!alive||!raw)return;
+      const parsed:unknown=JSON.parse(raw);
+      if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return;
+      const restored:Record<string,string>={};
+      for(const [key,value] of Object.entries(parsed)){
+        if(/^[0-9a-f-]{36}$/i.test(key)&&typeof value==='string'&&Number.isFinite(Date.parse(value)))restored[key]=value;
+      }
+      setClearedChats(restored);
+    }).catch(()=>{}).finally(()=>{if(alive)setClearedReady(true)});
+    return()=>{alive=false;};
+  },[ownId]);
   useEffect(()=>{
     let alive=true;
     if(!ownId){setInviteAdmin(false);return;}
@@ -166,7 +186,12 @@ function AppMain(){
     const db=inbox[b.conversation.id]?.last?.created_at||b.conversation.created_at;
     return Date.parse(db)-Date.parse(da);
   }),[chats,inbox]);
-  const unreadTotal=useMemo(()=>chats.reduce((sum,item)=>sum+(inbox[item.conversation.id]?.unread||0),0),[chats,inbox]);
+  const displayChats=useMemo(()=>clearedReady?orderedChats.filter(item=>{
+    const cleared=clearedChats[item.conversation.id];
+    const newest=inbox[item.conversation.id]?.last;
+    return !cleared || Boolean(newest && newest.created_at>cleared);
+  }):[],[clearedReady,orderedChats,clearedChats,inbox]);
+  const unreadTotal=useMemo(()=>displayChats.reduce((sum,item)=>sum+(inbox[item.conversation.id]?.unread||0),0),[displayChats,inbox]);
   async function login(){if(!email.trim()||!password)return;
     setAuthBusy(true);setNotice('');
     const {error}=await db.auth.signInWithPassword({email:email.trim(),password});
@@ -181,7 +206,22 @@ function AppMain(){
     }
     setSearch('');setScreen({kind:'chat',conversation:chat,peer:person});
   }
-  async function logout(){await disableNativePush();await db.auth.signOut();setScreen({kind:'tab'});setTab('chats');}
+  async function clearConversation(id:string){
+    if(!ownId)return;
+    const next={...clearedChats,[id]:new Date().toISOString()};
+    try{
+      await SecureStore.setItemAsync('connect-native-cleared-chats:'+ownId,JSON.stringify(next));
+      setClearedChats(next);setScreen({kind:'tab'});setTab('chats');
+      setNotice('Переписка скрыта только на этом устройстве');
+    }catch(e){setNotice('Не удалось очистить переписку: '+(e instanceof Error?e.message:String(e)));}
+  }
+  function confirmClearConversation(id:string,person:string){
+    Alert.alert('Удалить переписку?',`Переписка с ${person} будет скрыта только на этом устройстве. У собеседника сообщения останутся.`,[
+      {text:'Отмена',style:'cancel'},
+      {text:'Удалить',style:'destructive',onPress:()=>void clearConversation(id)},
+    ]);
+  }
+  async function logout(){await disableNativePush();await db.auth.signOut();setClearedChats({});setScreen({kind:'tab'});setTab('chats');}
   const own=profiles.find(p=>p.id===ownId);
   const s=makeStyles(colors);
   if(initializing)return <View style={[s.root,s.center]}><ActivityIndicator color={colors.accent}/></View>;
@@ -213,6 +253,8 @@ function AppMain(){
       conversation={screen.conversation} peer={screen.peer} ownerId={ownId} profiles={profiles}
       avatarUrl={avatars[screen.peer.id]} colors={colors}
       wallpaperUri={appearance.prefs.wallpaper} enabledPacks={appearance.prefs.enabledPacks}
+      clearedAt={clearedChats[screen.conversation.id]||null}
+      onClearChat={()=>confirmClearConversation(screen.conversation.id,screen.peer.display_name)}
       onBack={()=>setScreen({kind:'tab'})}
       onOpenProfile={()=>setScreen({kind:'profile',profile:screen.peer})}
       onCall={()=>void voice.dial(screen.conversation.id,screen.peer.id,screen.peer.display_name)} />;
@@ -246,7 +288,7 @@ function AppMain(){
     if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}
       onDial={(conversationId,peer)=>void voice.dial(conversationId,peer.id,peer.display_name)}/>;
     if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><Text style={[s.entryTitle,{flex:1}]}>{item.display_name}</Text><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
-    return <FlatList data={orderedChats.filter(item=>{
+    return <FlatList data={displayChats.filter(item=>{
       const q=search.trim().toLocaleLowerCase('ru-RU');
       const last=inbox[item.conversation.id]?.last;
       return !q||item.peer.display_name.toLocaleLowerCase('ru-RU').includes(q)||
@@ -264,7 +306,7 @@ function AppMain(){
         <View style={{flexDirection:'row',alignItems:'center',gap:9,marginBottom:13}}>
           <Text style={s.title}>Чаты</Text>
           <View style={{borderRadius:12,backgroundColor:glassColor(colors.surface,.85),paddingHorizontal:8,paddingVertical:3}}>
-            <Text style={{fontSize:12,fontWeight:'700',color:colors.accent}}>{orderedChats.length}</Text>
+            <Text style={{fontSize:12,fontWeight:'700',color:colors.accent}}>{displayChats.length}</Text>
           </View>
         </View>
         <View style={[s.field,{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:0,marginBottom:13}]}>
@@ -273,13 +315,15 @@ function AppMain(){
           {!!search&&<Pressable accessibilityRole="button" accessibilityLabel="Очистить поиск" onPress={()=>setSearch('')}><Ionicons name="close-circle" color={colors.muted} size={20}/></Pressable>}
         </View>
       </>}
-      ListEmptyComponent={<Text style={s.subtitle}>Нет подходящих переписок.</Text>}
+      ListEmptyComponent={<Text style={s.subtitle}>{clearedReady?'Нет подходящих переписок.':'Загружаем чаты…'}</Text>}
       renderItem={({item})=>{
         const summary=inbox[item.conversation.id];
         const last=summary?.last;
         const unread=summary?.unread||0;
         return <Pressable accessibilityRole="button" accessibilityLabel={item.peer.display_name+(unread?' · непрочитано: '+unread:'')}
-          style={[s.entry,{minHeight:78,paddingVertical:12}]} onPress={()=>{setSearch('');setScreen({kind:'chat',conversation:item.conversation,peer:item.peer});}}>
+          style={[s.entry,{minHeight:78,paddingVertical:12}]}
+          onLongPress={()=>confirmClearConversation(item.conversation.id,item.peer.display_name)}
+          onPress={()=>{setSearch('');setScreen({kind:'chat',conversation:item.conversation,peer:item.peer});}}>
           <Avatar name={item.peer.display_name} url={avatars[item.peer.id]} colors={colors} size={49}/>
           <View style={{flex:1,gap:5}}>
             <Text numberOfLines={1} style={s.entryTitle}>{item.peer.display_name}</Text>
