@@ -272,8 +272,8 @@ function AppMain({onBootReady}:{onBootReady:(ready:boolean)=>void}){
   if(initializing)return <View style={[s.root,s.center]}><ActivityIndicator color={colors.accent}/></View>;
   if(!configured)return <View style={[s.root,s.center,s.pad]}><Label colors={colors}>Новый клиент пока не настроен: добавь публичный ключ Supabase в конфигурацию сборки.</Label></View>;
   if(!session)return <View style={[s.root,s.center,s.pad]}><ConnectNativeGlass colors={colors} theme={theme}/>
-    <Ionicons name="chatbubbles-outline" size={70} color={colors.accent}/><Text style={s.loginTitle}>Connect</Text>
-    <Text style={s.subtitle}>Вход в нативное приложение</Text>
+    <Image source={require('../assets/connect-splash-bubbles.png')} resizeMode="contain" style={{width:150,height:112}}/><Text style={s.loginTitle}>Connect</Text>
+    <Text style={s.subtitle}>Добро пожаловать в Connect</Text>
     <TextInput style={s.field} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholder="Почта" placeholderTextColor={colors.muted} value={email} onChangeText={setEmail}/>
     <TextInput style={s.field} secureTextEntry placeholder="Пароль" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword}/>
     <Pressable style={s.mainAction} onPress={()=>void login()} disabled={authBusy}><Text style={s.actionText}>{authBusy?'Вход…':'Войти'}</Text></Pressable>

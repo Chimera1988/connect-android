@@ -71,6 +71,64 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
       }
     }.start()
   }
+
+  private var previewPlayer:android.media.MediaPlayer?=null
+  @ReactMethod
+  fun previewSound(source:String, promise:Promise){
+    try {
+      synchronized(this){
+        previewPlayer?.setOnCompletionListener(null)
+        previewPlayer?.release()
+        previewPlayer=null
+        val location=when(source){
+          "default-notification"->android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+          "default-ringtone"->android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+          else->Uri.parse(source)
+        } ?: throw IllegalStateException("Default sound is unavailable")
+        if(location.scheme!="content"&&location.scheme!="android.resource")
+          throw IllegalArgumentException("Only Android local audio can be previewed")
+        val p=android.media.MediaPlayer()
+        p.setAudioAttributes(android.media.AudioAttributes.Builder()
+          .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+          .setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
+        p.setDataSource(ctx,location)
+        p.prepare()
+        p.setOnCompletionListener { completed->
+          synchronized(this){
+            if(previewPlayer===completed)previewPlayer=null
+            completed.release()
+          }
+        }
+        previewPlayer=p
+        p.start()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+          synchronized(this){
+            if(previewPlayer===p){
+              previewPlayer=null
+              p.setOnCompletionListener(null)
+              p.stop()
+              p.release()
+            }
+          }
+        },10000)
+      }
+      promise.resolve(true)
+    }catch(e:Exception){
+      synchronized(this){previewPlayer?.release();previewPlayer=null}
+      promise.reject("CONNECT_SOUND_PREVIEW_FAILED",e.message,e)
+    }
+  }
+  @ReactMethod
+  fun stopPreviewSound(promise:Promise){
+    try{
+      synchronized(this){
+        previewPlayer?.setOnCompletionListener(null)
+        previewPlayer?.release()
+        previewPlayer=null
+      }
+      promise.resolve(true)
+    }catch(e:Exception){promise.reject("CONNECT_SOUND_STOP_FAILED",e.message,e)}
+  }
 }
 `;
 const kotlinBridge=String.raw`package com.connect.messenger

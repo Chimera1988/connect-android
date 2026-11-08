@@ -12,8 +12,9 @@ import {uploadFile} from './nativeMediaUtils';
 import ConnectNativeAvatarCropper,{type AvatarSource,type CroppedAvatar} from './ConnectNativeAvatarCropper';
 import {glassColor} from './ConnectNativeGlass';
 import {BUILTIN_PACKS,ACCENTS,type AppearanceController} from './ConnectNativeAppearance';
-import {themeNames,type Palette} from './theme';
-import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
+import {palettes,themeNames,type Palette} from './theme';
+import ConnectNativeSoundSettings,{previewBuiltinSound} from './ConnectNativeSoundSettings';
+import {testNativeMessagePush} from './ConnectNativePush';
 import ConnectNativeStickerManager from './ConnectNativeStickerManager';
 import ConnectNativeSonicRunner from './ConnectNativeSonicRunner';
 
@@ -57,6 +58,8 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
   const [page,setPage]=useState<Page>('home');
   const [gameOpen,setGameOpen]=useState(false);
   const [notification,setNotification]=useState<NotificationPref>(DEFAULT_NOTIFICATIONS);
+  const [pushDiagnostic,setPushDiagnostic]=useState('');
+  const [pushBusy,setPushBusy]=useState(false);
   const [notices,setNotices]=useState('');
   const [working,setWorking]=useState(false);
   const [deletePassword,setDeletePassword]=useState('');
@@ -201,7 +204,7 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       {page!=='home'&&<Pressable accessibilityRole="button" accessibilityLabel="Назад" onPress={()=>{setPage('home');setNotices('');}}><Ionicons name="chevron-back" size={29} color={colors.accent}/></Pressable>}
       <Text style={{color:colors.text,fontWeight:'800',fontSize:26}}>{title}</Text>
     </View>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:15,paddingTop:8,paddingBottom:32}}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:15,paddingTop:8,paddingBottom:125}}>
       {page==='home'&&<>
         <Row icon="person-circle-outline" title={owner?.display_name||'Мой профиль'} subtitle={owner?.bio||email} colors={colors} onPress={onProfile}/>
         {pageRows.map(r=><Row key={r.page} colors={colors} icon={r.icon} title={r.title} subtitle={r.subtitle} onPress={()=>{setPage(r.page);setNotices('');}}/>)}
@@ -218,7 +221,13 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
         <Heading colors={colors}>Темы оформления</Heading>
         <Text style={{color:colors.muted,fontSize:12,marginBottom:10}}>Семь сцен PWA. Тема и цвет кнопок настраиваются отдельно.</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{themeNames.map(scene=><Pressable key={scene.id} onPress={()=>appearance.update({scene:scene.id})} accessibilityRole="button" accessibilityState={{selected:a.scene===scene.id}} style={{width:'47%',minHeight:86,borderWidth:a.scene===scene.id?2:1,borderColor:a.scene===scene.id?colors.accent:colors.line,borderRadius:19,overflow:'hidden',padding:10,justifyContent:'flex-end',backgroundColor:colors.elevated}}>
-          <View style={{height:23,width:'100%',borderRadius:12,marginBottom:12,backgroundColor:colors.accent,opacity:a.scene===scene.id ? .6 : .2}}/>
+          <View style={{height:43,width:'100%',borderRadius:11,marginBottom:9,backgroundColor:palettes[scene.id].bg,overflow:'hidden',padding:6,justifyContent:'space-between'}}>
+            <View style={{height:8,width:'65%',alignSelf:'flex-start',borderRadius:9,backgroundColor:palettes[scene.id].surface}}/>
+            <View style={{flexDirection:'row',alignItems:'flex-end',gap:5}}>
+              <View style={{height:16,width:'42%',borderRadius:9,backgroundColor:palettes[scene.id].elevated}}/>
+              <View style={{height:12,width:'32%',borderRadius:9,backgroundColor:palettes[scene.id].accent,opacity:.72}}/>
+            </View>
+          </View>
           <Text style={{color:colors.text,fontWeight:'700'}}>{scene.name}{a.scene===scene.id?' ✓':''}</Text>
         </Pressable>)}</View>
         <Heading colors={colors}>Цветовая схема</Heading>
@@ -245,11 +254,24 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={{color:colors.text,flex:1}}>Уведомления включены</Text><Switch value={notification.enabled} onValueChange={enabled=>void saveNotification({...notification,enabled})} trackColor={{true:colors.accent}}/></View>
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={{color:colors.text,flex:1}}>Вибрация</Text><Switch value={notification.vibrate} onValueChange={vibrate=>void saveNotification({...notification,vibrate})} trackColor={{true:colors.accent}}/></View>
           <Text style={{color:colors.text,fontWeight:'700'}}>Сигнал для всех чатов</Text>
-          {SOUND_OPTIONS.map(([sound,label])=><SmallButton key={sound} colors={colors} label={(notification.sound===sound?'✓ ':'')+label} onPress={()=>void saveNotification({...notification,sound})}/>)}
+          {SOUND_OPTIONS.map(([sound,label])=><View key={sound} style={{flexDirection:'row',gap:8,alignItems:'center'}}>
+            <View style={{flex:1}}><SmallButton colors={colors} label={(notification.sound===sound?'✓ ':'')+label} onPress={()=>void saveNotification({...notification,sound})}/></View>
+            {sound!=='silent'&&<SmallButton colors={colors} label="▶" onPress={()=>void previewBuiltinSound(sound).catch(e=>setNotices('Прослушивание: '+errorOf(e)))}/>} 
+          </View>)}
         </Panel>
         <Heading colors={colors}>Звуки Android</Heading>
         <ConnectNativeSoundSettings colors={colors}/>
-        <Text style={{color:colors.muted,fontSize:12,marginTop:12}}>Доставка FCM требует корректной регистрации Android-приложения и разрешения уведомлений. Этот экран не подтверждает их работоспособность.</Text>
+        <Heading colors={colors}>Диагностика уведомлений Android</Heading>
+        <Panel colors={colors}>
+          <Text style={{color:colors.muted,fontSize:12}}>Проверит системное разрешение, регистрацию Firebase и покажет тестовое локальное уведомление. Для проверки настоящей доставки попросите другого пользователя отправить сообщение, когда Connect в фоне.</Text>
+          <SmallButton colors={colors} label={pushBusy?'Проверяем…':'Проверить и показать тестовое уведомление'} disabled={pushBusy}
+            onPress={()=>{if(!owner){setPushDiagnostic('Войдите в аккаунт');return;}
+              setPushBusy(true);setPushDiagnostic('Проверяем…');
+              void testNativeMessagePush(owner.id).then(setPushDiagnostic)
+                .catch(e=>setPushDiagnostic('Ошибка: '+errorOf(e))).finally(()=>setPushBusy(false));}}/>
+          {!!pushDiagnostic&&<Text style={{color:colors.text,fontSize:12}}>{pushDiagnostic}</Text>}
+        </Panel>
+        <Text style={{color:colors.muted,fontSize:12,marginTop:12}}>Тестовое уведомление подтверждает работу Android-канала, но не доказывает доставку серверного FCM.</Text>
       </>}
       {page==='data'&&<>
         <Heading colors={colors}>Локальные данные</Heading>

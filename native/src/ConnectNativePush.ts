@@ -14,6 +14,8 @@ const CALLS='connect-native-calls-v1';
 const READ_KEY='connect-native-read-marker-v1:';
 // connect-native-push-pref-phase9: preserve the same user-facing settings as PWA.
 const NOTIFICATION_KEY='connect-native-notifications-v1';
+const LAST_RECEIVED_KEY='connect-native-fcm-last-message-v1';
+const LAST_REGISTERED_KEY='connect-native-fcm-last-registration-v1';
 type NotificationPrefs={enabled:boolean;vibrate:boolean;sound:'soft'|'bright'|'gentle'|'silent'};
 async function notificationPrefs():Promise<NotificationPrefs>{
   const fallback:NotificationPrefs={enabled:true,vibrate:true,sound:'soft'};
@@ -61,6 +63,8 @@ export async function rememberReadAt(conversationId:string,iso:string){
 /** Handles the data-only FCM payloads already sent by the Connect server. */
 export async function handleNativePush(data:Data|undefined){
   if(!data)return;
+  if(data.messageId||data.kind==='message'||data.kind==='chat')
+    await SecureStore.setItemAsync(LAST_RECEIVED_KEY,new Date().toISOString()).catch(()=>{});
   if(data.kind==='read'){
     if(data.conversationId&&UUID.test(data.conversationId)){
       if(data.readAt)await rememberReadAt(data.conversationId,data.readAt);
@@ -90,7 +94,7 @@ export async function handleNativePush(data:Data|undefined){
     const lastRead=await SecureStore.getItemAsync(READ_KEY+data.conversationId);
     if(data.createdAt&&lastRead&&Number.isFinite(Date.parse(data.createdAt))&&
       Date.parse(data.createdAt)<=Date.parse(lastRead))return;
-    const channelId=await getConnectSoundChannel('messages',{silent:prefs.sound==='silent',vibrate:prefs.vibrate});
+    const channelId=await getConnectSoundChannel('messages',{silent:prefs.sound==='silent',vibrate:prefs.vibrate,tone:prefs.sound});
     await notifee.displayNotification({
       id:'chat:'+data.conversationId,
       title:'Connect · Новое сообщение',body:'Откройте переписку, чтобы прочитать сообщение',
@@ -148,6 +152,7 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
       const token=await getToken(getMessaging());
       if(!alive)return;
       await sendRegistration(token,'POST',ownerId);
+      await SecureStore.setItemAsync(LAST_REGISTERED_KEY,new Date().toISOString()).catch(()=>{});
       const initial=await notifee.getInitialNotification();
       if(alive&&initial?.notification?.data){
         if(initial.pressAction?.id==='connect-answer')
@@ -169,6 +174,39 @@ export async function dismissChatPush(conversationId:string){
   const displayed=await notifee.getDisplayedNotifications().catch(()=>[]);
   await Promise.all(displayed.filter(item=>item.notification?.data?.conversationId===conversationId &&
     typeof item.notification?.id==='string').map(item=>notifee.cancelNotification(item.notification!.id!)));
+}
+
+/** Explicit diagnostic: checks Android system permission, re-registers FCM,
+ * then creates a safe local notification to validate OS display / sound channel.
+ * A local test does NOT prove the server can send FCM. */
+export async function testNativeMessagePush(ownerId:string):Promise<string>{
+  if(!ownerId)throw Error('Сначала войдите в Connect');
+  const permission=await notifee.requestPermission();
+  if(permission.authorizationStatus===0)throw Error('Система запретила уведомления для Connect. Включите их в настройках Android.');
+  const settings=await notifee.getNotificationSettings();
+  if(settings.authorizationStatus===0)throw Error('Уведомления Connect отключены в Android');
+  const token=await getToken(getMessaging());
+  if(!token)throw Error('Firebase не выдал токен. Проверьте Google Play Services и интернет.');
+  await sendRegistration(token,'POST',ownerId);
+  await SecureStore.setItemAsync(LAST_REGISTERED_KEY,new Date().toISOString());
+  const prefs=await notificationPrefs();
+  const channelId=await getConnectSoundChannel('messages',{
+    silent:prefs.sound==='silent',vibrate:prefs.vibrate,tone:prefs.sound,
+  });
+  const channel=await notifee.getChannel(channelId);
+  if(!channel || channel.blocked || channel.importance===AndroidImportance.NONE)
+    throw Error('Канал сообщений заблокирован в системных настройках Android');
+  await notifee.displayNotification({
+    id:'connect-native-local-test-v1',title:'Connect · Проверка уведомлений',
+    body:'Если видите это уведомление, системный канал работает.',
+    data:{kind:'diagnostic'},
+    android:{channelId,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
+      visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true},
+  });
+  const last=await SecureStore.getItemAsync(LAST_RECEIVED_KEY);
+  return 'Разрешение Android есть, FCM-токен зарегистрирован, тест отправлен в шторку. '+
+    (last?'Последний входящий FCM: '+new Date(last).toLocaleString('ru-RU'):
+      'Входящие FCM ещё не зафиксированы. Проверьте сообщение от другого пользователя.');
 }
 
 /** Do not keep showing personal notifications after account sign-out. */
