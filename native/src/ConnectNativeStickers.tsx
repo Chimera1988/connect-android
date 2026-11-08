@@ -3,7 +3,8 @@
  * the existing connect_sticker_packs / connect_stickers tables and signed storage URLs.
  */
 import React, {useEffect, useMemo, useState} from 'react';
-import {ActivityIndicator,Image,Pressable,ScrollView,Text,View} from 'react-native';
+import {ActivityIndicator,Alert,Image,Pressable,ScrollView,Text,View} from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import {SvgUri} from 'react-native-svg';
 import {db,mediaUrl} from './backend';
 import type {Palette} from './theme';
@@ -37,6 +38,14 @@ const FAVORITE_NAME='Избранное из чатов · Connect';
 const STATIC_BASE=(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'');
 const builtInUrl=(pack:Pack['id'],id:string)=>`${STATIC_BASE}/stickers/${pack}/${id}.svg`;
 const textError=(e:unknown)=>e instanceof Error?e.message:String(e);
+// CONNECT_NATIVE_PWA_PHASE6_STICKER_LIBRARY: device-specific built-in favorites and recents.
+const validBuiltIn=(key:string)=>{
+  const [pack,id]=key.split(':');
+  return Boolean(packs.some(p=>p.id===pack)&&moods.some(m=>m.id===id));
+};
+const favoriteKey=(id:string)=>`connect-native-sticker-favorites-v1:${id}`;
+const recentKey=(id:string)=>`connect-native-sticker-recent-v1:${id}`;
+
 
 export function parseStickerReference(value:string):StickerReference|null {
   const common=commonPattern.exec(value);
@@ -77,9 +86,41 @@ export function ConnectNativeStickerBubble({body,colors}:{body:string;colors:Pal
 }
 
 export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,onEmoji,onClose,enabledPacks=packs.map(p=>p.id)}:{
-  colors:Palette;ownerId:string;busy:boolean;onSend:(body:string)=>Promise<void>;onEmoji:(emoji:string)=>void;onClose:()=>void;enabledPacks?:string[];
+  colors:Palette;ownerId:string;busy:boolean;onSend:(body:string)=>Promise<boolean>;onEmoji:(emoji:string)=>void;onClose:()=>void;enabledPacks?:string[];
 }) {
   const [selected,setSelected]=useState('speed');
+  const [favorites,setFavorites]=useState<string[]>([]);
+  const [recent,setRecent]=useState<string[]>([]);
+  const [localLoaded,setLocalLoaded]=useState(false);
+  useEffect(()=>{
+    let active=true;setLocalLoaded(false);setFavorites([]);setRecent([]);
+    void Promise.all([SecureStore.getItemAsync(favoriteKey(ownerId)),SecureStore.getItemAsync(recentKey(ownerId))])
+      .then(([fav,rec])=>{
+        if(!active)return;
+        const parse=(raw:string|null,max:number):string[]=>{
+          try{const value:unknown=raw?JSON.parse(raw):[];
+            return Array.isArray(value)?Array.from(new Set(value.filter((x):x is string=>typeof x==='string'&&validBuiltIn(x)))).slice(0,max):[];
+          }catch{return [];}
+        };
+        setFavorites(parse(fav,100));setRecent(parse(rec,30));
+      }).catch(()=>{}).finally(()=>{if(active)setLocalLoaded(true);});
+    return()=>{active=false;};
+  },[ownerId]);
+  useEffect(()=>{if(localLoaded)void SecureStore.setItemAsync(favoriteKey(ownerId),JSON.stringify(favorites)).catch(()=>{});},[favorites,localLoaded,ownerId]);
+  useEffect(()=>{if(localLoaded)void SecureStore.setItemAsync(recentKey(ownerId),JSON.stringify(recent)).catch(()=>{});},[recent,localLoaded,ownerId]);
+  function toggleFavorite(key:string){if(validBuiltIn(key))setFavorites(prev=>prev.includes(key)?prev.filter(v=>v!==key):[key,...prev].slice(0,100));}
+  async function sendBuiltIn(pack:string,id:string){
+    if(!validBuiltIn(`${pack}:${id}`)||busy)return;
+    const success=await onSend(`[[connect-sticker:${pack}:${id}]]`);
+    if(success){
+      const key=`${pack}:${id}`;
+      const next=[key,...recent.filter(v=>v!==key)].slice(0,30);
+      // Parent chat closes the picker after sending. Persist before unmount.
+      await SecureStore.setItemAsync(recentKey(ownerId),JSON.stringify(next)).catch(()=>{});
+      setRecent(next);
+    }
+  }
+
   useEffect(()=>{if(packs.some(p=>p.id===selected)&&!enabledPacks.includes(selected))setSelected(enabledPacks[0]||'emoji');},[selected,enabledPacks]);
   const [customPacks,setCustomPacks]=useState<CustomPack[]>([]);
   const [customStickers,setCustomStickers]=useState<CustomSticker[]>([]);
@@ -106,12 +147,31 @@ export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,o
   },[ownerId]);
   const active=customPacks.find(x=>x.id===selected);
   const chosen=active?customStickers.filter(s=>s.pack_id===active.id):[];
+  const builtInKeys=selected==='favorites'?favorites:selected==='recent'?recent:
+    packs.some(p=>p.id===selected)?moods.map(m=>`${selected}:${m.id}`):[];
+  const ownedFavorites=customPacks.filter(p=>p.owner_id===ownerId&&p.name===FAVORITE_NAME);
+  const ownedFavoriteIds=new Set(ownedFavorites.map(p=>p.id));
+  const savedKeyboardStickers=selected==='favorites'?customStickers.filter(s=>ownedFavoriteIds.has(s.pack_id)):[];
+  function removeSavedFavorite(st:CustomSticker){
+    Alert.alert('Удалить из избранного?',st.name,[{text:'Отмена',style:'cancel'},
+      {text:'Удалить',style:'destructive',onPress:()=>void(async()=>{
+        try{
+          const removed=await db.from('connect_stickers').delete().eq('id',st.id);
+          if(removed.error)throw removed.error;
+          await db.storage.from('connect-stickers').remove([st.storage_path]);
+          setCustomStickers(prev=>prev.filter(x=>x.id!==st.id));
+          setCustomUrls(prev=>{const next={...prev};delete next[st.id];return next;});
+        }catch(e){setError('Не удалось удалить из избранного: '+textError(e));}
+      })()}]);
+  }
+
   useEffect(()=>{
-    if(!active)return;
+    const selectedStickers=selected==='favorites'
+      ? customStickers.filter(st=>customPacks.some(p=>p.id===st.pack_id&&p.owner_id===ownerId&&p.name===FAVORITE_NAME)).slice(0,120)
+      : active?customStickers.filter(x=>x.pack_id===active.id).slice(0,120):[];
+    if(!selectedStickers.length)return;
     let alive=true;
-    // Resolve only the selected pack; signing every image from all packs at once
-    // can overwhelm mobile networks and wastes tokens on files never viewed.
-    const selectedStickers=customStickers.filter(x=>x.pack_id===active.id).slice(0,120);
+    // Resolve only the currently visible pack, including saved keyboard stickers.
     void Promise.all(selectedStickers.map(async item=>{
       try{
         const res=await db.storage.from('connect-stickers').createSignedUrl(item.storage_path,3600);
@@ -121,7 +181,7 @@ export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,o
       if(alive)setCustomUrls(prev=>({...prev,...Object.fromEntries(rows.filter(([,url])=>Boolean(url)))}));
     });
     return()=>{alive=false;};
-  },[selected,customStickers]);
+  },[selected,customStickers,customPacks,ownerId]);
   const tabStyle={borderRadius:14,borderWidth:1,borderColor:colors.line,backgroundColor:colors.elevated,paddingVertical:8,paddingHorizontal:11,marginRight:6} as const;
   const toggleButton=(value:string,title:string)=>
     <Pressable key={value} accessibilityRole="button" accessibilityLabel={'Открыть '+title} onPress={()=>setSelected(value)}
@@ -138,7 +198,9 @@ export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,o
     <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" style={{flexGrow:0,marginBottom:9}}>
       {toggleButton('emoji','☺ Эмодзи')}
       {packs.filter(p=>enabledPacks.includes(p.id)).map(p=>toggleButton(p.id,`${p.emoji} ${p.name}`))}
-      {customPacks.map(p=>toggleButton(p.id,`${p.name===FAVORITE_NAME?'⭐':p.emoji||'🎨'} ${p.name===FAVORITE_NAME?'Избранное':p.name}`))}
+      {customPacks.filter(p=>!(p.owner_id===ownerId&&p.name===FAVORITE_NAME)).map(p=>toggleButton(p.id,`${p.emoji||'🎨'} ${p.name}`))}
+      {toggleButton('favorites','⭐ Избранное')}
+      {toggleButton('recent','🕒 Недавние')}
     </ScrollView>
     {loading&&<ActivityIndicator color={colors.accent} style={{marginTop:30}}/>}
     {!!error&&<Text style={{color:colors.danger,fontSize:12}}>{error}</Text>}
@@ -148,13 +210,33 @@ export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,o
         style={{width:48,height:48,alignItems:'center',justifyContent:'center',borderRadius:12,backgroundColor:colors.elevated}}>
         <Text style={{fontSize:28}}>{emoji}</Text>
       </Pressable>)}
-      {packs.some(p=>p.id===selected)&&moods.map(m=><Pressable key={m.id} disabled={busy}
-        accessibilityRole="button" accessibilityLabel={'Отправить '+m.title}
-        onPress={()=>void onSend(`[[connect-sticker:${selected}:${m.id}]]`)}
-        style={{width:78,height:89,alignItems:'center',justifyContent:'center',borderRadius:12,backgroundColor:colors.elevated}}>
-        <SvgUri width={67} height={67} uri={builtInUrl(selected as Pack['id'],m.id)}/>
-        <Text numberOfLines={1} style={{fontSize:10,color:colors.muted}}>{m.title}</Text>
-      </Pressable>)}
+      {builtInKeys.map(key=>{
+        const [pack,id]=key.split(':');
+        const mood=moods.find(m=>m.id===id);
+        if(!mood||!packs.some(p=>p.id===pack))return null;
+        return <View key={key} style={{width:81,borderRadius:12,backgroundColor:colors.elevated,alignItems:'center',paddingVertical:3}}>
+          <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel={'Отправить '+mood.title}
+            onPress={()=>void sendBuiltIn(pack,id)} style={{alignItems:'center',width:80}}>
+            <SvgUri width={65} height={65} uri={builtInUrl(pack as Pack['id'],id)}/>
+            <Text numberOfLines={1} style={{fontSize:10,color:colors.muted}}>{mood.title}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={favorites.includes(key)?'Убрать из избранного':'Добавить в избранное'}
+            onPress={()=>toggleFavorite(key)} style={{width:80,alignItems:'flex-end',paddingRight:7,paddingBottom:3}}>
+            <Text style={{color:favorites.includes(key)?colors.accent:colors.muted,fontSize:17}}>{favorites.includes(key)?'★':'☆'}</Text>
+          </Pressable>
+        </View>;
+      })}
+      {savedKeyboardStickers.map(st=><View key={st.id} style={{width:82,borderRadius:12,backgroundColor:colors.elevated,paddingVertical:6,alignItems:'center'}}>
+        <Pressable accessibilityRole="button" disabled={busy||!customUrls[st.id]} accessibilityLabel={'Отправить сохранённый стикер '+st.name}
+          onPress={()=>void onSend(`[[connect-custom-sticker:${st.id}]]`)}>
+          {customUrls[st.id]?<Image source={{uri:customUrls[st.id]}} resizeMode="contain" style={{width:68,height:68}}/>:<ActivityIndicator color={colors.accent}/>}
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Удалить сохранённый стикер" onPress={()=>removeSavedFavorite(st)}>
+          <Text style={{color:colors.accent,fontSize:18}}>★</Text>
+        </Pressable>
+      </View>)}
+      {selected==='favorites'&&!builtInKeys.length&&!savedKeyboardStickers.length&&<Text style={{padding:14,color:colors.muted}}>Избранных стикеров пока нет.</Text>}
+      {selected==='recent'&&!builtInKeys.length&&<Text style={{padding:14,color:colors.muted}}>Недавно отправленных стикеров пока нет.</Text>}
       {active&&chosen.map(st=><Pressable key={st.id} disabled={busy||!customUrls[st.id]}
         accessibilityRole="button" accessibilityLabel={'Отправить '+st.name}
         onPress={()=>void onSend(`[[connect-custom-sticker:${st.id}]]`)}

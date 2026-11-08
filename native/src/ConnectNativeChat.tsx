@@ -14,6 +14,7 @@ import ConnectNativeVideoNote from './ConnectNativeVideoNote';
 import {dismissChatPush,rememberReadAt} from './ConnectNativePush';
 import ConnectNativeAlbum,{parseAlbumReference} from './ConnectNativeAlbum';
 import ConnectNativeStickerPicker,{ConnectNativeStickerBubble,parseStickerReference} from './ConnectNativeStickers';
+import {saveKeyboardStickerFavorite} from './ConnectNativeStickerLibrary';
 import {uploadFile,type LocalUpload} from './nativeMediaUtils';
 import type {Palette} from './theme';
 import {glassColor} from './ConnectNativeGlass';
@@ -279,8 +280,18 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;}
     finally{setUploading(false);setUploadProgress('');}
   }
-  async function sendSticker(body:string):Promise<void>{
-    if(busy||uploading||!parseStickerReference(body))return;
+  // CONNECT_NATIVE_PWA_PHASE6_STICKER_LIBRARY: persist received keyboard images as private stickers.
+  async function addKeyboardFavorite(item:Message){
+    if(!ownerId||busy)return;
+    setBusy(true);setActionMessage(null);
+    try{
+      const result=await saveKeyboardStickerFavorite(item,ownerId);
+      setNotice(result==='exists'?'Этот стикер уже в избранном':'Стикер добавлен в избранное');
+    }catch(e){setNotice('Не удалось сохранить стикер: '+(e instanceof Error?e.message:String(e)));}
+    finally{setBusy(false);}
+  }
+  async function sendSticker(body:string):Promise<boolean>{
+    if(busy||uploading||!parseStickerReference(body))return false;
     setBusy(true);
     try{
       const result=await db.from('messages').insert({
@@ -288,7 +299,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       });
       if(result.error)throw result.error;
       setReply(null);setStickerPickerOpen(false);await load();
-    }catch(e){setNotice('Стикер не отправлен: '+(e instanceof Error?e.message:String(e)));}
+      return true;
+    }catch(e){setNotice('Стикер не отправлен: '+(e instanceof Error?e.message:String(e)));return false;}
     finally{setBusy(false);}
   }
   async function sendAlbum(files:LocalUpload[]):Promise<boolean>{
@@ -609,6 +621,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             <LabelButton title="Ответить" colors={colors} onPress={()=>{setReply(actionMessage);setEdit(null);setActionMessage(null);}}/>
             <LabelButton title="Переслать" colors={colors} onPress={()=>{setForwardItems([actionMessage]);setActionMessage(null);}}/>
             <LabelButton title="Выбрать" colors={colors} onPress={()=>{setSelectionMode(true);setSelected([actionMessage.id]);setActionMessage(null);}}/>
+            {actionMessage.attachment_kind==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(actionMessage.attachment_name||'')&&
+              <LabelButton title="Добавить стикер в избранное" colors={colors} onPress={()=>void addKeyboardFavorite(actionMessage)}/>}
             <LabelButton title="Удалить у себя" colors={colors} onPress={()=>{void hideLocally([actionMessage]);setActionMessage(null);}}/>
             {Boolean(actionMessage.body)&&<LabelButton title="Копировать текст" colors={colors} onPress={()=>{void Clipboard.setStringAsync(forwardMeta(actionMessage.body).text);setActionMessage(null);}}/>}
             {actionMessage.sender_id===ownerId&&<>
