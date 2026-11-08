@@ -1,0 +1,151 @@
+# PWA parity phase 10B. Protected corrective workflow: NEVER builds an APK.
+name: Connect Native - Phase 10B (password setup, JSON export, invite share; NO APK)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-pwa-parity-phase10b.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-phase10b
+  cancel-in-progress: false
+
+jobs:
+  parity-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout latest native project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fail closed if legacy APK build has reappeared
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY_GUARD'
+          from pathlib import Path
+          import re
+          file=Path('.github/workflows/android-apk.yml')
+          if not file.is_file():raise SystemExit('STOP: APK workflow status unknown')
+          source=file.read_text()
+          if re.search(r'^\s{2}push\s*:',source,re.M) or re.search(r'\bassemble(?:Debug|Release)\b',source):
+              raise SystemExit('STOP: old APK build is enabled')
+          for name in ['native/src/App.tsx','native/src/ConnectNativeInvites.tsx','native/src/ConnectNativeSettings.tsx','native/package-lock.json']:
+              if not Path(name).is_file():raise SystemExit('STOP: missing required file '+name)
+          PY_GUARD
+
+      - name: Apply guarded native source corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_PATCH'
+          import gzip,base64
+          payload=''.join('''
+          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
+          '''.split())
+          exec(compile(gzip.decompress(base64.b64decode(payload)).decode('utf-8'),'phase10b_patch.py','exec'))
+          PY_PATCH
+
+      - name: Prepare Node for Expo SDK 58
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Add Expo SDK-compatible sharing and validate TypeScript
+        shell: bash
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --save-exact expo-sharing@58.0.22 --no-audit --no-fund
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Commit source changes only if validation succeeds
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/src/App.tsx native/src/ConnectNativePasswordSetup.tsx native/src/ConnectNativeInvites.tsx native/src/ConnectNativeSettings.tsx native/package.json native/package-lock.json
+          if git diff --cached --quiet; then
+            echo 'Phase 10B already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(native): password setup callbacks, export JSON share and invitation sharing'
+          git push origin HEAD:main
+
+      - name: Report limitations (NOT a release approval)
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native - phase 10B applied (NO APK)'
+            echo '- Password setup accepts verified connect:// recovery/invite callbacks and Supabase password recovery auth events.'
+            echo '- HTTPS web-to-app links require server-side Android App Links/redirect settings and a real-device test.'
+            echo '- JSON export is a local file shared via Android chooser; no automatic upload.'
+            echo '- Invitation codes can be shared via the Android native share menu.'
+            echo '- TypeScript checked. No APK build. Device and end-to-end acceptance still pending.'
+            echo '- Re-run the 199-point audit after completing residual corrections.'
+          } >> "$GITHUB_STEP_SUMMARY"
