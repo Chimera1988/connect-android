@@ -27,6 +27,7 @@ const forwardMeta=(body:string):{from:string|null;text:string}=>{
   catch{return {from:null,text:body};}
 };
 const time=(value:string)=>new Date(value).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+const audioTime=(seconds:number)=>`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
 // CONNECT_NATIVE_PWA_PHASE4_CHAT
 const dayKey=(value:string)=>new Date(value).toDateString();
 const dayLabel=(value:string)=>{
@@ -74,6 +75,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [uploading,setUploading]=useState(false);
   const [albumProgress,setAlbumProgress]=useState('');
   const [uploadProgress,setUploadProgress]=useState('');
+  const [pendingFiles,setPendingFiles]=useState<LocalUpload[]>([]);
   // CONNECT_NATIVE_CHAT_PARITY_PHASE3: user-scoped local message hiding and receipts.
   const [peerRecording,setPeerRecording]=useState(false);
   const [peerTyping,setPeerTyping]=useState(false);
@@ -90,6 +92,15 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const seenIncoming=useRef<Record<string,string>>({});
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState=useAudioRecorderState(recorder);
+  // CONNECT_NATIVE_PWA_PHASE5_MEDIA: recording may be sent or cancelled; never auto-send on cancel.
+  const [recordSeconds,setRecordSeconds]=useState(0);
+  const recordingBegan=useRef(0);
+  const recordingTransition=useRef(false);
+  useEffect(()=>{
+    if(!recorderState.isRecording)return;
+    const timer=setInterval(()=>setRecordSeconds(recordingBegan.current?Math.floor((Date.now()-recordingBegan.current)/1000):0),250);
+    return()=>clearInterval(timer);
+  },[recorderState.isRecording]);
   const id=conversation.id;
   const localHiddenKey=`connect-native-chat-hidden-v1:${ownerId}:${id}`;
   useEffect(()=>{
@@ -280,8 +291,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     }catch(e){setNotice('Стикер не отправлен: '+(e instanceof Error?e.message:String(e)));}
     finally{setBusy(false);}
   }
-  async function sendAlbum(files:LocalUpload[]){
-    if(uploading||busy||files.length<2||files.length>20)return;
+  async function sendAlbum(files:LocalUpload[]):Promise<boolean>{
+    if(uploading||busy||files.length<2||files.length>20)return false;
     setUploading(true);setAlbumProgress('Подготавливаем альбом…');
     const created:string[]=[];
     try{
@@ -310,14 +321,44 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       if(result.error)throw result.error;
       setReply(null);
       await load();
+      return true;
     }catch(e){
       if(created.length){
         try{await db.storage.from('connect-attachments').remove(created);}catch{/* best effort */}
       }
       setNotice('Альбом: '+(e instanceof Error?e.message:String(e)));
+      return false;
     }finally{setUploading(false);setAlbumProgress('');}
   }
 
+  function queueAttachments(files:LocalUpload[]){
+    if(!files.length)return;
+    const invalid=files.find(f=>(f.size??new File(f.uri).size)>100*1024*1024);
+    if(invalid){setNotice('Файл '+invalid.name+' больше 100 МБ');return;}
+    setPendingFiles(prev=>{
+      if(prev.length+files.length>20){setNotice('Можно выбрать не более 20 файлов за раз');return prev;}
+      return [...prev,...files];
+    });
+  }
+  async function sendPending(){
+    if(!pendingFiles.length||uploading||busy)return;
+    const files=[...pendingFiles];
+    const media=files.filter(f=>f.mime.startsWith('image/')||f.mime.startsWith('video/'));
+    const documents=files.filter(f=>!f.mime.startsWith('image/')&&!f.mime.startsWith('video/'));
+    if(media.length&&documents.length){setNotice('Для альбома выбирайте фото и видео отдельно от документов');return;}
+    if(media.length>1){
+      if(await sendAlbum(media))setPendingFiles([]);
+      return;
+    }
+    for(let i=0;i<files.length;i++){
+      const f=files[i];
+      if(!await sendAttachment(f)){
+        setPendingFiles(files.slice(i));
+        return;
+      }
+    }
+    setPendingFiles([]);
+  }
   async function attachMedia(fromCamera=false){
     try{
       if(fromCamera){
@@ -332,46 +373,61 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             uri:a.uri,name:a.fileName||`${a.type||'media'}-${Date.now()}-${index}.${a.type==='video'?'mp4':'jpg'}`,
             mime:a.mimeType||(a.type==='video'?'video/mp4':'image/jpeg'),size:a.fileSize,
           }));
-          if(files.length===1)await sendAttachment(files[0]);
-          else if(files.length>1){
-            if(files.length>20){setNotice('В альбоме может быть максимум 20 файлов.');return;}
-            Alert.alert('Отправить альбом?',`${files.length} фото и видео будут отправлены одним сообщением.`,[
-              {text:'Отмена',style:'cancel'},
-              {text:'Отправить',onPress:()=>void sendAlbum(files)},
-            ]);
-          }
+          queueAttachments(files);
         }
       }
     }catch(e){setNotice('Камера/галерея: '+(e instanceof Error?e.message:String(e)));}
   }
   async function attachDocument(){
     try{
-      const pick=await DocumentPicker.getDocumentAsync({type:'*/*',multiple:false,copyToCacheDirectory:true});
-      if(!pick.canceled)for(const file of pick.assets){await sendAttachment({uri:file.uri,name:file.name,mime:file.mimeType||'application/octet-stream',size:file.size});}
+      const pick=await DocumentPicker.getDocumentAsync({type:'*/*',multiple:true,copyToCacheDirectory:true});
+      if(!pick.canceled)queueAttachments(pick.assets.map(file=>({uri:file.uri,name:file.name,mime:file.mimeType||'application/octet-stream',size:file.size})));
     }catch(e){setNotice('Файл: '+(e instanceof Error?e.message:String(e)));}
   }
   function showAttachmentMenu(){
     Alert.alert('Прикрепить','Выбери источник',[{text:'Фото/видео',onPress:()=>void attachMedia()},{text:'Камера',onPress:()=>void attachMedia(true)},{text:'Файл',onPress:()=>void attachDocument()}]);
   }
+  async function clearRecordingPresence(){
+    await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:null},{onConflict:'conversation_id,user_id'});
+  }
+  async function cancelRecord(){
+    if(!recorderState.isRecording||recordingTransition.current)return;
+    recordingTransition.current=true;
+    try{
+      await recorder.stop();
+      recordingBegan.current=0;setRecordSeconds(0);
+      await setAudioModeAsync({allowsRecording:false,playsInSilentMode:true});
+      await clearRecordingPresence();
+      setNotice('Запись отменена');
+    }catch(e){setNotice('Отмена записи: '+(e instanceof Error?e.message:String(e)));}
+    finally{recordingTransition.current=false;}
+  }
   async function toggleRecord(){
-    if(uploading)return;
+    if(uploading||recordingTransition.current)return;
+    recordingTransition.current=true;
     try{
       if(recorderState.isRecording){
         await recorder.stop();
         const uri=recorder.uri;
-        if(!uri)throw new Error('Запись не найдена');
-        await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:null},{onConflict:'conversation_id,user_id'});
-        await sendAttachment({uri,name:`connect-voice-${Date.now()}.m4a`,mime:'audio/mp4',size:new File(uri).size},'audio');
+        recordingBegan.current=0;setRecordSeconds(0);
+        // Release microphone audio mode immediately, before an upload that can take minutes.
         await setAudioModeAsync({allowsRecording:false,playsInSilentMode:true});
+        await clearRecordingPresence();
+        if(!uri)throw new Error('Запись не найдена');
+        const bytes=new File(uri).size;
+        if(bytes<1000)throw new Error('Записан пустой файл. Попробуйте ещё раз.');
+        await sendAttachment({uri,name:`connect-voice-${Date.now()}.m4a`,mime:'audio/mp4',size:bytes},'audio');
       }else{
         const permission=await AudioModule.requestRecordingPermissionsAsync();
         if(!permission.granted){setNotice('Нужен доступ к микрофону');return;}
         await setAudioModeAsync({allowsRecording:true,playsInSilentMode:true});
         await recorder.prepareToRecordAsync();
+        recordingBegan.current=Date.now();setRecordSeconds(0);
         recorder.record();
         await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:new Date(Date.now()+120000).toISOString()},{onConflict:'conversation_id,user_id'});
       }
     }catch(e){setNotice('Запись: '+(e instanceof Error?e.message:String(e)));}
+    finally{recordingTransition.current=false;}
   }
   async function forwardTo(profile:Profile){
     if(forwardBusy||!forwardItems.length)return;
@@ -506,13 +562,43 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={uploading||busy||recorderState.isRecording}/>
       <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение'} placeholderTextColor={mutedColor}
         value={draft} onChangeText={setDraft} style={{backgroundColor:glassColor(colors.bg,.30),color:textColor,borderRadius:18,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
-      {Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={busy} onPress={()=>void submit()}/>
+      {!recorderState.isRecording&&Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={busy} onPress={()=>void submit()}/>
       :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
         label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} onPress={()=>void toggleRecord()}/>}
     </View>
+    {pendingFiles.length>0&&<View style={{marginHorizontal:10,marginBottom:7,padding:10,borderRadius:15,backgroundColor:glassColor(colors.surface,.93),borderWidth:1,borderColor:colors.line}}>
+      <Text style={{color:colors.text,fontSize:13,fontWeight:'700',marginBottom:8}}>Выбрано файлов: {pendingFiles.length}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always">
+        {pendingFiles.map((file,index)=><View key={`${file.uri}-${index}`} style={{width:105,marginRight:10,gap:3}}>
+          {file.mime.startsWith('image/')?<Image source={{uri:file.uri}} resizeMode="cover" style={{width:102,height:68,borderRadius:8}}/>:
+            <View style={{width:102,height:68,backgroundColor:colors.elevated,borderRadius:8,alignItems:'center',justifyContent:'center'}}>
+              <Ionicons name={file.mime.startsWith('video/')?'videocam-outline':'document-outline'} size={30} color={colors.accent}/>
+            </View>}
+          <Text numberOfLines={2} style={{color:colors.text,fontSize:11}}>{file.name}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Убрать ${file.name}`} disabled={uploading}
+            onPress={()=>setPendingFiles(prev=>prev.filter((_,j)=>j!==index))}>
+            <Text style={{color:colors.danger,fontSize:12}}>Убрать</Text>
+          </Pressable>
+        </View>)}
+      </ScrollView>
+      <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:7}}>
+        <Btn name="close-circle-outline" label="Отменить выбор" colors={colors} disabled={uploading} onPress={()=>setPendingFiles([])}/>
+        <Pressable accessibilityRole="button" accessibilityLabel="Отправить выбранные вложения" disabled={uploading||busy}
+          onPress={()=>void sendPending()} style={{padding:10,borderRadius:12,backgroundColor:colors.accent,opacity:uploading?0.5:1}}>
+          <Text style={{color:colors.bg,fontSize:13,fontWeight:'800'}}>Отправить выбранное</Text>
+        </Pressable>
+      </View>
+    </View>}
     {uploadProgress!==''&&<Text style={{color:colors.accent,textAlign:'center',padding:5}}>{uploadProgress}</Text>}
     {albumProgress!==''&&<Text style={{color:colors.accent,textAlign:'center',padding:5}}>{albumProgress}</Text>}
-    {recorderState.isRecording&&<Text style={{color:colors.danger,textAlign:'center',padding:5}}>● Идёт запись — нажми Стоп для отправки</Text>}
+    {recorderState.isRecording&&<View style={{paddingHorizontal:14,paddingVertical:9,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:10}}>
+      <Text style={{color:colors.danger,fontWeight:'700',fontSize:13}}>● Запись {audioTime(recordSeconds)}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Отменить голосовое сообщение" onPress={()=>void cancelRecord()}
+        style={{padding:8,borderRadius:10,backgroundColor:colors.elevated}}>
+        <Text style={{color:colors.danger,fontWeight:'700',fontSize:13}}>Отменить</Text>
+      </Pressable>
+      <Text style={{color:colors.muted,fontSize:12}}>Стоп — отправить</Text>
+    </View>}
     {Boolean(notice)&&<Pressable onPress={()=>setNotice('')} style={{padding:10,backgroundColor:colors.elevated}}><Text style={{color:colors.danger}}>{notice} ×</Text></Pressable>}
     <ConnectNativeVideoNote visible={videoNoteOpen} colors={colors} onClose={()=>setVideoNoteOpen(false)}
       onSend={file=>sendAttachment(file,'video')}/>

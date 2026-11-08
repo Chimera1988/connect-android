@@ -20,13 +20,38 @@ function IconButton({name, onPress, colors, label, disabled}:{name:keyof typeof 
   return <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={label}
     style={{padding:8,opacity:disabled ? 0.4 : 1}}><Ionicons name={name} size={22} color={colors.accent}/></Pressable>;
 }
+// CONNECT_NATIVE_PWA_PHASE5_MEDIA: seekable audio messages with 1x/1.5x/2x playback.
+const audioClock=(value:number)=>{
+  const n=Math.max(0,Math.floor(Number.isFinite(value)?value:0));
+  return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;
+};
 function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
-  const player = useAudioPlayer(uri,{updateInterval:250});
-  const state = useAudioPlayerStatus(player);
-  return <View style={{flexDirection:'row',alignItems:'center',gap:10,flex:1}}>
-    <IconButton name={state.playing?'pause-circle':'play-circle'} label={state.playing?'Пауза':'Воспроизвести'} colors={colors}
-      onPress={()=>state.playing?player.pause():player.play()}/>
-    <Text style={{color:colors.muted,fontSize:12}}>{Math.floor(state.currentTime||0)} / {Math.floor(state.duration||0)} с</Text>
+  const player=useAudioPlayer(uri,{updateInterval:250});
+  const state=useAudioPlayerStatus(player);
+  const [speed,setSpeed]=useState(1);
+  const [barWidth,setBarWidth]=useState(1);
+  const duration=Math.max(0,state.duration||0);
+  const position=Math.max(0,Math.min(duration,state.currentTime||0));
+  const fraction=duration>0?position/duration:0;
+  return <View style={{width:260,maxWidth:'100%',gap:4}}>
+    <View style={{flexDirection:'row',alignItems:'center',gap:5}}>
+      <IconButton name={state.playing?'pause-circle':'play-circle'} label={state.playing?'Пауза':'Воспроизвести'} colors={colors}
+        onPress={()=>state.playing?player.pause():player.play()}/>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Перемотка аудио: ${audioClock(position)} из ${audioClock(duration)}`}
+        onLayout={event=>setBarWidth(Math.max(1,event.nativeEvent.layout.width))}
+        onPress={event=>{if(duration>0){const x=event.nativeEvent.locationX;void player.seekTo(Math.max(0,Math.min(duration,duration*x/barWidth)));}}}
+        style={{height:31,flex:1,justifyContent:'center',paddingVertical:13}}>
+        <View pointerEvents="none" style={{height:5,backgroundColor:colors.line,borderRadius:4,overflow:'hidden'}}>
+          <View style={{height:5,width:Math.round(fraction*barWidth),backgroundColor:colors.accent,borderRadius:4}}/>
+        </View>
+      </Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Скорость воспроизведения ${speed}x`}
+        onPress={()=>{const next=speed===1?1.5:speed===1.5?2:1;player.setPlaybackRate(next);setSpeed(next);}}
+        style={{paddingHorizontal:7,paddingVertical:5,borderRadius:8,backgroundColor:colors.elevated}}>
+        <Text style={{color:colors.accent,fontWeight:'700',fontSize:12}}>{speed}×</Text>
+      </Pressable>
+    </View>
+    <Text style={{color:colors.muted,fontSize:11,marginLeft:7}}>{audioClock(position)} / {audioClock(duration)}</Text>
   </View>;
 }
 function VideoClip({uri}:{uri:string}) {
@@ -36,16 +61,24 @@ function VideoClip({uri}:{uri:string}) {
 
 /** Circular playable video note, matching the PWA's filename contract. */
 function VideoNoteBubble({uri,colors}:{uri:string;colors:Palette}) {
-  const player=useVideoPlayer(uri,instance=>{instance.loop=false;});
+  const player=useVideoPlayer(uri,instance=>{instance.loop=true;});
   const [playing,setPlaying]=useState(false);
-  return <Pressable accessibilityRole="button" accessibilityLabel={playing?'Пауза видеокружка':'Воспроизвести видеокружок'}
-    onPress={()=>{if(playing)player.pause();else player.play();setPlaying(!playing);}}
-    style={{width:208,height:208,borderRadius:104,overflow:'hidden',backgroundColor:'#081421',borderWidth:2,borderColor:colors.accent}}>
-    <VideoView player={player} nativeControls={false} contentFit="cover" surfaceType="textureView" style={{width:'100%',height:'100%'}} />
-    {!playing&&<View pointerEvents="none" style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center',backgroundColor:'#06101b44'}}>
-      <Ionicons name="play-circle" size={52} color="#fff"/>
-    </View>}
-  </Pressable>;
+  const [muted,setMuted]=useState(false);
+  return <View style={{width:208,height:220}}>
+    <Pressable accessibilityRole="button" accessibilityLabel={playing?'Пауза видеокружка':'Воспроизвести видеокружок'}
+      onPress={()=>{if(playing)player.pause();else player.play();setPlaying(!playing);}}
+      style={{width:208,height:208,borderRadius:104,overflow:'hidden',backgroundColor:'#081421',borderWidth:2,borderColor:colors.accent}}>
+      <VideoView player={player} nativeControls={false} contentFit="cover" surfaceType="textureView" style={{width:'100%',height:'100%'}} />
+      {!playing&&<View pointerEvents="none" style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center',backgroundColor:'#06101b44'}}>
+        <Ionicons name="play-circle" size={52} color="#fff"/>
+      </View>}
+    </Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={muted?'Включить звук видеокружка':'Выключить звук видеокружка'}
+      onPress={()=>{const next=!muted;player.muted=next;setMuted(next);}}
+      style={{position:'absolute',right:2,bottom:0,borderRadius:17,padding:8,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.line}}>
+      <Ionicons name={muted?'volume-mute':'volume-high'} size={19} color={colors.accent}/>
+    </Pressable>
+  </View>;
 }
 
 export function ConnectNativeMediaViewer({url,kind,title,onClose,colors,onPrevious,onNext,count,index}:{
