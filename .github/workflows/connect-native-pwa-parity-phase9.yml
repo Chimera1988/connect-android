@@ -1,0 +1,266 @@
+# Connect Native phase 9/10: message read sync, push preferences and offline mini-game.
+# The only run trigger after upload is THIS YAML; no Gradle, APK or emulator.
+name: Connect Native - PWA parity phase 9 (notifications, sync and mini-game)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-pwa-parity-phase9.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-pwa-parity-phase9
+  cancel-in-progress: false
+
+jobs:
+  integrate-phase9:
+    name: Read state and push parity, Sonic runner; TypeScript only (NO APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Retired APK gate and prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY_GATE'
+          from pathlib import Path
+          legacy=Path('.github/workflows/android-apk.yml')
+          if not legacy.is_file(): raise SystemExit('STOP: missing release gate')
+          text=legacy.read_text(encoding='utf-8')
+          if '  push:' in text or 'assembleDebug' in text or 'assembleRelease' in text or 'gradle --no-daemon' in text:
+              raise SystemExit('STOP: legacy automatic APK build still active')
+          for needed in ['native/src/ConnectNativeVoice.tsx','native/src/ConnectNativeMissedCalls.ts','native/src/ConnectNativeMusic.tsx','native/src/ConnectNativePush.ts','native/src/ConnectNativeSettings.tsx','native/src/ConnectNativeSoundSettings.tsx','native/src/ConnectNativeInbox.ts']:
+              if not Path(needed).is_file():raise SystemExit('STOP: missing prior phase source '+needed)
+          print('Phase 8 prerequisites and NO-APK gate verified.')
+          PY_GATE
+
+      - name: Install guarded PWA phase 9 sources (no APK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_PHASE9'
+          PAYLOADS = {
+              'native/src/ConnectNativeSonicRunner.tsx': ('8dc2294ea1c06a6f685101f6eee3e7f3be6468adbd52ee6f827e5bd8437f869c',
+                'H4sIAAAAAAAC/706aZPbRnbf9SsgShbIYZODgyABcjCKrkiq9aGacay4plQrEGgMYYEEFwDnMM0qH7V2uby1rt1UsqlUJc7+gKTs'
+                'tb1ry7H8F8i/4F+Qn5D3uhsXyVlbSiV2adjH69fv7tevsbuzI73m+2EwoUSaOGlwQqXDN+5K0yhOpciXbkWTCXVT6cHDG3Ii1Zb/'
+                'uHpv+d3yGwl+nq4+WH20/H75rCbFM4CK25ekHenQGVPohzQhkuO6NKQxYI0mRIqGSeq4IZXS8ynOxsHkWErciP06E08KI9cJpSFN'
+                'UjZMGb4bYSh5sXOKQEHCYQbSJJIe0uEbAT0lUjBJaTyhqeRyWmEzKYqlCT2VpjQeB0kCIwki270UjBljB9RxUzKfJfSWE4ZDx31C'
+                'oH3H92E5tg6ojz+HqZPSheTH0ViSY1wjDzIU8xvTKZsnr0SeE5IHMU0SZxhScujGURgy2l6nZynBVgVJi8u5wLUjOYl0SN1ZDFsC'
+                '4wKYnk2jVsKGWwmOFysOT47J/Db1E3InDINpQsld8jLo0Invxo4X0ElKDpAXQDfdtncrOTkusN2PJgEILxGAf4Mb757A+ihusYnd'
+                'DKJYg0qU5g+ckKaFjNq76YiOkc5LbP7OhI7PfxFMPFseR2k0nB3L78hu7AzH1EmhOZy9/fYwGg9pDEuKFfY88PqTGY4PnsDqfo5n'
+                'cJaNn2aNUdZwwjRIZx4V/YXAeACWU0aYYzjPGqnzhE76wygKqTPJloFWqY0y886BUDRwwAOt6KQg9i7Yuj2noQMKyPEz0806aNvJ'
+                'LTAHEGYJZEqLzluz8RQ8MKFpeeQNCpYepDmNE7Ck14QDZWMUpBLQhEvn6BHfrI/8QgcX3PcKWaD2UumhrXcVcs/WNYXcPXjt7169'
+                'bd9rGRZ58PKNN+8c/PLvbaOXgd68c/j6L39x501bFn7VStAIWtzXW+imrRNVzsB9sP+RXW/0mVD267lYFMIlopA1YcAEk4PaM0hJ'
+                'CAqp8K+QCutqWzdIxvjRI44TG4JfddEYXPJnEx4GRjQ4HqWv+XVccc4FRcCjoomXCNE05jFNZ/FEYiBtNDfbtsuWeZ3PZObVfMVJ'
+                'R+0kmNQFoh2jrTU5TOA1drS20VcGi4KIw2kcpPRBcEbD+vyMnJNTMiJuFEYxSAb8x9bairHozzcNc9PG2bJ+kiLbA7b6eqbixvyS'
+                'JAle9tD5pTN7zmiNo9nEq5/tMPjGQjqvjJ/n46eBl44qc6f5HJdkZXKUT/pBGNpzRttid39wqcT8AbMWLoL6HDVL0sB9AuxiO/dA'
+                'GKrwwW0KTM1GMGlPanWl65Ii9aU6o8APoyiu47IdVWu8pIHYB/myqV3PZEkyWZJMliSTJSnLkjyh56LZsPf3SiqTYMaew58FyvOM'
+                'SQ/ap/YcgjpIa7SQGKIy/xkhN235itrpmtSRyW1oK2ZHd3oyuQ9tQxvqvi+TQ2j7iuP1dJk8xLblG9SUyQG0qaZR3ZUHJcXeldLY'
+                'mSR+FI/t+WPWDuEQql+dZy68kK7OuWs3UXYto7doPF7sAw5Jmk/rKrGIqpAOuU1kR24sYEgnXaJqMHSTyEM+pBBVxzEdx1w+1iV6'
+                'DubBUI4RgAEpw0g5qGpAt0cMBPXFkElMGDBx6JgPdYiqEhi3cGxUwggUdpGALjkkciDWc4QWeUjkt8RQD7oaQIGULdM0hjKRn5QJ'
+                'M9kGbSQGQBTN0SmAhGI17NIDljScM1VT02BuzOdMoqk5+5MSyg7RcEMDqYgEni6OGXzsVyXYXhPsl2gdgGcyizPZtMS4wceTMn6+'
+                'poeEa+SAyKlYpPFFZj4x21zF2SXMhiy0LfmkutraADgtYTE4li5aQxnmTCDRW4K2tflzPm8xlWvkPpHf5lj3du9WgwGLv1ksYBET'
+                'gsGYQjAoxecBDm0JBuc2t+oWD7WjVjW4M0yNwvce/K+DAIuhVe+H4K7yCMBbImKe8l4WI0e8ux4VM8rGkELYlSg2pjs9CGIVP+cO'
+                'mwdyzvRZ02DbC/9WqzF77JyBqgkHPW1ZpbCtC3JqVzRT7+o9w6jtih0ujihiTwwo50UMAVupHpVZZnd9LwMAkAcQaMAe0STkK8Oe'
+                'amloKiqaygMIOAaPQRDifN3qdGFK41MGQbdHn/T9rtlTYUbPbDRDrLNog6td07OoCzAdvhr2A7wa9+mhBuET5oxsUxaVcJnW0z0D'
+                'YqzcXUetbgHq8fUdDEoctaU61LVgyhTbalvmrAL33u5+vyqzPAdeExqjH6hAqVFLp7pXSM0gPcY4iqYHaVwhtC4TGZvR/Z7vbBOa'
+                'ugnTyVaDorjIepqlu4XIVHVzakNkgFMDMPmKZ2ldvSQwtbs5JQSmgJYx/iErhtMxq+LieI1NGFXhy0HcZhPdSITvbqfnW0icKkSF'
+                'h5fZ2gqhVdWyLn4Twz6STM1hTzfKNmsx0wTD8MBkzUL6oLF8StPcjrJN/MLgkR1Ppxb1S0bb5UEd6XR7cOI7hQbgzOVsGAy/5Xtd'
+                'v7NNC4C8KQBxj6FFe/6wpAs8TjtsCwO8yvQKXVjcdtEy9I7udahQBkzBMaiIVVTX3UIHhQB5EyP9toB/6ILZ1+fHcCUgY7hQQaTH'
+                'NrsjDHCgj9escpSP2CXAriNYW1whdliHXRZ22j2j8VJHKaKpO6LuExrbR4/wEs0u9m3291XADPcgAITQVg9ZfSC0Wxrm0Huaij/N'
+                'ZiObi6NTWxnA370O/oWZOeNMoG9PZ8moXjoSHl/FyL7oX50D9OIxOx5gYEdTWpyFcpyGkzWCM0LJwzU2s9CMbX5U1JEkgISj4Dqo'
+                '0OlBoJb7oHXa1TRPhkOEnW+LgvcwmnmHo8BfF5iqN16Ca1UhpRFssBXQAkBLKZ88hyfHgsyaqigv1TJCRe8koKc3I+D2sQL5+NX5'
+                'Qzwe7qEEpnADpPEJvQGactMDrPrYtbNXAu9N+CeNKU1r4sjBwsX+XrVeIQWeXUuenNekM9Wu4U7n4vdME31N0AD5eRpNM1OpKTUp'
+                'gf4tloXXrkDY7vgOHG9rUO1urwroGL7iuxuAahUKHM7ydITarRIMA4yP6jmtML0Xmn5YKPpedgbP4rB+BVhtZGfw/AizREzfILIZ'
+                '3Udwkk/r55UUhCcgSn792MCu5Se8z/7TNMCeJXdHLVAygZMF/uqmwjc4gw3ucuxwxl+UBJy1cttZSEopC9gTlSfJBcJME65BJYMH'
+                'QmMYtiBdiWHY6uTUma7rmVbG+RoaFS4rFTxdjqdncjzdXo6n1xl2e0UWA5GnxGzPQGbhr24oxNCM52O4cKs1jjMl6zwLM7RcEZZW'
+                'aELVBdGFRjqoEdcvcZ2h6lgMld7LUXVLmaSmclSquoaLmltwoXQAl2YWccYqkWUJXMqapXjdLVJcM2ihj85Wu27x2ULFkF5qTm7c'
+                'IoT+Fbyt7ja8JUI1c2h0vJzMrTjMbTiKvNfUac/INcCOoTYrHrUBIKVxPbb3L8dtVgtsMHOJC3OJ24F3scXEPEeO25AlS6wmAoPt'
+                'rsErRc4wqeclo0rw7TYaO220JfUit1K4NwhvEk5QyGUSTShGqzh6QpFFanSVTjbwkAujs9j9Gah7wk8vwAxGYurDNcz6YtMEWxpT'
+                'SUstImBnmzbA7LqOuc17uYR4gY+pgYIaShdHrhDKFEJ5sZiCagKsxJalu9jdMOWsQtJED912i9K1bbSqpubqaunGVK5pSVhjETsX'
+                'RUwkyH2yQRDnEPMevAPw2vK1a891dlxRLE3RTVWt8dxrbxfOa5Z0YdE+TiWP+s4sTKU8BxMvOK+yuv8hlnA5/fX5SZAE+GARTW6F'
+                'UUL5XTiBHE1MZCXxgQDo1+FafBIFHi9DJv2s+l/K35Bjm7+g7GGWt19nheF6o1G+AHs4n4FhCrhfF+IogWGFuQCrK6Wp0EnSezNv'
+                '29QRYiegA0T7yM5ecS7c5ciPMTuFBX+LjdKKi8g/YvVsXHGIjWIF0EGOWEzBSazDJ2uTyBLO3YTfylSB3Q8mQTKyS09TdRQ7z0YD'
+                'vy6E13ZncQxZyGU0JPE40eAp3ICBrsHZ4uFCCKbOuw0OK1RnM3MVC/hMxmT9uM24bgwyzmCkWs8XuIBEAbsvFJhhFBm1JK2N2wJ+'
+                'IART7CXg0eTKz2NtALyf0vGN5Hzi1rN3CnLIKjf56kbbdVJ3xKW3EMjQZRbk6FFJ4EnqxOkF8i4LxBaWMNiQbCb/Qri5Rga5AJWS'
+                '6KAtLDhHwlLwNcpYaHkhQ5gzpoBWYRGLn1AzU1oRvvbhmnTtGh/JHmL2baVRHbFbhpmRzfbjtOcPqVVyL4ugUjFSvHk5IcQlO41n'
+                'dPA8Mmd+XJK48OvMjwu/vUgDl7aa1vE202q00xGd1E8ydjhDjPAKO5mIT5xwJkp8WJNTSKna9yqrO9ZPGu+8owB1677AluaewHqZ'
+                '6W41aL49G+KC9J0woRfKayH0JZTxYhqDi95JEM0S+zYEr/YkOq1X4giexbGNPooP88BCCW0GA4vKq/mglwqZQaJUh4lWtlFjF+59'
+                'CmkreqcxyHcHiKrYt1n2NlexS65y7Vr2jp/Nsg6COC57pc/DFphmdpY3bS8dHPOSREGzbhh46WjmYDudtpFHMVxedp+mrXY1ZYch'
+                'KlyvwKaQ8nizuhiWlRCvuS8Qr2y474b3KmXCym+sLWSuirs8vQeBoBBJrnT8pqN4pz96ZB/lhWFSlDtJ+WH10WADDauPMlxHJZ/h'
+                'j47OxIvG9cYOm26HdHKcjhpbcGQPtfa2t9x6rpx9FYRUwbzfNq73jL5qNvpKGe1xno+yKhB+S8BFct9rNgnuQs76D5sdhZz2Nwu8'
+                'Hb2vW2TU30ZNp9fvaCQjeNEo7wqCX6NO0xri0N1KCNJgdMl5X1yIwGcI/7SBxYQq9qpOi1jVtkx8MRN3l1zm7a7ZKsy6rShluy4q'
+                'kVhN40qg+PFQLrgGbZ+1bOEwO2XzKlbEfAXjrxFfBJ+jtAutiAscXBRgmyZtn+63zIrbMZz28cZ9D3bZb2lgBvnFr1glEk3qp3Zx'
+                'b8BvGDAfz0c6BkmjafYy1TGbZT8kwyhNo7GYrUy1OoOfFtqml/kRvVnGWXoDI7l6GgTAXgeqcugWbY/WTIvxweRlXLuGXO4J2bWg'
+                'z+ne52gQAHjcK7AZjTnPUiFyD+FgeTJYbLGFvx53Gxcofr5GJmjIRvJa5rVr0NmzGeFN1oOcBAhrqR3W2bM52U2rMRfq5FnFeqLa'
+                'bG6lV+SN5Ze5wuJVjOpVNDuaUQ3BeGKtpXX7qgrBcj3Xw4PruRLrjMjsN09y5u12+7j4HAZ7mfXkn8awQdZ+lGfBBA/StfwBwoAT'
+                '50c2O8Qb1WyBcK2XU9SpM6GhPcfs9Jh9FcLKpn1+P2wns9h3XAp+EHs0rkyxDw75OCsn9FXRO3C8YJb0VYNMHc8DsvvgdX5IzwAC'
+                'MpzjCaZnSV92KZIqY9GfkbIo17DZJ3mSINvO7rMLyZkEY/Y14utwhti1JAw8WuOF60nKJg7Tc1hR82dheOjGlE5qUjQ5oL+aQTrG'
+                'LsH2XNyGRcVmr/jcD64SuHg+F+ReIJXh8QK/GQHyJylczlMnwGqCWJoznfMPLtjX8x53QRw4dqZ9VVsUhaMNEm4HMf8csi/H0am8'
+                'TXzkrVmSBv75LU5OX06moLDWkKanwLtcYAf8+DFjjt8tc5TiZ44+oDgM3qZ9zWDthyw09WVTURDP1i9Hpf/+7Lf/ubeLmEsb5Z9S'
+                'sg9IE9BdEELGchChZoYzEABopTL1sjMEM6wt/7D8HJC/u/pk9f7qN9Lym+WX0PkAVchwFrrL+cjkba2Zn3aR9mhITyBB9IClvfy7'
+                'yQlWPWouoq5JCQjBnmta9cOgpI0UT9IFviTkHObK20Xt5b2LRT2ewd6FrJkBLD8DTp+CXL9efrf6zfL71SfLb6XlH5fPQMQwIS1/'
+                'WL27fLZ6Hzp/krC5/IJ1n0F3+RX8PMUOTHwuLf9j+SX8/18gx++Xn1c189MGhiZpVmymvITFCpDaz7YjdZsdzVm4XAjSnkNSKkrq'
+                '38Duni6/yVZXpP5/Qy6LvAvpxz98/IIk/wsoCNS6+jDXx/8H2XgvfVEh/zsY4lNmUF9tpXitV7h77qaYKC2e2/s/Q89f/hkNGn0f'
+                'gw1aMaj8c+g8y+LBJ7WcF54+9fFr2PJZpG07sbj7roUJi2AdDbKF0748CjwPYuZG4JCv9Lqe4ZvVaMqexnm5dM5KkAtWsrNZebio'
+                'rIt68eXKlZUrfBqxL9/vnABZSVGyF3EtSgLumc4wiUJQk0wwj+rL1ksyz2J5EzKovqx3oZUfPZ2No3iTJcXS9I7heXJFVPIVqvoG'
+                'fhVWPdq3nTwYLLplkWyPe/j5B+Bbt9GSzVlor1lRnZU1r8vLf0ZVY0B7hqYIMfEjMEowhstyX17+QxH+wFL+AubxBcx+ufrgurxY'
+                'P40uoop2OaOlUEwwqbnHiVR7BP3sBjKe87xJ6OPlH1cfrX63er8vXRWRrS3BUfnx6ndI+ldA+AcQv6H5Ax5qeHJefwwcfLb8Gtj7'
+                'GiM7mPyXGNmBi2+ZvQNDX0MEh2Ng9WuJ+8A3MAZhD/rV8A97fYbbSMs/AfR7TFjfwNpvxJnB5cIwwyzDs/rgMj9bvgB87/JNnxYh'
+                'qr0pQeHuxUcjm6ffzzpZrIr/vGiSUDy/CHcCYykFDjSPf+Uxg+cQuXXIiyI+beBgHzOzIuhiPQssZXRVt+pclGKISLPFaRbrgX3D'
+                'Ldz1THN/C8M/fgjWVWF6zX1+/PC7zAqZjv8CYvnxn/4slUWTK3qLQn+ufi7Oy15YeFl+9tzi622IDx0Yz7PfM2cDT0S2V++tPr2Y'
+                '8efM4zZDxIXxxOS5wOfgh+BzSIU4z9CP4d+XeMD9wBzxUyJBUEEH/2L1iZTHCKY18PjfF66OAeI74O59mPzt6uMtESILBD8A95C4'
+                'F0HmK4khAcDlt4C0dOazidWvmeF8v/oU0XNyYZmEaKCPKJGJ94H2r9vliLG3W1yo+Ddl7DLHnjj/B5MlRcqtNgAA'
+              ),
+              'native/src/ConnectNativeReadSync.ts': ('b8abd696cc3ea05086b55cf4b214368c165de71495f0d02e56d1a62b557d4da4',
+                'H4sIAAAAAAAC/41WXW+jRhR996+YSJWAFOO03ZVaW2RrJbtSpCZabbTqQ5RaY7iY0eLBOzPYsQz/vXc+wODE2/oJD/eee+bcLyaX'
+                'l+QLJCVPWAFkzlNRspSsQUq6AsJLxTKWUMVKLsmOqZzQSuWlYArPtkAkiC0IIoCmROIZRCOCgBVal7zYk6wUROVgvIArDQUpqdDN'
+                'k2TLJFsWr6KgofaDlSgrnkJqIOdb5CVJyuSaScn4itAChJImAocdknCk5QxDIyO8E4dEEaZIDrSQxDlqtE8395YzmgHbaBhRrsnn'
+                'v+eTEomKTogUtiwBqSlMRmy9KYUiB6T/McsQu7FuHkIlypt1BvPN5lGLMXg/5kayo5m5NoCz+dP9nbxtfEiXLVo0WdLkG/C0/9bq'
+                'cpNT9bmSeShgDesliC94ybk6et5YUR4MurZEjBEqJRX5+vXuNp7883Q1/oOOs+fD7824e373P55/+bX5acJmI3gxlLKKJzqhOtmD'
+                'qJrS454nfrnjIO7SqVQC0xIcRoR0yvp+EF/rE0JY5l8400CAqgSfmfMCFNYAAsZKVBBmoJIcceIMcw3WxF5MtOUdU6njdsgW22DU'
+                'detf1232oqQSAovW/LmIYw/zonMyYEFIF1jTaA+V2LcxWhq2XmO6o6zLfbQCdcvkpqB7SB/6beAHs86/Y3kSuUVOMOsIbPCjjBUK'
+                'hP8SX79E/cb6EKVU0Q/RN8bTGC/jusULOjBCojXdaE//gMDY19J4YooeTYr8txGHtnXteUHYA0WWWNLY9nP1HzitmYFoggGz47V0'
+                'nUYKpEKYYejgRDOjS1QAX6n8jHQ4U+K5EHQf6Q7xcZCQR1C+9XRqvA4TnMIIkFWhXG7TpQXz+m4LPfMWZkQOJZdQ6HofGrM0LKhU'
+                'Cz2jFlR5QQTffc9AsNQL23aIGH/l6IV4p7eKp64tywiEKMUZPXRAGWsZ7vHyvvPQ+anrp+fASCLKXXz95FKJf6ITBkHYe9e/hsnr'
+                'c189HN5+rztImdliDg49iY7MYkNPN41v7E8TowPMep767tqlri8eKj0OIyY/Mc4U+Le6wTdUSPC1BeYUsRTjxxbWv8mE3Lt1o1eG'
+                'xGkwpoootoYpSUvdxoRKWa0BtxyT7hY7Kg3d6ISK43ws8x+xOjE+QxBhT29yHf8I5TDoTFuww2XxprShgZ4NnDG2nUqu7Icr6O0M'
+                '9RGa0elTgwMhyX0I9PyRZQHRjgoscbc/Bh8K3f42s52Zs6kXQjBr0TLGaVHsDyebwb5uLBP9VXFcEO3QdbOB48TZ0iKWoO7cs91L'
+                'r7ya8Lf3V1dXA3fT63G3TGiaftxi/fzFpAJsX2zcnHIcwOEWEVHLbdxbMa8jDLC1K4cixlHjHs0c0CK5L4dxIkopx/b7ZWz6Zuz9'
+                '3A4Op1BUoribUqoVNvrC8pFeeABNdOpdeqFMcljTqbeplgVLvFBR/GCbnp1soR3T03ZUxfA96qI24RnxOjqyWspEsGWXCDukjJtd'
+                '9TaFSQFUdClp8xTM7BcolnO51RAmEkpkD26cUE4wjKtjNOGTo/eMMZvRv4Epu8QQCwAA'
+              ),
+              'native/src/ConnectNativeInbox.ts': ('737474727d9756884414ac398c205fe2d8b3d7ac95afb9c1055f305d5691ec52',
+                'H4sIAAAAAAAC/6VX227bOBB991ewQFFJiaK4XSwWsMIA3SIoAjRtEbcvaxiOLNExt7LokpRTw9a/7/AmUcoF2N0nyyRn5syZC4fn'
+                'JyfoA6sqkktEqyX7hUS92WScEoEeqFwjTrJS0g1B9bbIJKxmVYEytGVlSat7JLIVkXtUEZmM0AmaEr4jHOWsgh+RScqqRS0IXwgJ'
+                'wogKJNcE5ZwJcVaQHc2JMgAKa7lmnMq90nI+opst4xIdQPRqtQJsMXzdkA1Tv1OlqkErzjYoAOlcBmkr8X67fbx/VgGSHfGOFcv4'
+                '5mo6ff/xavHhy6fvN5+nsdxviaKiBW5WbogQ2X2rLzlfZvkPUhWgbER+aW363LUib6q52+NDmQk5saLHqi7LtK6Uo5Oq3iwJb9IR'
+                'UCQk+nj75fvXxfT6ryv82+9u0SKbLr5e3S70CfzHeJw6c6u6yhU+BFzY0H3W/mkIIXuoCL8uJkJyCFDsh0JMfP9m82hyS3LGiwt7'
+                '1vfh8jBCyOCZtSkRCyKn7s8cu2BcvKDmMjw0Udrq+kH2AttghmGEL3v4kk22DXNYTGgRJaKE/AjH8bu34yj5m9EqDOIgimc9kblW'
+                '3iaK1qmgI0RX4StLxvH4ShmODj5+DYwTWfMqbbRESSTKSmASS16TGDI7X4NDeJWVgsQ/a1KTwvxJ2/MFWTIICAEqlaZvkAsXKiHY'
+                'CoGxb1A5rJaXOgewTgQtacighcAKVyK2JZXau2RFS0l4+CdjJcmqyD9+z1m9FTaws/lsjmdzs79iPFRgKB6n9ALUJiWp7uU6pae4'
+                'S7HIKEi2tViH6pAhmMb01DvUM8nJihOxxpnYV3lHrSbX0RMdLDOKtD6hgMxxqDftouR7p8cZWmZwjgicPWRUoq9Qa1SQJCvL0IJW'
+                'maFRGBo6JJ2O2cYUnIhVqUF+PlY284QQKpaJquowcILAvyClSqNBd4gSlX29tkaLINZQop5OhBIoBYhgkAMKSYpFJoP4kIkcmgYQ'
+                'MdH500RJSTe0tePVehQ/jfGZntpBHsKLVRNaKCoUhEcoyc8w0GqUI7ZOXnTTxzWPUu8fJINjMCGcMx7JNWcPqL84kNAx6h33Vvyz'
+                'JqPQwWmbdMbgRsqOR2hkKBOuU8/mfQK11ok11xM4DBy1lZX6vNk1Xb/NbN50wJrI40D1Gt05Ipv/g/Qu1dUpX2q3+NAMhRQE1UDE'
+                'QM789CVUOUMXuMpyVdpQHcbijBZzexspD2J7C42btPHQq/bhlSGC3mXrMfKrrDum72x3KtHURjakic9e1Low03sDwuf4kUT6pD0b'
+                '8M6ky4AePscbqaDBYEuAPfnIdNoTVPHTYhGck7TqetVgX4M9HlutbY1fdtveatStYivjK25Gj79eCMa/JeQ/0tE62/lZQIsxHnVr'
+                'Ahqabh8YY9c/nmKv6w4+XWGXGs9hOh6DILIMmsQ9PU2fYKx3qRs/2+RuckVPSCJV7ALu1OQh49Djnpl5J0FMou7yohVcGt5d1Z8I'
+                'euVv7sA3b0wXOPSGhR2jhbtKw069+W38+1ZAnIu6JHhw15rmcjy68TbJa86BGf3nFcYBTLlqwj0e3TwCi6riB/3I7eJuNjETU7uh'
+                'Z5Qh4Pjdu7Gl1MIdnPBcUI8FrvRfVzDI7LLSGAAnngSPO/DRI7Nv347H48FAArEiuFWVFcXVDnR9okKSSl+766y6J0EMlmtiDJtP'
+                'z5CjWRmx6s/P0a176sArgbMdvHVUMlX5PkVbwikraG4yAAlJyxI9MP5DQHT0m0bol08gnLJtvYTpSucyKhjoqhiUIkzwgsDzSWbL'
+                'EqqXa9EHshQMHhVSvY8KKnKTm6RIPMeVWxUpMcwD9lNf1Oqgfd6c6Vw+U3VyFpy6ihy5oQSSHozLe2BwYTgSMJcQRd4kOAlixckm'
+                'mwQGeBBriJNnx47YDKoTN0Ng8jNprTaxY7i1L+qlyDldkrAj/EsFvOVsSwpkt7eaL2DbtjX0maj3ZCuMJENqZa8mfmC7GzE8quza'
+                'B0OTwN4EaabJmELn+gVZ6ZF59ySZG3F/9vrgvIJPLdnc/W9a24nT8Xg36H6YVkn4+qDxdo+fJrp7mVtLrql6v4mYd43pRzk8LXhb'
+                'nrpg1UtIVRZc5htIfQgS1M2wl2g51zbcZttqdfUCo0aDZT+0/LanBsFph5Z8DVifU9GVqW4/TTxTzyY3tZph1I6JbStPR83oH3ne'
+                'tb7eEAAA'
+              ),
+              'phase9_patch.py': ('38de49e2ae1cc4ac5ae66f1d8a18462739ee6e188230743e6aa88b6f873221c0',
+                'H4sIAAAAAAAC/7VZ227byBm+11NMlMJDIhSN9GpXNm0YjrurpmsbUZpFkQTeETmSpqFm2JmRbUERsG2B9mJ72wfoG7Q3RZBF01eQ'
+                '36j/HEhTJ8vObnWj4Rz+4/cfhuxLMUIF0cOc9RAbFUJqdA6PjYYUQidmGGBONLuku0qmOGxktG8OpMMLwVMaaHqtI5FnEadXUU56'
+                'NA/bDQQ/npilOBVjrgPYENpZ1kf8UfLUbTE/SZiiqDtRmo5OrpkO8PmQwMyXqJC0n7PBUKMRUyPDEb3GTyyLJ/htG9HrgqaaZugp'
+                'IjwdChmhgdAIP1FaBjx0/CTVY8mRFUXSIicgcint07DReIyO8hzRjGmFiKS3TIEu42hER0JOUI/2BSwSPgGuTGnGB0iJsUwpYgpd'
+                'SaY15XGDFMWFsWVibLeLj4oi1uoam/mkXAMpSHZh5AkoT0UGpBI81v3WF2BbsE5zrOix4BxUO7VmfwH7uxOeNhEH7UAmoOTMZ8jW'
+                'PAGPUWXWpvflAqljkucK9Y3Lcby7uoT3mj+Zwhvuz003KTJbf75cXhDC2BANhXjnsYnD7ZojlAquNBJXvJMliirFBD+MQRwZs+z9'
+                'e7yo5j22v+EIbdImsOfC9UKnYBMQmeaKtkv44+208IqrN0QKkZqRHBl+ZdQwrulAAlnBgXNDUW3Qquq4XODd9RscUsvtycK5bZhd'
+                'oig4S1+MYUZWipTknDaPUYeDeTUi2e8hILlGWiAhgS6BYHPZxjscoovpoRhrlA4JH5jAE3pIJTgto7GlVslcQ0Q5twXOXc3Sd1R+'
+                'QzgZAM21uFzcsz1EPodmFTSbDLmBTM3SCwAckBFdjJh7GqkMhtcFCBbBhnP4f5sAYLuaaLpvHg8CPBQjisO1YXS/kyai/H4j61lB'
+                'uTnzlR/fngv6BIInXNXukinWyylSZtdDlXS/KclGjO/s7L8QV4iBOMmbZkFFkdMWAC5nnL5pNtecq+83srRgqKXIcypvDyLNdE5h'
+                'x/zvN3+c/zj/gODv482fb/46/8/8E6yrca/a8o/5J5j9MP/YRvP/3nx/88P83/OP8w8RuvkeVv41/3Tzp5sfENCA2U/zH2/+dvOX'
+                '+T+BRipyIVUydf8zJPi5hASWTIMwOajZM9ByTMPZ7oGx+2cp74xeGhNBzMrJw62+v9tNjaFeMXplZdnftcO95raNMLUxNjwUkmkJ'
+                'pdkawxznQtFVwzh4ecuskcbp3R9DbUslpdARiIws5nRoDZBiA27y3Gu8YnUc4YeIDp1NxRxSqyW8nEQ3V4LKQRvKQTFWw42l4BwW'
+                'oQxguyuptm7N/qkj0nKJu2UOtkwf1SqMEF9WRcAsOOUcg1u4mOcaAlxmeHFy9Ozi+cnvkmUGRp7WiEjIoK3Lp+3FlNx88OnG7i7a'
+                'okLb9IVQsaAsQfFBymDCNAitPkltL1ianYDlvz2KG06G07OXnV91jo9eds5O18oChmF9llr3KJAGhNGTgqLT2jxEdB+QTDkBoGTt'
+                'nhA5JXzvkvXArbR6hnaUZ22sRF/j97gnTQ8LgwFEak5hoFgOQzzbaxAFrQZAmqeGPOLLvIKwfQ7VBiC2vyLHwbRRJm6InLxH0nft'
+                'O4Q1ARCVktqHupggC0KQR6bWe46qJFcJuSJMoy5NxxKKADTe8YDqDmD9yEgeLFs13POtVfAIToe+4y/F26sRL4hUNEt+3T07je04'
+                'MAes01z8rFF4r36NuFUMvCT6nmDsZ5Mkwd4d+HBxySnvUVoZZIGIn11HZMGCnogz5Gtnyah0eFQ6PCod/jZmPM3HGVWBp2ZPmr42'
+                'RIeoPmcMsWIAwwHW8FvURjW3zVITvdNlY88aswaEYCzhDsaKIKwlUhNT9npFJaQRqtCQ5gU0LuF9MoJ17xZcPDt51Tk+uTg6ftl5'
+                'dWKB8QhsOaEKe0wsVZmfg+JtH1NY5DuCa0LK7jQQtftKWKwRzNnJr0NfPBjk9L42KmUxrTKnOVxnnDyglE/0XePLY7cc4BH0CtCW'
+                'qZVW7rMJRVMHu7ZT00LHINqDscoFbtk/zcJVA9iTu26DyVJwv2dpaYjHyNyWTKZtmZs72MnmZlmDF7oaQrG2yRoqKM1aUH+OeCYF'
+                'y8ytCgJ6APd4KlV8X9PCrXMFLepOtEQOKntl0+XOU67gvDedQcZi9fpprDwln0vpSEBCcbSyXmzuEAGug/OiFo84BB45uDbAHn0u'
+                'WZc+g3X6hwCbsnfBMhzBXZVKuK3GIzLp0S6Uv5wGlQQ2G1v+MZVSyJ0d/5QRTcJppbEPnqS2ulfrf4IyR67LsTs71eqa5LmzU9FB'
+                '6GF5spYiwxqRLU5ZrkuRrTMmEcK9tT8JirCyzqxxNyIWOm9Af9le5oJUWK/7sWpANjemzfulqWbUvH+QNzf3qrbX29yn2hjf9MrC'
+                'cN38vsKsLr20MFMquT23tWMVhe24Dttek8PltqqamN2+wrBcnMKeY/3CY2dqkUyv7YV+qdnaYNt3DGq5nXkOo9v+y4HnYNr8eQhH'
+                'D9D7TiGwLwwmfPtsYD1PoJJVF/Ht9lktMd8tNce/mBrpZ/BvQHsIPOEGx1v4CcBm+FvJAjMdjyULoZ+0GGtltE/GuW5d/hLPvlv7'
+                'esLpnZSGiP1zkpjeqlbOq8pzu9WbCFoAe2msbf6/6QDnvKPKNNXGZJyZK6NdrKQ8xDCERaVZni/pjtloNNYme1YVsHRf59lDHIb8'
+                'KyUC621PqlPNxF93vvra9/dWWaMW5FCvT1n7QVjXxzY30/Y6r7L4zdm3mxi7IuvY+/MwpH0GxX+LPNE6ZLuO2Dt/5R3uXRIuZ4w7'
+                'buuWR8lxQzo0WdwkteiS5GNqc3lQfkyIYBBGwcLL2qh8goXqDh+ZkdlZ5UjnKRX6FG7TpvmQQV3etMyi1exZQC6ofaOBFsxcIZie'
+                'VN9DvPRgdST6ffMiCUn7siNCJi0jk7eiWqfWgmJkPryYlw9wY0ZH589jYPQ/fPYYhZkaAAA='
+              ),
+          }
+          
+          from pathlib import Path
+          import hashlib,base64,gzip
+          for path,(digest,blob) in PAYLOADS.items():
+              data=gzip.decompress(base64.b64decode(blob))
+              if hashlib.sha256(data).hexdigest()!=digest:
+                  raise SystemExit('STOP: corrupted phase 9 payload: '+path)
+              target=Path(path)
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_bytes(data)
+          # This is a guarded text-only patcher, not a shell script, build or executable.
+          script=Path('phase9_patch.py').read_text(encoding='utf-8')
+          exec(compile(script,'phase9_patch.py','exec'),{'__name__':'__main__'})
+          PY_PHASE9
+          git diff --check
+          test -s native/src/ConnectNativeSonicRunner.tsx
+          test -s native/src/ConnectNativeReadSync.ts
+
+      - name: Node.js 24 for Expo 58
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: TypeScript validation only
+        shell: bash
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Commit verified native sources only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/src/ConnectNativeSonicRunner.tsx native/src/ConnectNativeReadSync.ts native/src/ConnectNativeInbox.ts native/src/ConnectNativePush.ts native/src/ConnectNativeSoundSettings.tsx native/src/ConnectNativeSettings.tsx native/src/App.tsx
+          if git diff --cached --quiet; then
+            echo 'Phase 9 already integrated; no changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(native): notification preferences, cross-device reads and offline runner'
+          git push origin HEAD:main
+
+      - name: Phase 9 summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native - Phase 9 of 10 (NO APK)'
+            echo '- Android native game: Sonic-style runner, robots, rings, local best score; no WebView, permissions or network.'
+            echo '- Push respects enabled, silent and vibrate settings; custom Android sound remains preferred.'
+            echo '- Remote notification settings loaded on sign-in; new sound channels track immutable vibration/silent options.'
+            echo '- Inbox uses scoped Realtime updates and fallback polling; read notifications reconcile against server across devices.'
+            echo '- TypeScript validation completed. No Gradle, APK compilation or hardware runtime testing.'
+            echo '- Next: phase 10 (complete PWA parity audit, residual fixes and final acceptance).'
+          } >> "$GITHUB_STEP_SUMMARY"
