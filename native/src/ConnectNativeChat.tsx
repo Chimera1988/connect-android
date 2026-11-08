@@ -4,6 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import {AudioModule,RecordingPresets,setAudioModeAsync,useAudioRecorder,useAudioRecorderState} from 'expo-audio';
 import {File} from 'expo-file-system';
@@ -104,6 +105,24 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   },[recorderState.isRecording]);
   const id=conversation.id;
   const localHiddenKey=`connect-native-chat-hidden-v1:${ownerId}:${id}`;
+  // PWA compatibility: recording presence is a short, renewed lease (8 s), not
+  // a 2-minute stale status if Android loses microphone access or gets killed.
+  useEffect(()=>{
+    if(!ownerId||!recorderState.isRecording)return;
+    let alive=true;
+    const pulse=()=>{
+      if(!alive||AppState.currentState!=='active')return;
+      void db.from('conversation_user_state').upsert({
+        conversation_id:id,user_id:ownerId,
+        recording_until:new Date(Date.now()+8000).toISOString(),
+      },{onConflict:'conversation_id,user_id'}).then(({error})=>{
+        if(error)console.warn('Connect recording heartbeat:',error.message);
+      });
+    };
+    pulse();
+    const interval=setInterval(pulse,2000);
+    return()=>{alive=false;clearInterval(interval);};
+  },[ownerId,id,recorderState.isRecording]);
   useEffect(()=>{
     let alive=true;hiddenLoaded.current=false;setHidden([]);
     void SecureStore.getItemAsync(localHiddenKey).then(raw=>{
@@ -428,8 +447,38 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       if(!pick.canceled)queueAttachments(pick.assets.map(file=>({uri:file.uri,name:file.name,mime:file.mimeType||'application/octet-stream',size:file.size})));
     }catch(e){setNotice('Файл: '+(e instanceof Error?e.message:String(e)));}
   }
+  // On Android image clipboard data must be explicitly converted from
+  // base64 to a local file before using the existing upload/album preview.
+  async function attachClipboardImage(){
+    if(uploading||busy)return;
+    try{
+      const hasImage=await Clipboard.hasImageAsync();
+      if(!hasImage){setNotice('В буфере обмена нет изображения');return;}
+      const value=await Clipboard.getImageAsync({format:'png'});
+      if(!value?.data){setNotice('Изображение из буфера недоступно');return;}
+      const raw=value.data.startsWith('data:')?value.data.slice(value.data.indexOf(',')+1):value.data;
+      // Protect against unexpectedly huge clipboard payloads before writing.
+      if(!raw||raw.length>125*1024*1024)throw Error('Изображение из буфера слишком большое');
+      if(!FileSystem.cacheDirectory)throw Error('Кэш Android недоступен');
+      const uri=FileSystem.cacheDirectory+`connect-clipboard-${Date.now()}.png`;
+      await FileSystem.writeAsStringAsync(uri,raw,{encoding:FileSystem.EncodingType.Base64});
+      const size=new File(uri).size;
+      if(size<=0||size>100*1024*1024){
+        await FileSystem.deleteAsync(uri,{idempotent:true});
+        throw Error('Размер изображения должен быть до 100 МБ');
+      }
+      queueAttachments([{uri,name:`clipboard-${Date.now()}.png`,mime:'image/png',size}]);
+      setNotice('Фото добавлено из буфера. Проверь его перед отправкой.');
+    }catch(e){setNotice('Буфер обмена: '+(e instanceof Error?e.message:String(e)));}
+  }
   function showAttachmentMenu(){
-    Alert.alert('Прикрепить','Выбери источник',[{text:'Фото/видео',onPress:()=>void attachMedia()},{text:'Камера',onPress:()=>void attachMedia(true)},{text:'Файл',onPress:()=>void attachDocument()}]);
+    Alert.alert('Прикрепить','Выбери источник',[
+      {text:'Фото/видео',onPress:()=>void attachMedia()},
+      {text:'Камера',onPress:()=>void attachMedia(true)},
+      {text:'Файл',onPress:()=>void attachDocument()},
+      {text:'Фото из буфера',onPress:()=>void attachClipboardImage()},
+      {text:'Отмена',style:'cancel'},
+    ]);
   }
   async function clearRecordingPresence(){
     await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:null},{onConflict:'conversation_id,user_id'});
@@ -468,7 +517,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         await recorder.prepareToRecordAsync();
         recordingBegan.current=Date.now();setRecordSeconds(0);
         recorder.record();
-        await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:new Date(Date.now()+120000).toISOString()},{onConflict:'conversation_id,user_id'});
+        await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:new Date(Date.now()+8000).toISOString()},{onConflict:'conversation_id,user_id'});
       }
     }catch(e){setNotice('Запись: '+(e instanceof Error?e.message:String(e)));}
     finally{recordingTransition.current=false;}
@@ -507,7 +556,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Pressable style={{flexDirection:'row',alignItems:'center',gap:8,flex:1,minWidth:0}} onPress={onOpenProfile}>
         <ChatAvatar name={peer.display_name} url={avatarUrl} colors={colors}/>
         <View style={{flex:1,minWidth:0}}><Text numberOfLines={1} style={{color:textColor,fontSize:17,fontWeight:'700'}}>{peer.display_name}</Text>
-          <Text style={{fontSize:11,color:colors.muted}}>{peer.online_until&&Date.parse(peer.online_until)>Date.now()?'В сети':peerTyping?'Печатает…':peerRecording?'Записывает голосовое…':'Не в сети'}</Text></View>
+          <Text style={{fontSize:11,color:colors.muted}}>{peerRecording?'Записывает голосовое…':peerTyping?'Печатает…':peer.online_until&&Date.parse(peer.online_until)>Date.now()?'В сети':'Не в сети'}</Text></View>
       </Pressable>
       <Btn name="call-outline" label="Аудиозвонок" colors={colors} onPress={onCall}/>
       <Btn name="ellipsis-vertical" label="Действия в чате" colors={colors} onPress={()=>setToolsOpen(true)}/>
