@@ -1,0 +1,101 @@
+name: Connect Native - PWA parity phase 3A (chat controls and receipts)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-pwa-parity-phase3.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-parity-phase3a
+  cancel-in-progress: false
+
+jobs:
+  chat-parity-source-only:
+    name: Integrate chat parity and check TypeScript (NO APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout current native source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify main and apply checksum-verified source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          test -s native/src/ConnectNativeChat.tsx
+          test -s native/src/ConnectNativeSettings.tsx
+          test -s native/package-lock.json
+          python3 - <<'PY_CONNECT_CHAT_PHASE3'
+          import base64,gzip,hashlib,subprocess,sys
+          from pathlib import Path
+          assets=[
+            ('apply_phase3.py', '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'),
+            ('PWA_PARITY_PHASE3.md', '2a443f4fe6a79afdfc80160dcd539e2a81617f933df0097410c86feba3c5e0c4', 'H4sIAAAAAAAC/2VUS24TQRDd5xQlZQFYmWTBMiuTkI8QIQoIlna7uzwuuad71B8b7zgEJ+QkvJpOQoCNNTPuefV+Ncd0EUNgW+jOFNkx/frxk+6/zWk0ScrhhMaNyUxv50dHx8d0G6yvjh1JoLKRTDnWZLmLwR/Ibkzo+aije07dwDmbnmk2e+AhAncdEw08m5GxRWIgExwN1RfpMntuzxyuCnc4ivdP6Uac40BPULeXmUxiyiUmUPDRGo+xIyfK0gd2HVjVjFvFtjHsOGWjwOeEp7h7gmo4NZRY7YbdKThfsof6dAC9bYh7z67ngUPJ9HrpTS4L1w6wW5iyfDPJkWDjIKH/A7vfiGc1ohDM2UmWledzSmwcaJvCyi/DOqYx8U5izVAgw+inYVDVhukLOmdSEmKRtVjTLJI8CKZ5Jf2plj4qAaiw28GkbcYAfaATElsZBbCvMrlneQCc6BQB62KGMZ/QXsoGwi1kyEo8cidvVuyzDvlyGBVRglMOMZ08jkBJOugfwQsiaVmmcwu4Kn6pBVm+jGChwSwmD5aK+v675KIwiUd/OIOde5PcGTspZy9qwEo6Bm51wb+G0DLn25uD0cRDKx5i1Ip+xnhPsRbMAuXQY9hVxaMpFY+p/9WDrGcT6vjceQRXjUdpTLIbCmYn/XTwhDSdroYWqE0RuGPMon8qJUV2GnNmYKlbk4XvUKo+xfpPmLnF2/bu6uIj9gHsVkwFyaALuiVIbieWFeVrxMXzNpjqJNLe7Bg+DWd5ZHbY1hTXWkEgiSWUU7rRmwMjtemmNwM/dkDNU86PYpv25uFXTs8ktQEo07WUm7qieVtUCXDX+4y37LYtlGJWSFqGcdArQh946uXynKTA8GGQ0rpf9vHxy0HKNtP0/TDroqtcpx6q4LuImoxRV2VVxUPedTIO6rB78/sPZBGD0tGzD9o7aFvxBnHhQBOIfdCcoQZ+TtWcCKBWoajqtQT8JhROv3I748W1Svzl/W+yf6lCJQUAAA=='),
+          ]
+          result={}
+          for name,digest,encoded in assets:
+              raw=gzip.decompress(base64.b64decode(encoded))
+              if hashlib.sha256(raw).hexdigest()!=digest:
+                  raise SystemExit('Source checksum mismatch: '+name)
+              result[name]=raw
+          path=Path('/tmp/connect-chat-phase3.py')
+          path.write_bytes(result['apply_phase3.py'])
+          subprocess.run([sys.executable,str(path)],check=True)
+          document=Path('native/PWA_PARITY_PHASE3.md')
+          document.write_bytes(result['PWA_PARITY_PHASE3.md'])
+          print('Chat parity patched; verify TypeScript before commit')
+          PY_CONNECT_CHAT_PHASE3
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Install and verify TypeScript (NO Gradle or APK)
+        shell: bash
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Commit only verified source and audit notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/src/ConnectNativeChat.tsx native/PWA_PARITY_PHASE3.md
+          if git diff --cached --quiet; then
+            echo 'Phase 3 already applied. No source commit necessary.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(native): PWA chat read receipts, typing and local delete controls'
+          git push origin HEAD:main
+
+      - name: Result
+        if: success()
+        run: |
+          {
+            echo '### Connect Native PWA parity 3A'
+            echo '- Chat actions, PWA typing and delivery/read markers added.'
+            echo '- TypeScript passed. Source committed to main.'
+            echo '- **No APK, no Gradle, no Expo prebuild, no release artifact.**'
+            echo '- Runtime validation will be done after full parity is implemented.'
+          } >> "$GITHUB_STEP_SUMMARY"
