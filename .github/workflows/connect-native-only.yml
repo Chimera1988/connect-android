@@ -1,0 +1,242 @@
+name: Connect Native - retire legacy WebView and finish glass migration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-only.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: connect-native-retire-legacy
+  cancel-in-progress: false
+
+jobs:
+  migrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Checkout current Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Confirm legacy and native sources before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          test -s native/app.json
+          test -s native/src/App.tsx
+          test -s native/src/ConnectNativeChat.tsx
+          test -s native/plugins/withConnectTelecom.js
+          test -s app/google-services.json
+          test -s app/src/main/res/drawable/connect_icon.png
+          test -s .github/workflows/connect-native-visual.yml
+          test -s .github/workflows/connect-native-test-apk.yml
+          python3 - <<'PY_CHECK'
+          import json
+          from pathlib import Path
+          c=json.loads(Path('native/app.json').read_text())['expo']
+          assert c['android']['package']=='com.connect.messenger', 'Unexpected native package: migration aborted'
+          assert c['android']['googleServicesFile']=='../app/google-services.json', 'Unexpected source of Firebase config'
+          print('Original WebView resources and standalone native project verified')
+          PY_CHECK
+
+      - name: Integrate corrected Liquid Glass into Native and migrate shared resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_MIGRATE'
+          import hashlib, json, re, shutil, subprocess, sys, textwrap
+          from pathlib import Path
+
+          # The previous glass workflow failed TYPE-CHECK and committed nothing.
+          # Reuse its checksum-protected visual source payload (not the failed workflow).
+          visual=Path('.github/workflows/connect-native-visual.yml').read_text()
+          start="          python3 - <<'PY_CONNECT_VISUAL'\n"
+          end="          PY_CONNECT_VISUAL\n"
+          assert visual.count(start)==1 and visual.count(end)==1, 'Unexpected old visual installer; refusing migration'
+          embedded=textwrap.dedent(visual.split(start,1)[1].split(end,1)[0])
+          assert "payloads=[" in embedded and "hashlib.sha256" in embedded, 'Visual installer mismatch'
+          subprocess.run([sys.executable,'-c',embedded],check=True)
+          glass=Path('native/src/ConnectNativeGlass.tsx')
+          assert glass.is_file() and glass.stat().st_size>500, 'Native glass component missing'
+          content=glass.read_text()
+          # React Native 0.88 TS types omit absoluteFillObject. An inline ViewStyle
+          # works both as a style value and when spread in StyleSheet.create.
+          bad='StyleSheet.absoluteFillObject'
+          fix='({position:"absolute" as const,top:0,right:0,bottom:0,left:0})'
+          assert content.count(bad)==1, 'Expected one known TypeScript error in glass component'
+          glass.write_text(content.replace(bad,fix))
+          assert "ConnectNativeGlass" in Path('native/src/App.tsx').read_text(), 'Glass not integrated in App'
+
+          def copy_exact(source,destination):
+              origin=Path(source); target=Path(destination)
+              assert origin.is_file() and origin.stat().st_size>100, source
+              target.parent.mkdir(parents=True,exist_ok=True)
+              if target.exists():
+                  assert hashlib.sha256(origin.read_bytes()).digest()==hashlib.sha256(target.read_bytes()).digest(), 'Existing native asset differs: '+destination
+              else:
+                  shutil.copy2(origin,target)
+              assert target.stat().st_size==origin.stat().st_size
+
+          copy_exact('app/src/main/res/drawable/connect_icon.png','native/assets/connect-icon.png')
+          copy_exact('app/google-services.json','native/google-services.json')
+          firebase=json.loads(Path('native/google-services.json').read_text())
+          assert any(c.get('client_info',{}).get('android_client_info',{}).get('package_name')=='com.connect.messenger' for c in firebase.get('client',[])), 'Missing correct Firebase Android client'
+          p=Path('native/app.json'); data=json.loads(p.read_text()); expo=data['expo']
+          expo['android']['googleServicesFile']='./google-services.json'
+          expo['icon']='./assets/connect-icon.png'
+          expo['android']['adaptiveIcon']={'foregroundImage':'./assets/connect-icon.png','backgroundColor':'#07121b'}
+          p.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+
+          # The existing one-off workflow files are intentionally NOT edited
+          # by GITHUB_TOKEN; editing .github/workflows requires separate Workflow
+          # permission. They will be deactivated via the GitHub Actions API.
+          assert Path('.github/workflows/connect-native-test-apk.yml').is_file()
+
+          # Old documentation advertised the WebView app and outdated feature limits.
+          Path('README.md').write_text('''# Connect Native — Android\n\nThis repository now contains **only the native React Native / Expo Android client** in `native/`. The old WebView Android sources and Gradle build have been retired. The Connect Messenger PWA is a separate repository and is **not** deleted or changed here.\n\n## Native test APK\n\nThe previous QA build workflow depends on the deleted WebView resources and is deactivated. A fresh Native-only APK workflow will replace it; do not run the old one. The QA application ID will remain `com.connect.messenger.native`, distinct from the production `com.connect.messenger`.\n\nThe test APK is signed with a disposable debug key and **is not a final production release**. Firebase push in the QA package needs separately registered Firebase Android configuration and real-device tests. Audio calls, Bluetooth, background notifications, camera and media require real-device checks.\n\nThe native app uses the same users and Connect backend as the PWA. Its Firebase config and launcher icon now live inside `native/` rather than the deleted WebView project.\n\n## Development\n\n`cd native && npm ci && npx expo prebuild --platform android`\n\nThe old `app/` and root Android Gradle scripts have been deleted. Old GitHub Actions workflows are retained only as disabled history because the default Actions token cannot remove workflow definitions. Legacy source can be restored from Git history if needed.\n''')
+          Path('native/README.md').write_text('''# Connect Native\n\nNative Android client built with Expo SDK 58 / React Native 0.88; no WebView. Uses existing Connect Messenger accounts, Supabase data and Connect HTTPS proxy.\n\n## Implemented in source\n\nMessages and inbox previews, search, read state and cross-device notification clearing, file attachments up to 100 MB (TUS upload), albums, voice messages, video notes, stickers and emoji, media galleries, contacts and profile screens, call journal, WebRTC audio-only calls and Android Telecom integration, sound selection, and seven themes. Liquid Glass visual foundation is an ongoing adaptation, not a pixel-identical copy of the PWA.\n\nNative-only resources: `assets/connect-icon.png` and `google-services.json` (Firebase public client configuration). Android package in `app.json` is `com.connect.messenger`; the standalone QA workflow adds `.native` only to the generated test APK.\n\n## Build and test\n\nThe obsolete QA workflow is disabled because it still references legacy `app/`. A new Native-only test APK workflow is required before the next installable QA build. Production release signing must be configured separately. The QA package needs its own real Firebase registration for reliable push notifications.\n\nCompilation is not equivalent to device testing: verify sign-in, messaging, uploads, audio-only calls, foreground/background behavior, call lock screen, ringtones and Bluetooth routing on physical Android devices.\n''')
+          print('Liquid Glass TypeScript issue fixed; Firebase and icon now owned by native/')
+          PY_MIGRATE
+
+      - name: Remove only legacy WebView source and root Android Gradle
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Do not delete native/, PWA, Supabase or device data.
+          # Do not modify workflow definitions with the limited Actions token.
+          git rm -r -- app
+          git rm -- build.gradle.kts settings.gradle.kts gradle.properties
+          test ! -e app
+          test ! -e settings.gradle.kts
+          test -s native/google-services.json
+          test -s native/assets/connect-icon.png
+          test -s native/src/ConnectNativeGlass.tsx
+          git add -- native README.md
+          git diff --cached --check
+          git diff --cached --stat
+
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Type-check Native source after legacy removal
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Verify Expo prebuild without the deleted legacy app
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install --clean
+          test -s android/app/google-services.json
+          test -s android/app/build.gradle
+
+      - name: Install Android SDK 37
+        run: |
+          set -euo pipefail
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+
+      - name: Compile Native Android after legacy removal
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Save native-only repository only after successful validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --cached --check
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --cached --quiet; then
+            echo 'Native-only migration already applied'
+            exit 0
+          fi
+          git commit -m 'refactor(android): remove WebView sources, migrate native assets and finish glass UI'
+          git push origin HEAD:main
+
+      - name: Deactivate obsolete legacy and one-time workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Actions:write allows disable via API, not editing workflow YAML.
+          # The production WebView build MUST be disabled after its sources are removed.
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/android-apk.yml/disable"
+          # Old native installers and QA tester rely on app/ or obsolete snapshots.
+          # Disable rather than delete; editing workflows requires Workflow permission.
+          for workflow in \
+            connect-native-albums.yml \
+            connect-native-alerts-sounds.yml \
+            connect-native-call-routing.yml \
+            connect-native-media-bundle.yml \
+            connect-native-stickers.yml \
+            connect-native-test-apk.yml \
+            connect-native-ui-polish.yml \
+            connect-native-video-notes.yml \
+            connect-native-visual.yml \
+            install-connect-native-features.yml \
+            install-connect-native-prebuild-fix.yml \
+            install-connect-native-push-typefix.yml \
+            install-connect-native-push.yml \
+            install-connect-native-sdk37-fix.yml \
+            install-connect-native-telecom.yml \
+            install-connect-native-v2.yml \
+            install-connect-native-voice.yml; do
+            gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/disable"
+          done
+          echo 'Old WebView and outdated native setup workflows are deactivated.'
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo '### Connect Native only — source migration complete'
+            echo '- Removed old WebView `app/` and root Android Gradle build.'
+            echo '- Disabled obsolete Android WebView and old one-time workflows (definitions remain as history).'
+            echo '- Preserved Firebase public config and launcher icon in `native/`.'
+            echo '- Fixed and integrated the Liquid Glass visual foundation.'
+            echo '- TypeScript, Expo prebuild and Android compile succeeded.'
+            echo '- PWA (separate repository), Supabase and installed apps were NOT modified.'
+            echo '- Next: upload a fresh Native-only standalone APK build workflow; old QA workflow is deliberately disabled.'
+          } >> "$GITHUB_STEP_SUMMARY"
