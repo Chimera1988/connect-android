@@ -4,6 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
+import * as SecureStore from 'expo-secure-store';
 import {AudioModule,RecordingPresets,setAudioModeAsync,useAudioRecorder,useAudioRecorderState} from 'expo-audio';
 import {File} from 'expo-file-system';
 import {randomUUID} from 'expo-crypto';
@@ -60,7 +61,15 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [uploading,setUploading]=useState(false);
   const [albumProgress,setAlbumProgress]=useState('');
   const [uploadProgress,setUploadProgress]=useState('');
+  // CONNECT_NATIVE_CHAT_PARITY_PHASE3: user-scoped local message hiding and receipts.
   const [peerRecording,setPeerRecording]=useState(false);
+  const [peerTyping,setPeerTyping]=useState(false);
+  const [peerReceipts,setPeerReceipts]=useState<{delivered:string|null;read:string|null}>({delivered:null,read:null});
+  const [hidden,setHidden]=useState<string[]>([]);
+  const hiddenLoaded=useRef(false);
+  const typingLastSent=useRef(0);
+  const deliveredLastSent=useRef('');
+
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
@@ -69,6 +78,42 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState=useAudioRecorderState(recorder);
   const id=conversation.id;
+  const localHiddenKey=`connect-native-chat-hidden-v1:${ownerId}:${id}`;
+  useEffect(()=>{
+    let alive=true;hiddenLoaded.current=false;setHidden([]);
+    void SecureStore.getItemAsync(localHiddenKey).then(raw=>{
+      if(!alive)return;
+      if(raw){const saved:unknown=JSON.parse(raw);if(Array.isArray(saved))setHidden(saved.filter((v):v is string=>typeof v==='string'));}
+    }).catch(()=>{}).finally(()=>{if(alive)hiddenLoaded.current=true;});
+    return()=>{alive=false;};
+  },[localHiddenKey]);
+  async function hideLocally(items:Message[]){
+    if(!items.length)return;
+    // Same per-user semantics as PWA: do not delete messages from the server.
+    const next=Array.from(new Set([...hidden,...items.map(m=>m.id)]));
+    try{
+      await SecureStore.setItemAsync(localHiddenKey,JSON.stringify(next));
+      setHidden(next);setSelected([]);setSelectionMode(false);setActionMessage(null);
+    }catch(e){setNotice('Не удалось сохранить удаление у себя: '+(e instanceof Error?e.message:String(e)));}
+  }
+  async function signalTyping(active:boolean){
+    if(!ownerId||AppState.currentState!=='active')return;
+    const now=Date.now();
+    if(active && now-typingLastSent.current<3000)return;
+    typingLastSent.current=active?now:0;
+    await db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,
+      typing_until:active?new Date(now+6000).toISOString():null},
+      {onConflict:'conversation_id,user_id'});
+  }
+  useEffect(()=>{
+    if(!draft.trim()){void signalTyping(false);return;}
+    void signalTyping(true);
+    const end=setTimeout(()=>{void signalTyping(false);},2100);
+    return()=>clearTimeout(end);
+    // Typing presence follows editor changes, not every state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[draft,id,ownerId]);
+
   const textColor=colors.text;
   const mutedColor=colors.muted;
   const markChatRead=useCallback(async(iso:string)=>{
@@ -95,6 +140,13 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     const rows=((result.data||[]) as Message[]).reverse();
     setMessages(rows);
     const latest=[...rows].reverse().find(m=>!m.deleted_at&&m.sender_id!==ownerId);
+    // PWA delivery timestamp is the latest incoming message creation time.
+    if(latest && AppState.currentState==='active' && latest.created_at>deliveredLastSent.current){
+      deliveredLastSent.current=latest.created_at;
+      void db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,last_delivered_at:latest.created_at},
+        {onConflict:'conversation_id,user_id'}).then(({error})=>{if(error)deliveredLastSent.current='';});
+    }
+
     if(latest && latest.created_at>(seenIncoming.current[id]||'')){
       seenIncoming.current[id]=latest.created_at;
       if(AppState.currentState==='active')void markChatRead(new Date().toISOString());
@@ -130,18 +182,23 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   useEffect(()=>{
     let active=true;
     const check=async()=>{
-      const response=await db.from('conversation_user_state').select('recording_until')
+      const response=await db.from('conversation_user_state').select('recording_until,typing_until,last_delivered_at,last_read_at')
         .eq('conversation_id',id).eq('user_id',peer.id).maybeSingle();
-      if(active)setPeerRecording(Boolean(response.data?.recording_until &&
-        Date.parse(response.data.recording_until)>Date.now()));
+      if(active){
+        const state=response.data;
+        setPeerRecording(Boolean(state?.recording_until && Date.parse(state.recording_until)>Date.now()));
+        setPeerTyping(Boolean(state?.typing_until && Date.parse(state.typing_until)>Date.now()));
+        setPeerReceipts({delivered:state?.last_delivered_at||null,read:state?.last_read_at||null});
+      }
     };
     void check();
     const interval=setInterval(()=>void check(),4000);
     return()=>{active=false;clearInterval(interval);};
   },[id,peer.id]);
-  const shown=useMemo(()=>query.trim()?messages.filter(m=>
+  const visible=useMemo(()=>messages.filter(m=>!hidden.includes(m.id)),[messages,hidden]);
+  const shown=useMemo(()=>query.trim()?visible.filter(m=>
     (m.body||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU')) ||
-    (m.attachment_name||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU'))):messages,[messages,query]);
+    (m.attachment_name||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU'))):visible,[visible,query]);
   const selectedMessages=messages.filter(x=>selected.includes(x.id));
   const confirmDelete=(items:Message[])=>{
     const own=items.filter(x=>x.sender_id===ownerId && !x.deleted_at);
@@ -349,7 +406,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     {selectionMode&&<View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingHorizontal:12,backgroundColor:colors.surface}}>
       <Text style={{color:textColor}}>Выбрано: {selected.length}</Text>
       <Btn name="arrow-redo-outline" label="Переслать" colors={colors} disabled={!selected.length} onPress={()=>setForwardItems(selectedMessages)}/>
-      <Btn name="trash-outline" label="Удалить выбранные" colors={colors} disabled={!selected.length} onPress={()=>confirmDelete(selectedMessages)}/>
+      <Btn name="trash-outline" label="Удалить у себя" colors={colors} disabled={!selected.length} onPress={()=>void hideLocally(selectedMessages)}/>
+      <Btn name="trash-bin-outline" label="Удалить у всех" colors={colors} disabled={!selected.length||selectedMessages.some(m=>m.sender_id!==ownerId)} onPress={()=>confirmDelete(selectedMessages)}/>
       <Btn name="close" label="Отмена" colors={colors} onPress={()=>{setSelectionMode(false);setSelected([]);}}/>
     </View>}
     <FlatList key={id} ref={listRef} data={shown} keyExtractor={m=>m.id}
@@ -371,11 +429,14 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             {album?<ConnectNativeAlbum items={album} colors={colors}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
               Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':f.text}</Text>}
           </>}
-          <Text style={{color:mutedColor,fontSize:10,textAlign:'right',marginTop:5}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>
+            <Text style={{color:mutedColor,fontSize:10}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
+            {own&&!item.deleted_at&&<Text accessibilityLabel={peerReceipts.read&&peerReceipts.read>=item.created_at?'Прочитано':peerReceipts.delivered&&peerReceipts.delivered>=item.created_at?'Доставлено':'Отправлено'} style={{fontSize:11,color:peerReceipts.read&&peerReceipts.read>=item.created_at?colors.accent:mutedColor}}>{peerReceipts.read&&peerReceipts.read>=item.created_at?'✓✓':peerReceipts.delivered&&peerReceipts.delivered>=item.created_at?'✓✓':'✓'}</Text>}
+          </View>
         </Pressable>;
       }}/>
-    {peerRecording&&<View style={{paddingHorizontal:14,paddingVertical:5}}>
-      <Text style={{fontSize:12,color:colors.accent}}>● {peer.display_name} записывает голосовое…</Text>
+    {(peerRecording||peerTyping)&&<View style={{paddingHorizontal:14,paddingVertical:5}}>
+      <Text style={{fontSize:12,color:colors.accent}}>{peerRecording?`● ${peer.display_name} записывает голосовое…`:`${peer.display_name} печатает…`}</Text>
     </View>}
     {Boolean(reply||edit)&&<View style={{paddingHorizontal:12,paddingVertical:5,backgroundColor:colors.surface,flexDirection:'row',alignItems:'center',gap:8}}>
       <Text numberOfLines={1} style={{flex:1,color:colors.accent,fontSize:12}}>{edit?'Редактирование':`Ответ: ${reply?.body||reply?.attachment_name||'вложение'}`}</Text>
@@ -407,6 +468,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             <LabelButton title="Ответить" colors={colors} onPress={()=>{setReply(actionMessage);setEdit(null);setActionMessage(null);}}/>
             <LabelButton title="Переслать" colors={colors} onPress={()=>{setForwardItems([actionMessage]);setActionMessage(null);}}/>
             <LabelButton title="Выбрать" colors={colors} onPress={()=>{setSelectionMode(true);setSelected([actionMessage.id]);setActionMessage(null);}}/>
+            <LabelButton title="Удалить у себя" colors={colors} onPress={()=>{void hideLocally([actionMessage]);setActionMessage(null);}}/>
             {Boolean(actionMessage.body)&&<LabelButton title="Копировать текст" colors={colors} onPress={()=>{void Clipboard.setStringAsync(forwardMeta(actionMessage.body).text);setActionMessage(null);}}/>}
             {actionMessage.sender_id===ownerId&&<>
               {!actionMessage.attachment_path&&<LabelButton title="Редактировать" colors={colors} onPress={()=>{setEdit(actionMessage);setReply(null);setDraft(forwardMeta(actionMessage.body).text);setActionMessage(null);}}/>}
