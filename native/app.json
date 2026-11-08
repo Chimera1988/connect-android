@@ -21,8 +21,8 @@
       ],
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/connect-icon.png",
-        "backgroundColor": "#07121b"
+        "foregroundImage": "./assets/connect-adaptive-foreground.png",
+        "backgroundColor": "#080b11"
       }
     },
     "plugins": [
@@ -59,8 +59,25 @@
           "microphonePermission": "Микрофон нужен для записи видеокружков Connect."
         }
       ],
-      "./plugins/withConnectSounds"
+      "./plugins/withConnectSounds",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#090e14",
+          "image": "./assets/connect-splash-bubbles.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#090e14",
+            "image": "./assets/connect-splash-bubbles.png"
+          }
+        }
+      ]
     ],
-    "icon": "./assets/connect-icon.png"
+    "icon": "./assets/connect-icon.png",
+    "androidStatusBar": {
+      "backgroundColor": "#090e14",
+      "barStyle": "light-content"
+    }
   }
 }

@@ -29,6 +29,7 @@ import ConnectNativeInvites,{hasInviteAdminAccess,type InvitationMode} from './C
 import ConnectNativePasswordSetup from './ConnectNativePasswordSetup';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
 import {useConnectNativePresence} from './ConnectNativePresence';
+import ConnectNativeSplash from './ConnectNativeSplash'; // CONNECT_SILVER_NIGHT_SPLASH_2026
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
 type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile} | {kind:'media'; profile:Profile; mediaKind: MediaKind};
@@ -61,9 +62,10 @@ function Avatar({name,url,colors,size=46}:{name:string;url?:string;colors:Palett
 function Label({children,colors,muted=false,size=14}:{children:React.ReactNode;colors:Palette;muted?:boolean;size?:number}){
   return <Text style={{color:muted?colors.muted:colors.text,fontSize:size}}>{children}</Text>;
 }
-function AppMain(){
+function AppMain({onBootReady}:{onBootReady:(ready:boolean)=>void}){
   const [session,setSession]=useState<Session|null>(null);
   const [initializing,setInitializing]=useState(true);
+  const [directoryReady,setDirectoryReady]=useState(false);
   const [email,setEmail]=useState('');const [password,setPassword]=useState('');
   const [authBusy,setAuthBusy]=useState(false);
   const [passwordSetup,setPasswordSetup]=useState(false);
@@ -83,6 +85,8 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  useEffect(()=>{setDirectoryReady(false);},[ownId]);
+  useEffect(()=>{onBootReady(!initializing && (!session || directoryReady));},[initializing,session?.user.id,directoryReady,onBootReady]);
   useConnectNativePresence(ownId);
   useConnectNativeReadSync(ownId);
   const missedCalls=useConnectNativeMissedCalls(ownId,tab==='calls'&&screen.kind==='tab');
@@ -180,7 +184,7 @@ function AppMain(){
       const {data}=await db.storage.from('connect-avatars').createSignedUrl(x.avatar_path!,1800);
       return [x.id,data?.signedUrl?mediaUrl(data.signedUrl):''] as const;
     }));
-    if(generation===fetchCounter.current)setAvatars(Object.fromEntries(photos));
+    if(generation===fetchCounter.current){setAvatars(Object.fromEntries(photos));setDirectoryReady(true);}
   },[ownId]);
 
   useEffect(()=>{
@@ -423,4 +427,16 @@ function makeStyles(p:Palette){return StyleSheet.create({
   colorChip:{flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:11,paddingVertical:11,borderWidth:1,borderColor:glassColor(p.text,.14),backgroundColor:glassColor(p.surface,.65),borderRadius:14},
   toast:{position:'absolute',bottom:87,left:15,right:15,padding:14,borderWidth:1,borderColor:p.danger,backgroundColor:p.elevated,borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
 });}
-export default function App(){return <SafeAreaProvider><SafeAreaView style={{flex:1,backgroundColor:'#07121b'}} edges={['top','bottom']}><ConnectNativeMusicProvider><AppMain/></ConnectNativeMusicProvider></SafeAreaView></SafeAreaProvider>;}
+export default function App(){
+  const [bootReady,setBootReady]=useState(false);
+  const [showSplash,setShowSplash]=useState(true);
+  const finishSplash=useCallback(()=>setShowSplash(false),[]);
+  return <SafeAreaProvider>
+    <View style={{flex:1,backgroundColor:'#090e14'}}>
+      <SafeAreaView style={{flex:1,backgroundColor:'#07121b'}} edges={['top','bottom']}>
+        <ConnectNativeMusicProvider><AppMain onBootReady={setBootReady}/></ConnectNativeMusicProvider>
+      </SafeAreaView>
+      {showSplash&&<ConnectNativeSplash ready={bootReady} onComplete={finishSplash}/>}
+    </View>
+  </SafeAreaProvider>;
+}
