@@ -69,6 +69,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [searchOpen,setSearchOpen]=useState(false);
   const [toolsOpen,setToolsOpen]=useState(false);
   const [showJump,setShowJump]=useState(false);
+  const [visibleMessageIds,setVisibleMessageIds]=useState<string[]>([]);
   const nearBottom=useRef(true);
   const swipeStart=useRef<{id:string;x:number;y:number}|null>(null);
   const [query,setQuery]=useState('');
@@ -90,6 +91,10 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
   const listRef=useRef<FlatList<Message>>(null);
+  const onViewableMessages=useRef(({viewableItems}:{viewableItems:ReadonlyArray<{item:Message;isViewable:boolean|null}>})=>{
+    setVisibleMessageIds(viewableItems.filter(row=>row.isViewable).map(row=>row.item.id));
+  }).current;
+  const videoViewConfig=useRef({itemVisiblePercentThreshold:35}).current;
   const lastSyncedRead=useRef<Record<string,string>>({});
   const seenIncoming=useRef<Record<string,string>>({});
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -588,6 +593,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Btn name="close" label="Отмена" colors={colors} onPress={()=>{setSelectionMode(false);setSelected([]);}}/>
     </View>}
     <FlatList key={id} ref={listRef} data={shown} keyExtractor={m=>m.id}
+      onViewableItemsChanged={onViewableMessages} viewabilityConfig={videoViewConfig}
       onScrollToIndexFailed={info=>listRef.current?.scrollToOffset({offset:Math.max(0,info.averageItemLength*info.index),animated:true})}
       contentContainerStyle={{padding:14,gap:7,paddingBottom:18}}
       scrollEventThrottle={120}
@@ -628,7 +634,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
               <Text style={{fontSize:11,color:colors.accent,fontWeight:'700'}}>{original?.sender_id===ownerId?'Вы':peer.display_name}</Text>
               <Text numberOfLines={2} style={{fontSize:12,color:colors.muted}}>{quoteText}</Text>
             </View>}
-            {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors}/>}
+            {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={visibleMessageIds.includes(item.id)}/>}
             {album?<ConnectNativeAlbum items={album} colors={colors}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
               Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':highlightedText(f.text)}</Text>}
           </>}

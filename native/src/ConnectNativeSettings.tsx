@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import {File} from 'expo-file-system';
 import {db} from './backend';
 import {uploadFile} from './nativeMediaUtils';
+import ConnectNativeAvatarCropper,{type AvatarSource,type CroppedAvatar} from './ConnectNativeAvatarCropper';
 import {glassColor} from './ConnectNativeGlass';
 import {BUILTIN_PACKS,ACCENTS,type AppearanceController} from './ConnectNativeAppearance';
 import {themeNames,type Palette} from './theme';
@@ -63,6 +64,7 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
   const [newName,setNewName]=useState(owner?.display_name||'');
   const [newBio,setNewBio]=useState(owner?.bio||'');
   const [profileEdit,setProfileEdit]=useState(false);
+  const [cropAsset,setCropAsset]=useState<AvatarSource|null>(null);
   const a=appearance.prefs;
   useEffect(()=>{setNewName(owner?.display_name||'');setNewBio(owner?.bio||'');},[owner?.display_name,owner?.bio]);
   useEffect(()=>{
@@ -155,17 +157,23 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
   async function chooseAvatar(){
     if(!owner||working)return;
     try{
-      const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:.8});
+      const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:false,quality:1});
       if(picked.canceled||!picked.assets[0])return;
-      const item=picked.assets[0];const size=item.fileSize??new File(item.uri).size;
-      if(size<=0||size>2*1024*1024)throw Error('Выберите фото JPG, PNG или WebP до 2 МБ');
-      setWorking(true);
+      const item=picked.assets[0];
+      if(!item.width||!item.height)throw Error('Не удалось прочитать размеры фотографии');
+      setCropAsset({uri:item.uri,width:item.width,height:item.height});
+    }catch(e){setNotices('Не удалось открыть фотографию: '+errorOf(e));}
+  }
+  async function saveCroppedAvatar(file:CroppedAvatar){
+    if(!owner||working)return;
+    setWorking(true);
+    try{
       const path=`${owner.id}/avatar-${Date.now()}.jpg`;
-      await uploadFile('connect-avatars',path,{uri:item.uri,name:'avatar.jpg',mime:'image/jpeg',size});
+      await uploadFile('connect-avatars',path,{uri:file.uri,name:'avatar.jpg',mime:'image/jpeg',size:file.size});
       const result=await db.from('profiles').update({avatar_path:path}).eq('id',owner.id);
       if(result.error)throw result.error;
-      await onProfileSaved();setNotices('Аватар обновлён');
-    }catch(e){setNotices('Ошибка смены фото: '+errorOf(e));}finally{setWorking(false);}
+      await onProfileSaved();setCropAsset(null);setNotices('Аватар обновлён');
+    }finally{setWorking(false);}
   }
   async function deleteAccount(){
     if(!deletePassword||working)return;
@@ -270,5 +278,6 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       {working&&<ActivityIndicator color={colors.accent} style={{marginTop:12}}/>}
     </ScrollView>
     <ConnectNativeSonicRunner visible={gameOpen} colors={colors} onClose={()=>setGameOpen(false)}/>
+    <ConnectNativeAvatarCropper source={cropAsset} colors={colors} busy={working} onClose={()=>setCropAsset(null)} onSave={saveCroppedAvatar}/>
   </View>;
 }

@@ -1,15 +1,16 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, Alert, AppState, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import {File} from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
-import {useAudioPlayer, useAudioPlayerStatus} from 'expo-audio';
+import {useAudioPlayer, useAudioPlayerStatus, useAudioSampleListener, requestRecordingPermissionsAsync} from 'expo-audio';
 import {useVideoPlayer, VideoView} from 'expo-video';
 import {db} from './backend';
 import {ConnectNativeMusicLibrary} from './ConnectNativeMusic';
+import ConnectNativeAvatarCropper,{type AvatarSource,type CroppedAvatar} from './ConnectNativeAvatarCropper';
 import {DIRECT_UPLOAD_LIMIT, fileExtension, listMedia, nameForStorage, signedObject, uploadFile, type ListedMedia, type LocalUpload, type MediaKind} from './nativeMediaUtils';
 import type {Message} from './backend';
 import type {Palette} from './theme';
@@ -34,20 +35,45 @@ function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
   const state=useAudioPlayerStatus(player);
   const [speed,setSpeed]=useState(1);
   const [barWidth,setBarWidth]=useState(1);
+  const [bars,setBars]=useState<number[]>(()=>Array(43).fill(.14));
   const duration=Math.max(0,state.duration||0);
   const position=Math.max(0,Math.min(duration,state.currentTime||0));
   const fraction=duration>0?position/duration:0;
+  const durationRef=useRef(duration);durationRef.current=duration;
+  // Android Expo exposes actual decoded PCM frames during playback; unlike
+  // PWA Web Audio this does not pre-decode the entire track before playing.
+  useAudioSampleListener(player,sample=>{
+    const frames=sample.channels?.[0]?.frames;
+    if(!frames?.length||durationRef.current<=0)return;
+    const length=Math.min(frames.length,2048);
+    const stride=Math.max(1,Math.floor(length/96));
+    let peak=0;
+    for(let i=0;i<length;i+=stride)peak=Math.max(peak,Math.abs(frames[i]||0));
+    const bucket=Math.max(0,Math.min(42,Math.floor(sample.timestamp/durationRef.current*43)));
+    const amplitude=Math.max(.14,Math.min(1,Math.pow(peak,.65)));
+    setBars(previous=>{
+      if(amplitude<=previous[bucket])return previous;
+      const next=[...previous];next[bucket]=amplitude;return next;
+    });
+  });
+  async function togglePlayer(){
+    if(state.playing){player.pause();return;}
+    // Audio visualization may need RECORD_AUDIO permission on Android. Never
+    // prevent listening when the user does not grant this optional permission.
+    try{await requestRecordingPermissionsAsync();}catch{/* playback continues */}
+    player.play();
+  }
   return <View style={{width:260,maxWidth:'100%',gap:4}}>
     <View style={{flexDirection:'row',alignItems:'center',gap:5}}>
       <IconButton name={state.playing?'pause-circle':'play-circle'} label={state.playing?'Пауза':'Воспроизвести'} colors={colors}
-        onPress={()=>state.playing?player.pause():player.play()}/>
+        onPress={()=>void togglePlayer()}/>
       <Pressable accessibilityRole="button" accessibilityLabel={`Перемотка аудио: ${audioClock(position)} из ${audioClock(duration)}`}
         onLayout={event=>setBarWidth(Math.max(1,event.nativeEvent.layout.width))}
         onPress={event=>{if(duration>0){const x=event.nativeEvent.locationX;void player.seekTo(Math.max(0,Math.min(duration,duration*x/barWidth)));}}}
-        style={{height:31,flex:1,justifyContent:'center',paddingVertical:13}}>
-        <View pointerEvents="none" style={{height:5,backgroundColor:colors.line,borderRadius:4,overflow:'hidden'}}>
-          <View style={{height:5,width:Math.round(fraction*barWidth),backgroundColor:colors.accent,borderRadius:4}}/>
-        </View>
+        style={{height:35,flex:1,justifyContent:'center',flexDirection:'row',alignItems:'center',gap:1}}>
+        {bars.map((value,index)=><View key={index} pointerEvents="none" style={{flex:1,minWidth:1,
+          height:Math.round(4+22*value),borderRadius:2,
+          backgroundColor:index/43<=fraction?colors.accent:colors.muted}}/>)}
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={`Скорость воспроизведения ${speed}x`}
         onPress={()=>{const next=speed===1?1.5:speed===1.5?2:1;player.setPlaybackRate(next);setSpeed(next);}}
@@ -103,18 +129,33 @@ function VideoClip({uri}:{uri:string}) {
 }
 
 /** Circular playable video note, matching the PWA's filename contract. */
-function VideoNoteBubble({uri,colors}:{uri:string;colors:Palette}) {
+function VideoNoteBubble({uri,colors,active}:{uri:string;colors:Palette;active:boolean}) {
   const player=useVideoPlayer(uri,instance=>{instance.loop=true;});
   const [playing,setPlaying]=useState(false);
-  const [muted,setMuted]=useState(false);
+  const [muted,setMuted]=useState(true);
   const [duration,setDuration]=useState(0);
+  const [foreground,setForeground]=useState(AppState.currentState==='active');
+  const [manualPause,setManualPause]=useState(false);
+  useEffect(()=>{
+    const sub=AppState.addEventListener('change',value=>setForeground(value==='active'));
+    return()=>sub.remove();
+  },[]);
+  useEffect(()=>{
+    if(active&&foreground&&!manualPause){
+      // PWA behavior: entering viewport restarts the muted loop.
+      player.muted=true;setMuted(true);
+      player.play();setPlaying(true);
+    }else{player.pause();setPlaying(false);}
+    if(!active)setManualPause(false);
+    return()=>{player.pause();};
+  },[active,foreground,manualPause,player]);
   useEffect(()=>{
     const update=()=>{if(player.duration>0&&Number.isFinite(player.duration))setDuration(player.duration);};
     update();const timer=setInterval(update,800);return()=>clearInterval(timer);
   },[player]);
   return <View style={{width:208,height:220}}>
     <Pressable accessibilityRole="button" accessibilityLabel={playing?'Пауза видеокружка':'Воспроизвести видеокружок'}
-      onPress={()=>{if(playing)player.pause();else player.play();setPlaying(!playing);}}
+      onPress={()=>{if(playing){setManualPause(true);player.pause();setPlaying(false);}else{setManualPause(false);player.play();setPlaying(true);}}}
       style={{width:208,height:208,borderRadius:104,overflow:'hidden',backgroundColor:'#081421',borderWidth:2,borderColor:colors.accent}}>
       <VideoView player={player} nativeControls={false} contentFit="cover" surfaceType="textureView" style={{width:'100%',height:'100%'}} />
       {!playing&&<View pointerEvents="none" style={{position:'absolute',top:0,left:0,right:0,bottom:0,alignItems:'center',justifyContent:'center',backgroundColor:'#06101b44'}}>
@@ -158,7 +199,7 @@ export function ConnectNativeMediaViewer({url,kind,title,onClose,colors,onPrevio
     </View>
   </Modal>;
 }
-export function ConnectNativeAttachment({message,colors}:{message:Message;colors:Palette}) {
+export function ConnectNativeAttachment({message,colors,videoAutoPlay=false}:{message:Message;colors:Palette;videoAutoPlay?:boolean}) {
   const [url,setUrl]=useState<string|null>(null);
   const [view,setView]=useState(false);
   useEffect(()=>{
@@ -177,7 +218,7 @@ export function ConnectNativeAttachment({message,colors}:{message:Message;colors
       <AttachmentImage url={url}/>
     </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'image/jpeg'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
-  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <View><VideoNoteBubble uri={url} colors={colors}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/></View>;
+  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <View><VideoNoteBubble uri={url} colors={colors} active={videoAutoPlay}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/></View>;
   if(k==='video')return <><IconButton name="play-circle" label={`Открыть видео ${name}`} colors={colors} onPress={()=>setView(true)}/>
     <Text numberOfLines={2} style={{color:colors.text}}>{name}</Text>
     <SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/>
@@ -195,6 +236,7 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors,onA
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<number|null>(null);
   const [uploadProgress,setUploadProgress]=useState('');
+  const [avatarSource,setAvatarSource]=useState<AvatarSource|null>(null);
   const style=useMemo(()=>c(colors),[colors]);
   const label=owner?{photos:'Мои фото',videos:'Мои видео',music:'Моя музыка'}[kind]:{photos:'Фото',videos:'Видео',music:'Музыка'}[kind];
   const reload=useCallback(async()=>{
@@ -244,22 +286,30 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors,onA
       Alert.alert('Не подходит для аватара','Выбери JPG, PNG или WebP.');return;
     }
     if(!FileSystem.cacheDirectory){Alert.alert('Ошибка','Кэш телефона недоступен');return;}
-    let local:string|null=null;
     setBusy(true);
     try{
-      const mime=ext==='png'?'image/png':ext==='webp'?'image/webp':'image/jpeg';
-      const saved=await FileSystem.downloadAsync(item.url,FileSystem.cacheDirectory+`connect-avatar-${Date.now()}.${ext}`);
-      local=saved.uri;
+      const saved=await FileSystem.downloadAsync(item.url,FileSystem.cacheDirectory+`connect-crop-${Date.now()}.${ext}`);
+      if(saved.status!==200)throw Error('Не удалось загрузить фотографию');
       const size=new File(saved.uri).size;
       if(!size||size>12*1024*1024)throw Error('Фото должно быть не более 12 МБ.');
-      const newPath=`${ownerId}/avatar-${Date.now()}.${ext}`;
-      await uploadFile('connect-avatars',newPath,{uri:saved.uri,name:`avatar.${ext}`,mime,size});
-      const result=await db.from('profiles').update({avatar_path:newPath}).eq('id',ownerId);
+      const image=await new Promise<{width:number;height:number}>((resolve,reject)=>{
+        Image.getSize(saved.uri,(width,height)=>resolve({width,height}),reject);
+      });
+      setAvatarSource({uri:saved.uri,width:image.width,height:image.height});
+    }catch(e){Alert.alert('Не удалось открыть редактор',e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  }
+  async function saveCroppedGalleryAvatar(file:CroppedAvatar){
+    setBusy(true);
+    try{
+      const path=`${ownerId}/avatar-${Date.now()}.jpg`;
+      await uploadFile('connect-avatars',path,{uri:file.uri,name:'avatar.jpg',mime:'image/jpeg',size:file.size});
+      const result=await db.from('profiles').update({avatar_path:path}).eq('id',ownerId);
       if(result.error)throw result.error;
       await onAvatarUpdated?.();
-      Alert.alert('Готово','Фото установлено на аватар.');
-    }catch(e){Alert.alert('Не удалось установить аватар',e instanceof Error?e.message:String(e));}
-    finally{if(local)void FileSystem.deleteAsync(local,{idempotent:true}).catch(()=>{});setBusy(false);}
+      setAvatarSource(null);
+      Alert.alert('Готово','Фотография установлена на аватар.');
+    }finally{setBusy(false);}
   }
   function deleteMedia(item:ListedMedia){
     if(!owner||busy)return;
@@ -303,6 +353,7 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors,onA
         </View>)}
       <Text style={[style.muted,{marginTop:12}]}>Файлы видны участникам Connect. Пока доступна загрузка до {DIRECT_UPLOAD_LIMIT/1024/1024} МБ за файл.</Text>
     </ScrollView>}
+    <ConnectNativeAvatarCropper source={avatarSource} colors={colors} busy={busy} onClose={()=>setAvatarSource(null)} onSave={saveCroppedGalleryAvatar}/>
     {validViewer && active&&<ConnectNativeMediaViewer key={active.path} url={active.url} title={active.name} kind={kind as 'photos'|'videos'} colors={colors}
       count={items.length} index={selected||0} onClose={()=>setSelected(null)}
       onPrevious={()=>setSelected(x=>x===null?null:(x-1+items.length)%items.length)}
