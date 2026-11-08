@@ -1,0 +1,105 @@
+# Phase 7 of 10: standalone Connect Native media/music parity.
+# Important: FIRST replace .github/workflows/android-apk.yml with the provided
+# disabled workflow, otherwise that obsolete push trigger may build a legacy APK.
+name: Connect Native - PWA parity phase 7 (profile media and music)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-pwa-parity-phase7.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-pwa-parity-phase7
+  cancel-in-progress: false
+
+jobs:
+  media-music-parity:
+    name: Music queue, mini player, presence and media gallery (NO APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout latest Connect Native
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply guarded phase 7 changes (pure TSX and config only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          test -s native/src/App.tsx
+          test -s native/src/ConnectNativeMedia.tsx
+          test -s native/app.json
+          # Refuse to continue if the legacy APK push workflow was not retired.
+          python3 - <<'PY_GATE'
+          from pathlib import Path
+          src=Path('.github/workflows/android-apk.yml').read_text()
+          if '  push:' in src or 'assembleDebug' in src or 'assembleRelease' in src:
+              raise SystemExit('STOP: legacy APK workflow still builds on push. Replace android-apk.yml FIRST.')
+          print('Legacy APK push workflow disabled: safe to proceed.')
+          PY_GATE
+          python3 - <<'PY_PHASE7'
+          import os,base64,gzip,hashlib
+          music=gzip.decompress(base64.b64decode('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'))
+          installer=gzip.decompress(base64.b64decode('H4sIAK948GoC/81Z3XLcthW+36eAN2lAtjRlKYrTWYvSyIrsaPyjHctpLhSNjSXBXURcggOAWm03nEnSTm/SmUx7015ketM+gJqJkzSN1Veg3qgHALm/WjlOkzSa0S4XODj/+M4B8cq1lVyKlQ5LV2h6grKh6vH09Uaz2dzOsmSI2u9uo34uWYgS1hFEDFFGBFNDpDhSPYrCXAiaKrTD05SGCj0kip1QJHkuQir9xt2ciIhGHmIR7WdcaVqSRoil+pHxlCQgJaUnVKBOzpJIwjTabt/ztQ6NWPA+SFQ9kI4YMBAKteFno3ruEElvrnvofclTD3HZaDza338caBIHp0YX7Da22+1Aj69gKcIVMMxX8hQ3Huy+tbc9NVHZYE14QCNGKrp3DvZ2ltJp51i6nf2Hd/buVoQEpGitcKMR0RgJmiUkpE94Sp2QG+NB3wQck9KBhxLSoYnbaiD4Y7EeAw+hitAO679MgN+cGI8MfdFCJBGUREME0hJGI7C1JhVU5WLMomYMEi9lDFPVmB/yHGQAoXstWJ1QGJ6ESYoOhlLR/u4pm9Wk32HdnOc6fmGPC+SMFjkW7lIN/cpDms7TPlm1lFfJtFmGwh5JuzS6BRxjiEba1cnZzamUIK0BrgkgAXztqCeKniqHpiGPgCzAuYqv/xqI+jrYgcmHK+kMs+lQwm8P1GxW6biYQchkMPYvSS58q/k/rH0vrdaNFtOxLfgJ7DfhLU49YClrJ2Q4P/mQD+4z8HEK9nq5pIsriyXq6LnKFGx+VPtUO3+Zu5COulSID9K9KJAQKUCCLR/kCp9FH3yAa998B8L30prI4FRwqfKOa+hgbjeOYcpx3GBzZBb4kqp3gJ9jZLi3Cu/QPHkzs0fujIlaAYNjGRXS+C2kV9hL5DANUZynoYY8lPAuz5XjjsiAMIUiJkknoVbddi57oG010/FJrnq+ZN10X6+o3LKMn1U5TLikEx4vy70y0TJFYUJJmmdXBtP+bTyGTYOkGiY0GElf5h3FVEKLzZEMBaWpnwkes4T6HcYhcuVfy+cXvy/PLz4svy3PLv5Qfn3xKSrP0cVH5bPyn+UzVD6Hj4vfld+UZ+VX8P+8PMPFxoqWstn8v0nWaVRJXbqBUCUPUnZeAxYVkK0JFzIY2e9ixVqDgQMU2TkWOnzg8uEL/L/xGwYlo/LAKE7oaWu1APsrcHVcUF+TVOrXWh2zNAqCACvSwa+9NsNE+h2uFO8XU75+SSkbV8HPvBcQT/czmgYjFsHOrL1sN3bli6D6ln4MejtZsJmBP0F/FtntbSuZU5G5sHUPjJ3OSBvawgbmsVfNe+bnPTtjUKyo2RQQlO/rKdyuIQEQCcxFmbH3igBuQEfygEAHtrmxckBiug0lyLhx8rNG9CoYG8sxf3Oa21Vk300UvpvwDkkqI3QkzKSuhbZoThtkRqZr2ijqTMpGh4THNI3myt7lJFdVt/u2Ef3u9ajuXC3Lcbm/XPMq41h4HFiUfIuHeR+C2YYhqDpdquqRbY3CzkgNM9rCJI8YX/klhrKRKJYltBWTRFIv5NnwMd8hYY++xQSoycWwpUROixrMfziJmu2LBYJXLD0yHIxkE9Gr3DLeXNfsDkxo2lU91/Zw480HO+52LoeOFufear7ESpifnt5cXXNVTwAi7grBhYPLv5RngNHlF+XX5XMEyA3IjAC+z8svAZ7PEUycA3aflZ8Dmn988UeL4TByXv4bUP0ZWl1DgPln5b/g93n5OZ4ghvV/zEWfKNkaHd7THfKDGhuOWlJB1909PCqC0QT8sx5XXLYO8ftZF3vwSfVXlurPAe1k8NVlMT7yJkv0xjFL+tk6TPf5iaXtz1AZJDJEr2uidcArTEioSYlewLtaBM9yCV9xYmdmmRRj08AopzJP1xIem2/pThliAmNtP9Qgd+SzNEzyiEoTkN1TADLddJlffkr61HVnQvO0/Me4lH488fFZFYH/mKB9UT4Dki8heJ/D/DOI0EcXn7bQq6Mx1+LpJCLFFfmED4DYHktNj6z3gjStWJ+cQpRfmMfWH+YIEYyqMGJjw8flOfaqKOHyz6AsqK3HbExw+Rn0BF9dfKL7AlxYb831qZYt9I9UbE2YfwY++BqZlmNWhp3QObsgCmihKfl2UWLrh1Ia20NGRroU9eDQA0mue3apiFABHL5tCEbXGJy86n25Ndtq6S+/nysaFZuwQ3WUP9J7Twf9myoFppMCNp5f9VEty7ZPMsfRjx6DjtzW1WM6hDYAxnx98i9qaYdWXEhE5NlHSMKjYnN8oNxoCzgg6GYXmgnzHIxMnw85fkISFmnuVJi+gCaAjDRyGDT8xVxL4+kvi52Q+C0MYrAH67vpnta5hUOAYkBMr0uy1ip0QIiEoT6adFjC1PARB17NTg49QdrcnDpAj+omwgYQb23s9bXz7TEWxOeCGbf4uUimtBqwSPVaN294Pcq6PaWfOlxAFX4EQculUWFlc/aovrHHU6ZzEunNFYxF20zBW/YhJP3r0OQnLKW4aoJIcj3lisrxOOjBfgsc1t6oOte6ZfO11akC0cWU6CU94iV5o8/YBUrzfoeK/fg+yIJ4rUE7aVxgMKHKlVnLlmagXai13Xr66sgZ/1pZvbG2bj5cX/E77BTivuoWCDbZn5627MuESlLVv05SamWcU5PBsTNt1zjXDk7ZvK3r607CMgSRrVJah3bxBFDJnThyZDAEWO9BEG+bXLKRbCpBZK+OTrMGsqfl32H7ncEes+Xv1SkvPi0uaban9kcEm0HZ9wrGae5USCvF3EK/jYPWbAoYZr2wtbE5CxWg+w+FFcXG0i4QGT/pg1b1UCCjhPU2WMrkvp6o5gvUgXoSjPSn9sIjCmUYtJtywaXRmdpdPxYeLoDDQlLNQ5Iee1cABuEBfGLv/VwqFg93qpd7WGZQ/653qBrACQZ7sOauBqwbRTGDSi8NxBUg4dfXfmExcH2W4wwSL4fG2an7dR7/DUraNxcfXnxi8rgumvMJPZPAs4A+p4vGwpeAWbx64waYRWQG/B5BvnEoCLNwC/AL55Su4Hka7egcaVWACDqcEB18yJlZf1wGIxMwm8PA1eIKeFuKiz8XxJhBjcbcyI9Q9ZfX/bm0+Imq/ELtbc6X2uaLK+osvx+7pP7ERXXpfvj5pPBM2Vt2njCdsgdF0Zt90eDZ0yHqChaZk4lJAPNuT783eQXtQnwic312ot8VAccIlO1n8JAqpIOIBkz1EEER61I4VsCBVFN3KbhHAwwacHEcJ3zgNwQZBPYWzO/cXI9oyCPqcMCi9IQJnh7i9tvbB7tvPjGXWE9u31zHR259e9YDp4LODRbXj77skbU3bjrA1fV79NTKd9xrwVKWB29vwwp81Lr8ugbfBpRMQGV7izgxMyZMD+uLwK65UQx7NDzWDoLgx6wb6NszP+Ekko69WbvqasZtZEneZakM7OpDTE8zjo8OcTWOjxqxBuzgjn4tA88C2Rnt3IpmfP/GJPxSJA2pY6c8HTzXvvE3A4c3jqBWaxnXzVsUPHVJZwlWQTZNdYrfHlcL/epT1w58FDyGI+14idXMDOnbP67sSGvRm/AJRT7tol0QXb/AqeyQqM+kvv8CJ76CzM2r8bdOdNShYDJFA3A1UNxCEew1qcCjfbSzh0QOaKVkWJPBsj5TmtLXt6e+Xkat6/Vby8WbMXt3NkVmt8glhDppKsLOEA4aJtequ9NpBib8Ud7PpGNDCsxkLugTIkPGbBg96Jkgl4I191f4PWhxFsXZG1Pchvym6M36XhplsJuJoJGPHnJ924wgHe4KAokK6XDCj2EGFv8XTcniWR0fAAA='))
+          assert hashlib.sha256(music).hexdigest() == 'cabbc7bf4980eb74cd16a83035c5b9bf56ba0f19d1529d60627debee2d629a3a', 'music integrity error'
+          assert hashlib.sha256(installer).hexdigest() == '8c8b72c847f525b2f62336fa6a4de51956d1053f89850ed5b63c39d03531e8f4', 'installer integrity error'
+          os.environ['PHASE7_MUSIC_B64']=base64.b64encode(music).decode('ascii')
+          os.environ['PHASE7_MUSIC_SHA256']='cabbc7bf4980eb74cd16a83035c5b9bf56ba0f19d1529d60627debee2d629a3a'
+          exec(compile(installer,'phase7_patch.py','exec'),{'__name__':'__main__'})
+          PY_PHASE7
+          git diff --check
+
+      - name: Setup Node.js 24 (no Android SDK or Gradle)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Validate TypeScript before saving changes
+        shell: bash
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Commit validated React Native files only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/src/App.tsx native/src/ConnectNativeMedia.tsx native/src/ConnectNativeMusic.tsx native/app.json
+          if git diff --cached --quiet; then
+            echo 'Phase 7 source changes already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(native): PWA profile media and persistent music player parity'
+          git push origin HEAD:main
+
+      - name: Phase 7 summary (no APK produced)
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native: media + music parity phase 7'
+            echo '- Single music queue shared between screens, seek, shuffle, repeat, previous/next.'
+            echo '- Persistent mini-player and last position, opt-in now-playing presence.'
+            echo '- Photo grid, full screen viewer; audio upload selection up to 12 files.'
+            echo '- Background music plugin configuration and lock-screen controls.'
+            echo '- TypeScript validation only. No APK or device/emulator runtime checks.'
+          } >> "$GITHUB_STEP_SUMMARY"
