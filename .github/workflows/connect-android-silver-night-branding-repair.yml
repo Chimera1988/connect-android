@@ -1,0 +1,168 @@
+# Repairs the single React Native 0.88 TypeScript incompatibility in the
+# original PWA branding installer. Does not build an Android APK.
+name: Connect Android - Silver Night branding repair (NO APK)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-android-silver-night-branding-repair.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-silver-night-branding-repair
+  cancel-in-progress: false
+
+jobs:
+  install-repaired-branding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Confirm no APK build is enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY_GUARD'
+          from pathlib import Path
+          import re
+          legacy = Path('.github/workflows/android-apk.yml')
+          if not legacy.is_file():
+              raise SystemExit('STOP: legacy APK guard is missing')
+          s = legacy.read_text(encoding='utf-8')
+          if re.search(r'^\s{2}push\s*:', s, re.M) or re.search(r'\bassemble(?:Debug|Release)\b', s):
+              raise SystemExit('STOP: APK auto-build is enabled')
+          if not Path('native/src/App.tsx').is_file():
+              raise SystemExit('STOP: native application source missing')
+          print('APK release remains blocked; continuing with source only.')
+          PY_GUARD
+
+      - name: Restore original PWA images and install corrected splash source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_REPAIR'
+          from pathlib import Path
+          import re
+          import subprocess
+
+          # The failed installer was safely rolled back by the TypeScript step.
+          # Reuse its *exact* approved asset URLs, binary validation and source
+          # generation instead of approximating the visuals or duplicating a
+          # large base64 payload in a second workflow.
+          previous = Path('.github/workflows/connect-android-silver-night-branding.yml')
+          if not previous.is_file():
+              raise SystemExit('Original Silver Night installer is absent')
+          source = previous.read_text(encoding='utf-8')
+
+          def get_script(step_name: str) -> str:
+              marker = '      - name: ' + step_name + '\n'
+              if source.count(marker) != 1:
+                  raise RuntimeError('Cannot find exactly one installer step: ' + step_name)
+              part = source.split(marker, 1)[1].split('\n      - name: ', 1)[0]
+              lines = part.splitlines()
+              try:
+                  body_at = lines.index('        run: |')
+              except ValueError as e:
+                  raise RuntimeError('Installer step has no shell command: ' + step_name) from e
+              result = []
+              for line in lines[body_at+1:]:
+                  if not line.strip():
+                      result.append('')
+                  elif line.startswith('          '):
+                      result.append(line[10:])
+                  else:
+                      raise RuntimeError('Unexpected indentation in original installer')
+              if not result:
+                  raise RuntimeError('Empty original installer command')
+              return '\n'.join(result) + '\n'
+
+          for step in (
+              'Get PWA original icon, adaptive icon, and exact splash artwork',
+              'Install precise Silver Night React Native overlay and native config',
+          ):
+              print('Reusing original installer step:', step, flush=True)
+              subprocess.run(['bash', '-e', '-o', 'pipefail'], input=get_script(step),
+                             text=True, check=True, cwd='.')
+
+          splash = Path('native/src/ConnectNativeSplash.tsx')
+          if not splash.is_file():
+              raise SystemExit('Installer did not produce ConnectNativeSplash.tsx')
+          before = splash.read_text(encoding='utf-8')
+          old = 'StyleSheet.absoluteFillObject'
+          if before.count(old) != 1:
+              raise SystemExit(f'Expected one invalid RN property, found {before.count(old)}')
+          after = before.replace(old, 'StyleSheet.absoluteFill')
+          splash.write_text(after, encoding='utf-8')
+          print('Fixed React Native 0.88 TypeScript error (absoluteFillObject -> absoluteFill).')
+          PY_REPAIR
+
+      - name: Install Expo SDK 58 splash dependency and update lockfile
+        shell: bash
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npm install 'expo-splash-screen@~58.0.13' --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Typecheck and verify exact original branding - no APK
+        shell: bash
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npx expo config --type public --json > /tmp/connect-silver-night-config.json
+          python3 - <<'PY_CONFIG'
+          import json
+          from pathlib import Path
+          c = json.loads(Path('app.json').read_text(encoding='utf-8'))['expo']
+          assert c['name'] == 'Connect'
+          assert c['android']['package'] == 'com.connect.messenger'
+          assert c['icon'] == './assets/connect-icon.png'
+          assert c['android']['adaptiveIcon']['foregroundImage'] == './assets/connect-adaptive-foreground.png'
+          assert any(isinstance(p, list) and p[0] == 'expo-splash-screen' for p in c['plugins'])
+          for name in ('connect-icon.png', 'connect-adaptive-foreground.png',
+                       'connect-splash-bubbles.png', 'connect-splash-wordmark.png'):
+              assert Path('assets', name).is_file(), name
+          assert 'StyleSheet.absoluteFillObject' not in Path('src/ConnectNativeSplash.tsx').read_text()
+          print('PWA images, splash and Android configuration verified. APK not built.')
+          PY_CONFIG
+
+      - name: Commit only validated branding sources and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/app.json native/package.json native/package-lock.json native/src/App.tsx native/src/ConnectNativeSplash.tsx native/assets/connect-icon.png native/assets/connect-adaptive-foreground.png native/assets/connect-splash-bubbles.png native/assets/connect-splash-wordmark.png
+          if git diff --cached --quiet; then
+            echo 'Original Silver Night branding already installed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(android): install exact PWA Silver Night branding with RN 0.88 compatibility'
+          git push origin HEAD:main
+
+      - name: Summary - APK not built
+        run: |
+          {
+            echo '### Connect Android: Silver Night branding repair'
+            echo '- Reused exact PWA launcher, adaptive foreground, chat bubbles and wordmark.'
+            echo '- Fixed unsupported StyleSheet.absoluteFillObject in React Native 0.88.'
+            echo '- Checked TypeScript and Expo configuration before committing.'
+            echo '- NO APK, Gradle, EAS build, or prebuild was run.'
+            echo '- Installation on device remains untested.'
+          } >> "$GITHUB_STEP_SUMMARY"
