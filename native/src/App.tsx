@@ -14,6 +14,7 @@ import {useConnectNativeAppearance} from './ConnectNativeAppearance';
 import ConnectNativeSettings from './ConnectNativeSettings';
 import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
+import {useConnectNativeReadSync} from './ConnectNativeReadSync';
 import {useConnectNativeMissedCalls} from './ConnectNativeMissedCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
 import {ConnectNativeMusicProvider,ConnectNativeMusicMiniPlayer,ConnectNativeNowListening,useConnectNativeMusic} from './ConnectNativeMusic';
@@ -78,6 +79,7 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  useConnectNativeReadSync(ownId);
   const missedCalls=useConnectNativeMissedCalls(ownId,tab==='calls'&&screen.kind==='tab');
   const music=useConnectNativeMusic();
   useEffect(()=>{music.setUser(ownId);},[ownId,music.setUser]);

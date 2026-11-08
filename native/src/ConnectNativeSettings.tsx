@@ -13,6 +13,7 @@ import {BUILTIN_PACKS,ACCENTS,type AppearanceController} from './ConnectNativeAp
 import {themeNames,type Palette} from './theme';
 import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
 import ConnectNativeStickerManager from './ConnectNativeStickerManager';
+import ConnectNativeSonicRunner from './ConnectNativeSonicRunner';
 
 type Page='home'|'appearance'|'stickers'|'notifications'|'data'|'privacy'|'about';
 type Profile={id:string;display_name:string;bio:string|null;avatar_path:string|null};
@@ -52,6 +53,7 @@ function SmallButton({label,onPress,colors,disabled=false,danger=false}:{label:s
 
 export default function ConnectNativeSettings({owner,email,colors,appearance,admin,onInvite,onProfile,onLogout,onProfileSaved}:Props){
   const [page,setPage]=useState<Page>('home');
+  const [gameOpen,setGameOpen]=useState(false);
   const [notification,setNotification]=useState<NotificationPref>(DEFAULT_NOTIFICATIONS);
   const [notices,setNotices]=useState('');
   const [working,setWorking]=useState(false);
@@ -189,6 +191,7 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       {page==='home'&&<>
         <Row icon="person-circle-outline" title={owner?.display_name||'Мой профиль'} subtitle={owner?.bio||email} colors={colors} onPress={onProfile}/>
         {pageRows.map(r=><Row key={r.page} colors={colors} icon={r.icon} title={r.title} subtitle={r.subtitle} onPress={()=>{setPage(r.page);setNotices('');}}/>)}
+        <Row icon="game-controller-outline" title="Если скучно" subtitle="Соник: прыжки, роботы и кольца" colors={colors} onPress={()=>setGameOpen(true)}/>
         {admin&&<Row icon="people-outline" title="Управление участниками" subtitle="Приглашения в Connect" colors={colors} onPress={onInvite}/>}
         <Row icon="log-out-outline" title="Выйти из аккаунта" colors={colors} danger onPress={onLogout}/>
       </>}
@@ -260,5 +263,6 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       {!!notices&&<Text accessibilityRole="alert" style={{marginTop:14,color:colors.accent,fontSize:13}}>{notices}</Text>}
       {working&&<ActivityIndicator color={colors.accent} style={{marginTop:12}}/>}
     </ScrollView>
+    <ConnectNativeSonicRunner visible={gameOpen} colors={colors} onClose={()=>setGameOpen(false)}/>
   </View>;
 }

@@ -12,6 +12,20 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MESSAGES='connect-native-messages-v1';
 const CALLS='connect-native-calls-v1';
 const READ_KEY='connect-native-read-marker-v1:';
+// connect-native-push-pref-phase9: preserve the same user-facing settings as PWA.
+const NOTIFICATION_KEY='connect-native-notifications-v1';
+type NotificationPrefs={enabled:boolean;vibrate:boolean;sound:'soft'|'bright'|'gentle'|'silent'};
+async function notificationPrefs():Promise<NotificationPrefs>{
+  const fallback:NotificationPrefs={enabled:true,vibrate:true,sound:'soft'};
+  try{
+    const raw=await SecureStore.getItemAsync(NOTIFICATION_KEY);
+    if(!raw)return fallback;
+    const parsed=JSON.parse(raw) as Partial<NotificationPrefs>;
+    return {enabled:typeof parsed.enabled==='boolean'?parsed.enabled:true,
+      vibrate:typeof parsed.vibrate==='boolean'?parsed.vibrate:true,
+      sound:['soft','bright','gentle','silent'].includes(parsed.sound||'') ? parsed.sound as NotificationPrefs['sound'] : 'soft'};
+  }catch{return fallback;}
+}
 
 type Data=Record<string,string|undefined>;
 export type NativePushDestination={kind:'chat';conversationId:string}|{kind:'call';callId:string;conversationId:string|null};
@@ -64,6 +78,8 @@ export async function handleNativePush(data:Data|undefined){
     return;
   }
   if(await SecureStore.getItemAsync(DEVICE_ACTIVE_KEY)!=='yes')return;
+  const prefs=await notificationPrefs();
+  if(!prefs.enabled)return;
   if(data.kind==='incoming-call'&&data.callId&&UUID.test(data.callId)){
     await ensureChannels();
     await showIncomingSystemCall(data.callId,data.callerName||'Собеседник',data.conversationId||null);
@@ -74,7 +90,7 @@ export async function handleNativePush(data:Data|undefined){
     const lastRead=await SecureStore.getItemAsync(READ_KEY+data.conversationId);
     if(data.createdAt&&lastRead&&Number.isFinite(Date.parse(data.createdAt))&&
       Date.parse(data.createdAt)<=Date.parse(lastRead))return;
-    const channelId=await getConnectSoundChannel('messages');
+    const channelId=await getConnectSoundChannel('messages',{silent:prefs.sound==='silent',vibrate:prefs.vibrate});
     await notifee.displayNotification({
       id:'chat:'+data.conversationId,
       title:'Connect · Новое сообщение',body:'Откройте переписку, чтобы прочитать сообщение',
@@ -119,6 +135,13 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
   void (async()=>{
     try{
       await SecureStore.setItemAsync(DEVICE_ACTIVE_KEY,'yes');
+      const remote=await db.from('notification_preferences').select('enabled,sound,vibrate').eq('user_id',ownerId).maybeSingle();
+      if(!remote.error&&remote.data){
+        const p=remote.data;
+        if(typeof p.enabled==='boolean'&&typeof p.vibrate==='boolean'&&
+          ['soft','bright','gentle','silent'].includes(p.sound||''))
+          await SecureStore.setItemAsync(NOTIFICATION_KEY,JSON.stringify(p));
+      }
       await ensureChannels();
       const permission=await notifee.requestPermission();
       if(permission.authorizationStatus===0){if(alive)onError('Разрешите уведомления Connect в настройках Android.');return;}

@@ -33,13 +33,16 @@ async function preference(kind:SoundKind):Promise<Preference|null>{
     return typeof value.uri==='string'&&value.uri.startsWith('content://media/')&&typeof value.name==='string'?value:null;
   }catch{return null;}
 }
-export async function getConnectSoundChannel(kind:SoundKind):Promise<string>{
+export async function getConnectSoundChannel(kind:SoundKind,options?:{silent?:boolean;vibrate?:boolean}):Promise<string>{
   const pref=await preference(kind);
-  const channelId=`connect-native-${kind}-${pref?'chosen-'+hashUri(pref.uri):'system-default-v2'}`;
+  const silent=options?.silent===true;
+  const vibration=options?.vibrate!==false;
+  const channelId=`connect-native-${kind}-${pref?'chosen-'+hashUri(pref.uri):'system-default-v2'}-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
   await notifee.createChannel({
     id:channelId,name:kind==='calls'?'Connect · Входящие аудиозвонки':'Connect · Новые сообщения',
     description:kind==='calls'?'Звук входящих вызовов Connect':'Звук входящих сообщений Connect',
-    importance:AndroidImportance.HIGH,sound:pref?.uri||'default',vibration:true,
+    importance:silent?AndroidImportance.LOW:AndroidImportance.HIGH,
+    sound:silent?undefined:pref?.uri||'default',vibration,
   });
   return channelId;
 }
