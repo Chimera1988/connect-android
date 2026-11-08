@@ -127,7 +127,7 @@ def audit(root:Path, out:Path):
     out.mkdir(parents=True,exist_ok=True)
     (out/'phase10_parity_199.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     with (out/'phase10_parity_199.csv').open('w',newline='',encoding='utf-8-sig') as h:
-        writer=csv.DictWriter(h,fieldnames=['id','group','priority','description','baseline','source_probe','example_evidence','missing_signals','acceptance','device_test','visual_review','test_instruction'])
+        writer=csv.DictWriter(h,lineterminator='\n',fieldnames=['id','group','priority','description','baseline','source_probe','example_evidence','missing_signals','acceptance','device_test','visual_review','test_instruction'])
         writer.writeheader()
         for r in rows:
             entry={k:r[k] for k in writer.fieldnames}

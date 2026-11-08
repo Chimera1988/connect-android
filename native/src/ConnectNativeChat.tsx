@@ -506,7 +506,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Btn name="chevron-back" label="Назад" colors={colors} onPress={onBack}/>
       <Pressable style={{flexDirection:'row',alignItems:'center',gap:8,flex:1,minWidth:0}} onPress={onOpenProfile}>
         <ChatAvatar name={peer.display_name} url={avatarUrl} colors={colors}/>
-        <Text numberOfLines={1} style={{color:textColor,fontSize:17,fontWeight:'700',flex:1}}>{peer.display_name}</Text>
+        <View style={{flex:1,minWidth:0}}><Text numberOfLines={1} style={{color:textColor,fontSize:17,fontWeight:'700'}}>{peer.display_name}</Text>
+          <Text style={{fontSize:11,color:colors.muted}}>{peer.online_until&&Date.parse(peer.online_until)>Date.now()?'В сети':peerTyping?'Печатает…':peerRecording?'Записывает голосовое…':'Не в сети'}</Text></View>
       </Pressable>
       <Btn name="call-outline" label="Аудиозвонок" colors={colors} onPress={onCall}/>
       <Btn name="ellipsis-vertical" label="Действия в чате" colors={colors} onPress={()=>setToolsOpen(true)}/>

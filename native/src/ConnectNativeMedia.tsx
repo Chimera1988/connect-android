@@ -3,6 +3,7 @@ import {ActivityIndicator, Alert, Image, Linking, Modal, Pressable, ScrollView, 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import {File} from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import {useAudioPlayer, useAudioPlayerStatus} from 'expo-audio';
@@ -57,6 +58,45 @@ function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
     <Text style={{color:colors.muted,fontSize:11,marginLeft:7}}>{audioClock(position)} / {audioClock(duration)}</Text>
   </View>;
 }
+/** Share a downloaded attachment through Android's file chooser.
+ * Never send message files to Connect or third parties automatically.
+ */
+function SaveAttachment({url,name,mime,colors}:{url:string;name:string;mime:string;colors:Palette}){
+  const [working,setWorking]=useState(false);
+  async function save(){
+    if(working)return;
+    setWorking(true);
+    try{
+      if(!FileSystem.cacheDirectory)throw Error('Кэш Android недоступен');
+      if(!await Sharing.isAvailableAsync())throw Error('Системное меню сохранения недоступно');
+      const extension=fileExtension(name).replace(/[^a-z0-9]/g,'').slice(0,8)||'bin';
+      const local=FileSystem.cacheDirectory+`connect-file-${Date.now()}-${Math.floor(Math.random()*100000)}.${extension}`;
+      const downloaded=await FileSystem.downloadAsync(url,local);
+      if(downloaded.status!==200)throw Error('Загрузка файла завершилась с ошибкой');
+      await Sharing.shareAsync(downloaded.uri,{mimeType:mime||'application/octet-stream',dialogTitle:'Сохранить или отправить файл'});
+      // Do not immediately unlink the share target: receiving apps may read it
+      // after Android's chooser closes. OS will eventually evict app cache.
+    }catch(e){Alert.alert('Не удалось сохранить файл',e instanceof Error?e.message:String(e));}
+    finally{setWorking(false);}
+  }
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Сохранить или поделиться: ${name}`}
+    disabled={working} onPress={()=>void save()}
+    style={{alignSelf:'flex-start',flexDirection:'row',alignItems:'center',gap:5,paddingHorizontal:7,paddingVertical:5,opacity:working?0.5:1}}>
+    <Ionicons name="download-outline" color={colors.accent} size={17}/>
+    <Text style={{fontSize:11,color:colors.accent}}>{working?'Загружаем…':'Сохранить / Поделиться'}</Text>
+  </Pressable>;
+}
+function AttachmentImage({url}:{url:string}){
+  const [height,setHeight]=useState(205);
+  useEffect(()=>{
+    let alive=true;
+    Image.getSize(url,(w,h)=>{
+      if(alive&&w>0&&h>0)setHeight(Math.max(70,Math.min(330,Math.round(230*h/w))));
+    },()=>{});
+    return()=>{alive=false;};
+  },[url]);
+  return <Image source={{uri:url}} resizeMode="contain" style={{width:230,height,borderRadius:13}}/>;
+}
 function VideoClip({uri}:{uri:string}) {
   const player=useVideoPlayer(uri,instance=>{instance.loop=false;});
   return <VideoView player={player} style={{width:'100%',height:310,backgroundColor:'#000',borderRadius:14}} nativeControls contentFit="contain"/>;
@@ -67,6 +107,11 @@ function VideoNoteBubble({uri,colors}:{uri:string;colors:Palette}) {
   const player=useVideoPlayer(uri,instance=>{instance.loop=true;});
   const [playing,setPlaying]=useState(false);
   const [muted,setMuted]=useState(false);
+  const [duration,setDuration]=useState(0);
+  useEffect(()=>{
+    const update=()=>{if(player.duration>0&&Number.isFinite(player.duration))setDuration(player.duration);};
+    update();const timer=setInterval(update,800);return()=>clearInterval(timer);
+  },[player]);
   return <View style={{width:208,height:220}}>
     <Pressable accessibilityRole="button" accessibilityLabel={playing?'Пауза видеокружка':'Воспроизвести видеокружок'}
       onPress={()=>{if(playing)player.pause();else player.play();setPlaying(!playing);}}
@@ -76,6 +121,7 @@ function VideoNoteBubble({uri,colors}:{uri:string;colors:Palette}) {
         <Ionicons name="play-circle" size={52} color="#fff"/>
       </View>}
     </Pressable>
+    {duration>0&&<Text style={{position:'absolute',bottom:0,left:8,fontSize:11,color:colors.text,backgroundColor:colors.surface,paddingHorizontal:7,paddingVertical:4,borderRadius:8}}>{audioClock(duration)}</Text>}
     <Pressable accessibilityRole="button" accessibilityLabel={muted?'Включить звук видеокружка':'Выключить звук видеокружка'}
       onPress={()=>{const next=!muted;player.muted=next;setMuted(next);}}
       style={{position:'absolute',right:2,bottom:0,borderRadius:17,padding:8,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.line}}>
@@ -128,16 +174,18 @@ export function ConnectNativeAttachment({message,colors}:{message:Message;colors
   if(k==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(name))
     return <Image source={{uri:url}} resizeMode="contain" style={{width:150,height:150}} accessibilityLabel="Стикер из клавиатуры"/>;
   if(k==='image')return <><Pressable accessibilityRole="button" accessibilityLabel={`Открыть фото ${name}`} onPress={()=>setView(true)}>
-      <Image source={{uri:url}} resizeMode="cover" style={{width:230,height:205,borderRadius:13}}/>
-    </Pressable>{view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
-  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <VideoNoteBubble uri={url} colors={colors}/>;
+      <AttachmentImage url={url}/>
+    </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'image/jpeg'} colors={colors}/>
+    {view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
+  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <View><VideoNoteBubble uri={url} colors={colors}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/></View>;
   if(k==='video')return <><IconButton name="play-circle" label={`Открыть видео ${name}`} colors={colors} onPress={()=>setView(true)}/>
     <Text numberOfLines={2} style={{color:colors.text}}>{name}</Text>
+    <SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="videos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
-  if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:255}}><Text numberOfLines={1} style={{color:colors.text}}>{name}</Text><AudioClip uri={url} colors={colors}/></View>;
-  return <Pressable onPress={()=>void Linking.openURL(url).catch(()=>Alert.alert('Не удалось открыть файл'))} style={{flexDirection:'row',alignItems:'center',gap:8}}>
+  if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:255}}><Text numberOfLines={1} style={{color:colors.text}}>{name}</Text><AudioClip uri={url} colors={colors}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'audio/mpeg'} colors={colors}/></View>;
+  return <View><Pressable onPress={()=>void Linking.openURL(url).catch(()=>Alert.alert('Не удалось открыть файл'))} style={{flexDirection:'row',alignItems:'center',gap:8}}>
     <Ionicons name="document-attach-outline" size={22} color={colors.accent}/><Text numberOfLines={2} style={{color:colors.text,flexShrink:1}}>{name}</Text>
-  </Pressable>;
+  </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'application/octet-stream'} colors={colors}/></View>;
 }
 
 export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors,onAvatarUpdated}:{ownerId:string;kind:MediaKind;owner:boolean;onBack:()=>void;colors:Palette;onAvatarUpdated?:()=>Promise<void>}) {

@@ -43,6 +43,7 @@ export function mediaUrl(url: string) {
 export type Profile = {
   id: string; display_name: string; bio: string | null;
   avatar_path: string | null; is_blocked: boolean;
+  online_until?: string | null; last_seen_at?: string | null;
 };
 export type Conversation = { id: string; user_a: string; user_b: string; created_at: string };
 export type Message = {

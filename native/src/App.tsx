@@ -28,11 +28,13 @@ import * as SecureStore from 'expo-secure-store';
 import ConnectNativeInvites,{hasInviteAdminAccess,type InvitationMode} from './ConnectNativeInvites';
 import ConnectNativePasswordSetup from './ConnectNativePasswordSetup';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
+import {useConnectNativePresence} from './ConnectNativePresence';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
 type Screen = {kind:'tab'} | {kind:'chat';conversation:Conversation;peer:Profile} | {kind:'profile';profile:Profile} | {kind:'media'; profile:Profile; mediaKind: MediaKind};
 const pad = (x:number)=>x<10?'0'+x:''+x;
 const time = (v:string) => {const d=new Date(v);return Number.isNaN(d.getTime())?'':`${pad(d.getHours())}:${pad(d.getMinutes())}`;};
+const presenceLabel=(p:Profile)=>p.online_until&&Date.parse(p.online_until)>Date.now()?'В сети':p.last_seen_at?'Был(а) '+new Date(p.last_seen_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'Не в сети';
 function textOf(message:Message){
   if(message.deleted_at)return 'Сообщение удалено';
   if(message.body?.startsWith('[[connect-album:')&&message.body.endsWith(']]')){
@@ -81,6 +83,7 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  useConnectNativePresence(ownId);
   useConnectNativeReadSync(ownId);
   const missedCalls=useConnectNativeMissedCalls(ownId,tab==='calls'&&screen.kind==='tab');
   const music=useConnectNativeMusic();
@@ -166,7 +169,7 @@ function AppMain(){
     if(!ownId)return;
     const generation=++fetchCounter.current;
     const [p,c]=await Promise.all([
-      db.from('profiles').select('id,display_name,bio,avatar_path,is_blocked').eq('is_blocked',false).limit(250),
+      db.from('profiles').select('id,display_name,bio,avatar_path,is_blocked,online_until,last_seen_at').eq('is_blocked',false).limit(250),
       db.from('conversations').select('id,user_a,user_b,created_at').order('created_at',{ascending:false}).limit(400),
     ]);
     if(generation!==fetchCounter.current)return;
@@ -291,7 +294,7 @@ function AppMain(){
   }
   function content(){
     if(screen.kind==='chat')return <ConnectNativeChat key={screen.conversation.id}
-      conversation={screen.conversation} peer={screen.peer} ownerId={ownId} profiles={profiles}
+      conversation={screen.conversation} peer={profiles.find(p=>p.id===screen.peer.id)||screen.peer} ownerId={ownId} profiles={profiles}
       avatarUrl={avatars[screen.peer.id]} colors={colors}
       wallpaperUri={appearance.prefs.wallpaper} enabledPacks={appearance.prefs.enabledPacks}
       clearedAt={clearedChats[screen.conversation.id]||null}
@@ -308,6 +311,7 @@ function AppMain(){
         <Avatar name={screen.profile.display_name} url={avatars[screen.profile.id]} colors={colors} size={90}/>
         <Text style={[s.title,{fontSize:23}]}>{screen.profile.display_name}</Text>
         <Text style={s.subtitle}>{screen.profile.bio||'Информация о себе не указана'}</Text>
+        {screen.profile.id!==ownId&&<Text style={[s.subtitle,{color:colors.accent}]}>{presenceLabel(profiles.find(p=>p.id===screen.profile.id)||screen.profile)}</Text>}
         <ConnectNativeNowListening profileId={screen.profile.id} colors={colors}/>
         {screen.profile.id!==ownId&&<Pressable style={s.mainAction} onPress={()=>void openPerson(screen.profile)}><Text style={s.actionText}>Написать сообщение</Text></Pressable>}
         <View style={{width:'100%',gap:10,marginTop:15}}>
@@ -329,7 +333,7 @@ function AppMain(){
       onLogout={()=>void logout()} onProfileSaved={loadDirectory}/>;
     if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}
       onDial={(conversationId,peer)=>void voice.dial(conversationId,peer.id,peer.display_name)}/>;
-    if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><Text style={[s.entryTitle,{flex:1}]}>{item.display_name}</Text><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
+    if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{item.display_name}</Text><Text style={s.subtitle}>{presenceLabel(item)}</Text></View><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
     return <FlatList data={displayChats.filter(item=>{
       const q=search.trim().toLocaleLowerCase('ru-RU');
       const last=inbox[item.conversation.id]?.last;
