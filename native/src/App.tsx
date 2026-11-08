@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, AppState, FlatList, Image, KeyboardAvoidingView,
-  Modal, Platform, Pressable, ScrollView, StatusBar as AndroidStatusBar,
+  Modal, Linking, Platform, Pressable, ScrollView, StatusBar as AndroidStatusBar,
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -26,6 +26,7 @@ import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
 import ConnectNativeGlass,{glassColor} from './ConnectNativeGlass';
 import * as SecureStore from 'expo-secure-store';
 import ConnectNativeInvites,{hasInviteAdminAccess,type InvitationMode} from './ConnectNativeInvites';
+import ConnectNativePasswordSetup from './ConnectNativePasswordSetup';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
@@ -63,6 +64,7 @@ function AppMain(){
   const [initializing,setInitializing]=useState(true);
   const [email,setEmail]=useState('');const [password,setPassword]=useState('');
   const [authBusy,setAuthBusy]=useState(false);
+  const [passwordSetup,setPasswordSetup]=useState(false);
   const [inviteMode,setInviteMode]=useState<InvitationMode|null>(null);
   const [inviteAdmin,setInviteAdmin]=useState(false);
   const [tab,setTab]=useState<Tab>('chats');const [screen,setScreen]=useState<Screen>({kind:'tab'});
@@ -126,9 +128,38 @@ function AppMain(){
 
   useEffect(()=>{
     let alive=true;
-    void db.auth.getSession().then(({data})=>{if(alive){setSession(data.session);setInitializing(false);}}).catch(()=>setInitializing(false));
-    const {data:{subscription}}=db.auth.onAuthStateChange((_event,next)=>{if(alive)setSession(next);});
-    return ()=>{alive=false;subscription.unsubscribe();};
+    void db.auth.getSession().then(({data})=>{if(alive){setSession(data.session);setInitializing(false);}}).catch(()=>{if(alive)setInitializing(false);});
+    const {data:{subscription}}=db.auth.onAuthStateChange((event,next)=>{
+      if(!alive)return;
+      setSession(next);
+      if(event==='PASSWORD_RECOVERY' && next)setPasswordSetup(true);
+    });
+    const openPasswordLink=async(url:string)=>{
+      // A PWA HTTPS link does not automatically become an Android app link:
+      // the server must explicitly redirect/associate it with connect://.
+      if(!alive||!url.toLowerCase().startsWith('connect://'))return;
+      try{
+        const parsed=new URL(url);
+        const parts=new URLSearchParams([parsed.search.replace(/^\?/,''),parsed.hash.replace(/^#/,'')].filter(Boolean).join('&'));
+        const kind=parts.get('type');
+        if(kind!=='recovery'&&kind!=='invite')return;
+        const access_token=parts.get('access_token');
+        const refresh_token=parts.get('refresh_token');
+        if(access_token&&refresh_token){
+          const {data,error}=await db.auth.setSession({access_token,refresh_token});
+          if(error||!data.session)throw error||new Error('Ссылка больше не действует');
+        }else if(parts.get('code')){
+          const {data,error}=await db.auth.exchangeCodeForSession(parts.get('code')!);
+          if(error||!data.session)throw error||new Error('Не удалось подтвердить ссылку');
+        }else throw new Error('Ссылка не содержит подтверждения входа');
+        if(alive)setPasswordSetup(true);
+      }catch(e){
+        if(alive)setNotice('Не удалось открыть ссылку установки пароля: '+(e instanceof Error?e.message:String(e)));
+      }
+    };
+    const linkSub=Linking.addEventListener('url',event=>{void openPasswordLink(event.url);});
+    void Linking.getInitialURL().then(url=>{if(url)void openPasswordLink(url);}).catch(()=>{});
+    return ()=>{alive=false;subscription.unsubscribe();linkSub.remove();};
   },[]);
 
   const loadDirectory=useCallback(async()=>{
@@ -365,6 +396,7 @@ function AppMain(){
     </View>}
     <ConnectNativeInvites visible={inviteMode==='admin'} mode="admin" colors={colors} onClose={()=>setInviteMode(null)}/>
     <ConnectNativeVoicePanel voice={voice} colors={colors}/>
+    <ConnectNativePasswordSetup visible={passwordSetup} colors={colors} onClose={()=>setPasswordSetup(false)}/>
     {!!notice&&<Pressable style={s.toast} onPress={()=>setNotice('')}><Text style={{color:colors.text}}>{notice}</Text><Ionicons name="close" color={colors.text} size={15}/></Pressable>}
   </View>;
 }

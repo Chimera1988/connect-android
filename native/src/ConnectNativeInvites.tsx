@@ -2,7 +2,7 @@
  * Invite tokens are redeemed by the server; no service_role key is shipped in this app.
  */
 import React,{useCallback,useEffect,useState} from 'react';
-import {ActivityIndicator,Alert,Modal,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
+import {ActivityIndicator,Alert,Modal,Pressable,ScrollView,Share,Text,TextInput,View} from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import {db} from './backend';
 import type {Palette} from './theme';
@@ -117,6 +117,13 @@ export default function ConnectNativeInvites({visible,mode,colors,onClose}:{visi
               <Text selectable style={{color:colors.text,fontSize:17,fontWeight:'800',marginVertical:8}}>{issued}</Text>
               <Pressable accessibilityRole="button" onPress={()=>void Clipboard.setStringAsync(issued)}>
                 <Text style={{color:colors.accent}}>Скопировать код</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={()=>void Share.share({
+                title:'Приглашение в Connect',
+                message:`Приглашение в Connect\nКод: ${issued}\nДля: ${email.trim()}\nКод действителен 24 часа.`,
+              }).catch(e=>{setError(e instanceof Error?e.message:'Не удалось поделиться приглашением');})}
+                style={{marginTop:12,paddingVertical:8}}>
+                <Text style={{color:colors.accent,fontWeight:'700'}}>Поделиться приглашением</Text>
               </Pressable>
             </View>}
             <Text style={{color:colors.text,fontSize:16,fontWeight:'700',marginTop:22,marginBottom:8}}>Последние приглашения</Text>

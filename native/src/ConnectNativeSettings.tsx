@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import {File} from 'expo-file-system';
 import {db} from './backend';
 import {uploadFile} from './nativeMediaUtils';
@@ -131,9 +132,14 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
         if(messages.length>=50000)break;
       }
       const json=JSON.stringify({exported_at:new Date().toISOString(),account_id:owner.id,conversations,messages},null,2);
-      // Expo Sharing is not installed yet: do not pretend copying is a file export.
-      // The user can copy a bounded excerpt now; full JSON file export is a separate parity item.
-      setExportSummary(`Подготовлено ${messages.length} сообщений (${Math.round(json.length/1024)} КБ). Выгрузка файлом пока не реализована; данные не покинули устройство.`);
+      if(!FileSystem.documentDirectory)throw Error('Нет доступного каталога для экспорта.');
+      if(!await Sharing.isAvailableAsync())throw Error('Системное меню отправки файлов недоступно.');
+      // An intentionally local, explicit export. Never upload chat contents.
+      const filename=`connect-chats-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+      const uri=FileSystem.documentDirectory+filename;
+      await FileSystem.writeAsStringAsync(uri,json,{encoding:FileSystem.EncodingType.UTF8});
+      setExportSummary(`Подготовлено ${messages.length} сообщений (${Math.round(json.length/1024)} КБ). Выберите, куда сохранить JSON.`);
+      await Sharing.shareAsync(uri,{mimeType:'application/json',dialogTitle:'Экспорт переписок Connect'});
     }catch(e){setExportSummary('Ошибка подготовки экспорта: '+errorOf(e));}
     finally{setWorking(false);}
   }
@@ -241,7 +247,7 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
         <Heading colors={colors}>Локальные данные</Heading>
         <Panel colors={colors}><Text style={{color:colors.muted}}>Сброс темы, цвета, обоев и настроек стикеров. Переписки и файлы останутся на сервере.</Text><SmallButton colors={colors} label="Очистить локальные настройки" onPress={()=>void resetLocal()}/></Panel>
         <Heading colors={colors}>Экспорт переписок</Heading>
-        <Panel colors={colors}><Text style={{color:colors.muted}}>Экспорт в JSON до 50 000 сообщений: ещё не перенесён в Android. Данные при подготовке не публикуются.</Text><SmallButton colors={colors} disabled={working} label="Подсчитать сообщения для экспорта" onPress={()=>void exportChats()}/><Text style={{fontSize:12,color:colors.muted}}>{exportSummary}</Text></Panel>
+        <Panel colors={colors}><Text style={{color:colors.muted}}>Создать JSON-файл до 50 000 сообщений и сохранить его через системное меню Android. Файл не отправляется без вашего выбора.</Text><SmallButton colors={colors} disabled={working} label="Создать и сохранить JSON-файл" onPress={()=>void exportChats()}/><Text style={{fontSize:12,color:colors.muted}}>{exportSummary}</Text></Panel>
       </>}
       {page==='privacy'&&<>
         <Heading colors={colors}>Личные переписки</Heading>
