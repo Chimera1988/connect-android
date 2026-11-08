@@ -2,6 +2,8 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import {File} from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import {useAudioPlayer, useAudioPlayerStatus} from 'expo-audio';
 import {useVideoPlayer, VideoView} from 'expo-video';
@@ -138,7 +140,7 @@ export function ConnectNativeAttachment({message,colors}:{message:Message;colors
   </Pressable>;
 }
 
-export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors}:{ownerId:string;kind:MediaKind;owner:boolean;onBack:()=>void;colors:Palette}) {
+export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors,onAvatarUpdated}:{ownerId:string;kind:MediaKind;owner:boolean;onBack:()=>void;colors:Palette;onAvatarUpdated?:()=>Promise<void>}) {
   const [items,setItems]=useState<ListedMedia[]>([]);
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -187,6 +189,30 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors}:{o
     }catch(e){Alert.alert('Не удалось загрузить',e instanceof Error?e.message:String(e));}
     finally{setBusy(false);setUploadProgress('');}
   }
+  async function makeAvatar(item:ListedMedia){
+    if(!owner||busy||kind!=='photos')return;
+    const ext=fileExtension(item.name);
+    if(!['jpg','jpeg','png','webp'].includes(ext)){
+      Alert.alert('Не подходит для аватара','Выбери JPG, PNG или WebP.');return;
+    }
+    if(!FileSystem.cacheDirectory){Alert.alert('Ошибка','Кэш телефона недоступен');return;}
+    let local:string|null=null;
+    setBusy(true);
+    try{
+      const mime=ext==='png'?'image/png':ext==='webp'?'image/webp':'image/jpeg';
+      const saved=await FileSystem.downloadAsync(item.url,FileSystem.cacheDirectory+`connect-avatar-${Date.now()}.${ext}`);
+      local=saved.uri;
+      const size=new File(saved.uri).size;
+      if(!size||size>12*1024*1024)throw Error('Фото должно быть не более 12 МБ.');
+      const newPath=`${ownerId}/avatar-${Date.now()}.${ext}`;
+      await uploadFile('connect-avatars',newPath,{uri:saved.uri,name:`avatar.${ext}`,mime,size});
+      const result=await db.from('profiles').update({avatar_path:newPath}).eq('id',ownerId);
+      if(result.error)throw result.error;
+      await onAvatarUpdated?.();
+      Alert.alert('Готово','Фото установлено на аватар.');
+    }catch(e){Alert.alert('Не удалось установить аватар',e instanceof Error?e.message:String(e));}
+    finally{if(local)void FileSystem.deleteAsync(local,{idempotent:true}).catch(()=>{});setBusy(false);}
+  }
   function deleteMedia(item:ListedMedia){
     if(!owner||busy)return;
     Alert.alert('Удалить файл?',item.name,[{text:'Отмена',style:'cancel'},{text:'Удалить',style:'destructive',onPress:()=>void (async()=>{
@@ -214,7 +240,10 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors}:{o
               <Image source={{uri:item.url}} style={{width:'100%',aspectRatio:1,borderRadius:10,backgroundColor:colors.elevated}}/>
             </Pressable>
             <Text numberOfLines={1} style={style.muted}>{item.name}</Text>
-            {owner&&<IconButton name="trash-outline" label={`Удалить ${item.name}`} colors={colors} onPress={()=>deleteMedia(item)}/>}
+            {owner&&<View style={{flexDirection:'row',justifyContent:'space-between'}}>
+              {['jpg','jpeg','png','webp'].includes(fileExtension(item.name))&&<IconButton name="person-circle-outline" label={`Установить ${item.name} на аватар`} colors={colors} onPress={()=>void makeAvatar(item)}/>}
+              <IconButton name="trash-outline" label={`Удалить ${item.name}`} colors={colors} onPress={()=>deleteMedia(item)}/>
+            </View>}
           </View>)}
         </View>:items.map((item,i)=><View key={item.path} style={[style.card,style.row]}>
           <Pressable onPress={()=>setSelected(i)} style={{flex:1,flexDirection:'row',alignItems:'center',gap:11}} accessibilityRole="button">

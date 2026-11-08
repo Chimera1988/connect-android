@@ -270,7 +270,7 @@ function AppMain(){
       onCall={()=>void voice.dial(screen.conversation.id,screen.peer.id,screen.peer.display_name)} />;
     if(screen.kind==='media')return <ConnectNativeMedia key={`${screen.profile.id}:${screen.mediaKind}`}
       ownerId={screen.profile.id} owner={screen.profile.id===ownId} kind={screen.mediaKind}
-      colors={colors} onBack={()=>setScreen({kind:'profile',profile:screen.profile})}/>;
+      colors={colors} onAvatarUpdated={loadDirectory} onBack={()=>setScreen({kind:'profile',profile:screen.profile})}/>;
     if(screen.kind==='profile')return <View style={{flex:1}}>
       <View style={s.top}><Btn icon="chevron-back" colors={colors} onPress={()=>setScreen({kind:'tab'})}/><Text style={s.title}>Профиль</Text></View>
       <ScrollView contentContainerStyle={{padding:18,alignItems:'center',gap:12}}>

@@ -3,7 +3,7 @@
  * This module never uploads audio or creates an APK.
  */
 import React, {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
-import {Pressable, Text, View} from 'react-native';
+import {Dimensions, PanResponder, Pressable, Text, View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as SecureStore from 'expo-secure-store';
 import {setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus} from 'expo-audio';
@@ -253,9 +253,38 @@ export function ConnectNativeMusicLibrary({ownerId,items,isOwner,busy,onRemove,c
 }
 export function ConnectNativeMusicMiniPlayer({colors,onOpen}:{colors:Palette;onOpen:(ownerId:string)=>void}){
   const m=useConnectNativeMusic();
+  const [miniBottom,setMiniBottom]=useState(112);
+  const miniBottomRef=useRef(112);
+  const dragStart=useRef(112);
+  useEffect(()=>{
+    let alive=true;
+    void SecureStore.getItemAsync('connect-native-music-mini-bottom-v1').then(saved=>{
+      const value=Number(saved);
+      if(alive&&saved!==null&&Number.isFinite(value)){
+        const next=Math.max(83,Math.min(Dimensions.get('window').height-180,value));
+        miniBottomRef.current=next;setMiniBottom(next);
+      }
+    }).catch(()=>{});
+    return()=>{alive=false;};
+  },[]);
+  const pan=useMemo(()=>PanResponder.create({
+    onStartShouldSetPanResponder:()=>true,
+    onMoveShouldSetPanResponder:()=>true,
+    onPanResponderGrant:()=>{dragStart.current=miniBottomRef.current;},
+    onPanResponderMove:(_event,gesture)=>{
+      const maxBottom=Math.max(83,Dimensions.get('window').height-180);
+      const next=Math.max(83,Math.min(maxBottom,dragStart.current-gesture.dy));
+      miniBottomRef.current=next;setMiniBottom(next);
+    },
+    onPanResponderRelease:()=>{void SecureStore.setItemAsync('connect-native-music-mini-bottom-v1',String(miniBottomRef.current)).catch(()=>{});},
+    onPanResponderTerminate:()=>{void SecureStore.setItemAsync('connect-native-music-mini-bottom-v1',String(miniBottomRef.current)).catch(()=>{});},
+  }),[]);
   if(!m.current||!m.ownerId||m.libraryOpen)return null;
-  return <View style={{marginHorizontal:12,marginBottom:6,paddingHorizontal:7,paddingVertical:5,borderRadius:17,backgroundColor:colors.elevated,borderWidth:1,borderColor:colors.line,
+  return <View style={{position:'absolute',left:12,right:12,bottom:miniBottom,paddingHorizontal:7,paddingVertical:5,borderRadius:17,backgroundColor:colors.elevated,borderWidth:1,borderColor:colors.line,zIndex:30,
     flexDirection:'row',alignItems:'center'}}>
+    <View {...pan.panHandlers} accessibilityLabel="Переместить мини-плеер по вертикали" style={{width:24,minHeight:41,alignItems:'center',justifyContent:'center'}}>
+      <Ionicons name="reorder-two-outline" color={colors.muted} size={21}/>
+    </View>
     <Pressable accessibilityRole="button" accessibilityLabel={`Открыть музыку ${m.current.name}`} onPress={()=>onOpen(m.ownerId!)} style={{flex:1,flexDirection:'row',alignItems:'center',gap:6,padding:7}}>
       <Ionicons name="musical-notes" color={colors.accent} size={19}/>
       <Text numberOfLines={1} style={{color:colors.text,fontWeight:'600',flex:1}}>{m.current.name}</Text>

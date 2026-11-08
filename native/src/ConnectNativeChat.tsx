@@ -221,9 +221,41 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     return()=>{active=false;clearInterval(interval);};
   },[id,peer.id]);
   const visible=useMemo(()=>messages.filter(m=>!hidden.includes(m.id) && (!clearedAt || m.created_at>clearedAt)),[messages,hidden,clearedAt]);
-  const shown=useMemo(()=>query.trim()?visible.filter(m=>
-    (m.body||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU')) ||
-    (m.attachment_name||'').toLocaleLowerCase('ru-RU').includes(query.trim().toLocaleLowerCase('ru-RU'))):visible,[visible,query]);
+  // Keep messages in context while searching: filtering loses chronology and quoted replies.
+  const shown=visible;
+  const searchMatches=useMemo(()=>{
+    const needle=query.trim().toLocaleLowerCase('ru-RU');
+    if(!needle)return [] as number[];
+    return shown.flatMap((m,i)=>!m.deleted_at&&(
+      (m.body||'').toLocaleLowerCase('ru-RU').includes(needle)||
+      (m.attachment_name||'').toLocaleLowerCase('ru-RU').includes(needle))?[i]:[]);
+  },[shown,query]);
+  const [searchIndex,setSearchIndex]=useState(0);
+  useEffect(()=>{setSearchIndex(0);},[query]);
+  const activeSearchIndex=searchMatches.length?Math.min(searchIndex,searchMatches.length-1):-1;
+  const activeSearchId=activeSearchIndex>=0?shown[searchMatches[activeSearchIndex]]?.id:null;
+  function findInChat(direction:number){
+    if(!searchMatches.length)return;
+    const next=(activeSearchIndex+direction+searchMatches.length)%searchMatches.length;
+    setSearchIndex(next);
+    nearBottom.current=false;
+    listRef.current?.scrollToIndex({index:searchMatches[next],animated:true,viewPosition:.35});
+  }
+  function highlightedText(value:string){
+    const needle=searchOpen?query.trim():'';
+    if(!needle)return value;
+    const lowered=value.toLocaleLowerCase('ru-RU'),term=needle.toLocaleLowerCase('ru-RU');
+    const nodes:React.ReactNode[]=[];
+    let offset=0,part=0;
+    while(offset<value.length){
+      const at=lowered.indexOf(term,offset);
+      if(at<0){nodes.push(value.slice(offset));break;}
+      if(at>offset)nodes.push(value.slice(offset,at));
+      nodes.push(<Text key={`hit-${part++}`} style={{backgroundColor:colors.accent,color:colors.bg,fontWeight:'800'}}>{value.slice(at,at+needle.length)}</Text>);
+      offset=at+needle.length;
+    }
+    return nodes;
+  }
   const selectedMessages=visible.filter(x=>selected.includes(x.id));
   const confirmDelete=(items:Message[])=>{
     const own=items.filter(x=>x.sender_id===ownerId && !x.deleted_at);
@@ -490,9 +522,12 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         </View>
       </View>
     </Modal>
-    {searchOpen&&<View style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,gap:8}}>
-      <TextInput value={query} onChangeText={setQuery} placeholder="Найти в чате" placeholderTextColor={mutedColor} style={{flex:1,color:textColor,padding:10}}/>
-      <Btn name="checkbox-outline" label="Выбрать сообщения" colors={colors} onPress={()=>{setSelectionMode(true);setSearchOpen(false);}}/>
+    {searchOpen&&<View style={{flexDirection:'row',alignItems:'center',paddingHorizontal:10,gap:2}}>
+      <TextInput value={query} onChangeText={setQuery} placeholder="Найти в чате" placeholderTextColor={mutedColor}
+        accessibilityLabel="Поиск сообщений в текущем чате" style={{flex:1,color:textColor,padding:10,minWidth:40}}/>
+      <Text style={{color:mutedColor,fontSize:11}}>{query.trim()?`${searchMatches.length?activeSearchIndex+1:0}/${searchMatches.length}`:''}</Text>
+      <Btn name="chevron-up" label="Предыдущее совпадение" colors={colors} disabled={!searchMatches.length} onPress={()=>findInChat(-1)}/>
+      <Btn name="chevron-down" label="Следующее совпадение" colors={colors} disabled={!searchMatches.length} onPress={()=>findInChat(1)}/>
       <Btn name="close" label="Закрыть поиск" colors={colors} onPress={()=>{setSearchOpen(false);setQuery('');}}/>
     </View>}
     {selectionMode&&<View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingHorizontal:12,backgroundColor:colors.surface}}>
@@ -503,6 +538,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Btn name="close" label="Отмена" colors={colors} onPress={()=>{setSelectionMode(false);setSelected([]);}}/>
     </View>}
     <FlatList key={id} ref={listRef} data={shown} keyExtractor={m=>m.id}
+      onScrollToIndexFailed={info=>listRef.current?.scrollToOffset({offset:Math.max(0,info.averageItemLength*info.index),animated:true})}
       contentContainerStyle={{padding:14,gap:7,paddingBottom:18}}
       scrollEventThrottle={120}
       onScroll={e=>{
@@ -535,7 +571,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
           }}
           onTouchCancel={()=>{swipeStart.current=null;}}
           style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
-          borderWidth:isSelected?2:standalone?0:1,borderColor:isSelected?colors.accent:own?glassColor(colors.accent,.32):glassColor(colors.text,.15),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.84):glassColor(colors.surface,.82)}}>
+          borderWidth:isSelected||activeSearchId===item.id?2:standalone?0:1,borderColor:isSelected||activeSearchId===item.id?colors.accent:own?glassColor(colors.accent,.32):glassColor(colors.text,.15),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.84):glassColor(colors.surface,.82)}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
             {item.reply_to&&<View style={{borderLeftWidth:3,borderLeftColor:colors.accent,paddingLeft:8,marginBottom:6}}>
@@ -544,7 +580,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             </View>}
             {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors}/>}
             {album?<ConnectNativeAlbum items={album} colors={colors}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
-              Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':f.text}</Text>}
+              Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':highlightedText(f.text)}</Text>}
           </>}
           <View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>
             <Text style={{color:mutedColor,fontSize:10}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
