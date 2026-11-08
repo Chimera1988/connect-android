@@ -1,0 +1,139 @@
+name: Connect Native - PWA Liquid Glass Visual Foundation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-visual.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-visual-foundation
+  cancel-in-progress: false
+
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    steps:
+      - name: Checkout Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Sync with the latest Connect Native sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          test -s native/src/App.tsx
+          test -s native/src/ConnectNativeChat.tsx
+          test -s native/src/ConnectNativeCalls.tsx
+          test -s native/src/ConnectNativeSoundSettings.tsx
+          test -s app/src/main/res/drawable/connect_icon.png
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Integrate PWA-inspired native Liquid Glass presentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_CONNECT_VISUAL'
+          from pathlib import Path
+          import base64,hashlib,zlib,runpy,shutil
+          payloads=[
+              ('native/src/ConnectNativeGlass.tsx','65f51cecdbc0ef2debbfd4be9c4ed6f11584c61828e079a45fe410704f6b1c26','eNq9Vm1v2zYQ/p5fwSotLBW0LMmSbCtWh/QVA7K2SLZmWJChjE3Z6mRRJSkngWBg/2H/cL9kR0p+0ZJm7lbsS3I8ks/dPXzu5N7Tp+gFy3M6kegtkemSomUqSpKhhJX5FDwsR3/+/gfK6800l5QXnMp6hyVIzukG4f35MTpJP5fpFL3JiBBITGhO7QP0FP0kqED0JhUyzWeIUzKR3RqzK5YzRPKpRpqUnNNcKntBUUEyKiW10VuGzunVh5ReK7DeQbooGJfoVMHgqhT0VZJAAhisU5qsUMLZAnV0lM7R+nR1nKcLIukUn8nbjJ7NKZVYYbbON1ltr50tZ7h6SROBX2VZWgiKT9KcEv6Gk2kKueL3RM7xKSxItvGdSVbcB6uK3ULL24Ki6n1dJf5R1fyWLOj6ot3TNMD5A3qjLyRlPtHEzxS9L1jGuDmnN5GQHGjFJCvmJMrLxRXlVuNE1QFCE5YLiTi5juG0LSThUpyncm52DjvWd9qXpRNqulYEiyO4kSbmo96vF053RLrJcff1ZRWuHvdsSYU0AceyQAMlz9FHPrsipufj/hAHAX5c6RxW1kcF0jrzuCoIF/T7XAM0AR3sWdgNrRW+d9vD/kPbPg4329u4qw1dU5qQMtuhrRFqrXQtUbOaKBYF1lSvomYZNY9ypN3R9mmsHT4LzmacChHXsjNzeo3WGrM/kKyE+izLbjStCNko1TSt+JlCWmMtmEow3lzPGCvMzUrQzyXNoeILfQVtw8h0AY9srlPBlWQ6cuTiacl1l0au6ziO6o267pcc/vBI8hLKwXsDOl8DeGlZR9oAHWkKH8VxB4AhSNax6mJrHZrNwVoripbNLjCgN1f4YpOOBru0GonqVbwL3UguL7PsaPNQYp4mMl5j2PUQYxnUa1ZpXpTylOQzGl042L3ErJRbT9cNsOtfrqwdOY/VzEAF0zCvlvC0IjZyllMDCTVY4upiO2BsciVYVkr6Os2yd1ef1JSqGNCVZOw66szT6ZTmndXl6plmYQzTBl2nUzmPDSD5iYHmNJ3N5Xq1hNDP2U1sOMhB/ZGDhp5jgBCpoHxJj0UB+KfqkZqMnjXPO1YDbL2AZXtcoXQaG0D3G8jJQBOAH6lgk1sI64HBwTNQHg6efvDE2CKplOEmfAkSQSFNR5HACj2a4qaZbDKB74Bc6Z13BZmkEnAc2w2M3peR3P2RdmHGvXZtDxd9xaRki23dw6bswbApexQ2ZYfetyrbG/6PZY97uy8/bj5huta+7zRv7AzrYr3AqYv1lKoSUGxslDwzDxttWNuILSTfb1hzghqo7zlrsbSBtnxvsMY90HxjbqfnP7VYVTCR6mHUWXdYB2c0kVHXG2KuekZbdcCoO8J1I0UdEHIHS05ykTC+iC4qbath8HOkBwU042pT5tf0ox84KNyvH+90JDjaPyu0PK8JgBjoxtUKu3W1PG48/e/WU85dhP8iyn6/Lco7WLYf7sIZh/5wMLpqfLtNPXgY6F/qW+mkTdA+3D1vcee0uHP35844DMJhMg2MBxO8S1ng7YNie8E3o8z29matPRlgrX7HIiDuh64XIN930Av4ziNvECB3FKLQ8ZA/GCCYGuhEGWEfDHVUGb+0ulzL1mqNpx1wBwWup8AD1A8C5IUDFPRHAA7rYajAARNwT9RRZdwFf/5FcEgy7AM4tGLfGUD2EG00BPA+8l1NJGe/0XtYVO7zptHtYH1wl9lwnYbu5Pvjuz7U4kN8P9CfZw/iBoEPo2GAfGewiW8cDoOJlxDj75H790R2h/dH3p2cvdboVM5xT1vq9/BfN19GNA=='),
+              ('/tmp/connect-native-visual-apply.py','460b42d34da39d2ebeb2ea2284c5083ed7bd5904a315eaa832a476645e6468c3','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'),
+          ]
+          app=Path('native/src/App.tsx')
+          already="import ConnectNativeGlass,{glassColor} from './ConnectNativeGlass';" in app.read_text()
+          if already:
+              assert Path('native/src/ConnectNativeGlass.tsx').exists(), 'Visual module missing although App imports it'
+              print('PWA visual foundation already integrated, no duplicate patch')
+          else:
+              assert not Path('native/src/ConnectNativeGlass.tsx').exists(), 'Unexpected existing module; refusing overwrite'
+              for target,expected,b64 in payloads:
+                  content=zlib.decompress(base64.b64decode(b64))
+                  assert hashlib.sha256(content).hexdigest()==expected, f'Corrupted installer payload: {target}'
+                  path=Path(target)
+                  path.parent.mkdir(parents=True,exist_ok=True)
+                  path.write_bytes(content)
+              runpy.run_path('/tmp/connect-native-visual-apply.py',run_name='__main__')
+          Path('native/assets').mkdir(parents=True,exist_ok=True)
+          icon=Path('native/assets/connect-icon.png')
+          source=Path('app/src/main/res/drawable/connect_icon.png')
+          if icon.exists() and icon.read_bytes()!=source.read_bytes():
+              raise SystemExit('Existing native icon is different; refusing to overwrite custom artwork')
+          shutil.copyfile(source,icon)
+          print('Native Connect icon matches existing PWA/legacy original')
+          PY_CONNECT_VISUAL
+      - name: Type-check Connect Native
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+      - name: Generate native Android project
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Install Android SDK 37
+        run: |
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+      - name: Compile native Android (validation only; no production release)
+        working-directory: native/android
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Commit only verified native visual sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/ConnectNativeGlass.tsx native/src/App.tsx native/src/ConnectNativeChat.tsx native/src/ConnectNativeCalls.tsx native/assets/connect-icon.png
+          if git diff --cached --quiet; then
+            echo 'Liquid Glass visual foundation already integrated'
+            exit 0
+          fi
+          git commit -m 'feat(native): PWA-inspired glass backdrop, dock and chat surfaces'
+          git push origin HEAD:main
+      - name: GitHub summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native Liquid Glass foundation integrated'
+            echo '- Native SVG color waves (no WebView)'
+            echo '- Glass floating dock, chats and conversation surfaces'
+            echo '- Uses original Connect icon and existing saved theme'
+            echo '- TypeScript and Android build validated'
+            echo '- Source changed only in `native/`; legacy `app/` untouched'
+            echo '- To see UI on a phone, **re-run `connect-native-test-apk.yml` manually** after integration.'
+            echo '- First visual iteration; not a pixel-perfect PWA port or a real-device test.'
+          } >> "$GITHUB_STEP_SUMMARY"
