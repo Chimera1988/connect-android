@@ -1,0 +1,136 @@
+# Phase 10A corrective patch, NOT an APK release.
+name: Connect Native - Phase 10A (parity corrections, NO APK)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-pwa-parity-phase10a.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-phase10a
+  cancel-in-progress: false
+
+jobs:
+  parity-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current Connect Native sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Safety gate and apply phase 10A source corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY_GUARD'
+          from pathlib import Path
+          import re
+          p=Path('.github/workflows/android-apk.yml')
+          if not p.exists():raise SystemExit('STOP: legacy APK workflow unknown')
+          data=p.read_text()
+          if re.search(r'^\s{2}push\s*:',data,re.M) or re.search(r'\bassemble(?:Debug|Release)\b',data):
+              raise SystemExit('STOP: legacy APK push/build still enabled')
+          for f in ['native/src/ConnectNativeChat.tsx','native/src/ConnectNativeMedia.tsx','native/src/ConnectNativeMusic.tsx','native/src/App.tsx']:
+              if not Path(f).is_file():raise SystemExit('Missing '+f)
+          print('APK release gate remains closed.')
+          PY_GUARD
+          python3 - <<'PY_FIX'
+          import gzip,base64
+          payload=''.join('''
+          H4sIAAAAAAAC/806bXPbRnrf9SvWOtcAYhAS5aTnAQ1pZCdx3Fi2ajnnD6rGXgJLEjEIIMCCEgNhJi/t9G7u2ptrP3Sm0/am0/4AO2Pd+OKc7y+Q/+ieZ3fx
+          RlKO3br1yWOS2Jdnn/e3xU8ubGRpstH3ww0WTkg85aMovLK2vr5+M6OJxzxyIwpD5nJyh3J/wkg8oinrdDd3iRslCUz4UZhaa7txHPgsJXyUMEYSRgOy/2CX
+          xDTx+ZQM/BOWWuRORG4m1AvYxu7+p7B/PKahB5vhtLVBEo1hOR8Ffp/44zhKONmHxzX1O2Fra/fu3r3v4KCuhQKbjTRxNWNtzWMD3OuO9JCOmZmwOEgNe43A
+          X+zgrg0cF8/+gIQRJ7Hlpw8HfsB0tQ7/EuqnjBxMU87GH534XB9oe36a+uGQpFGWuIzgDpvkcQGn4g4434ktINd7yNkJ11noRh6sd7SMDzpX1apBlJA+g09m
+          0gFnCfFDInCsjw4dAGW5URZyXS41qjlE+YLTrRefg6uQGAD+HKQCggMsbcJOYvnETqjLgynpksh1M5BcCOREA5LL0w7tbnfz6EJSmGQI7MnDksKSSkQPcaYu
+          05u0mF25LraOQdRMsgEWm6tZESd+iLjuo7SYV/Jy7Seka6HGdNgXmT+hAQs5SRlN3JENFHEKHOMjBjoTTliSUtQ6k4z8IajLcMThF09NAtpEQjrxh5QzXD62
+          1iSMh1HgOZqmEQSQAuRRdBw6Wcr22DjSdcPZ/iJjydTiiT/WjZ2Jn/r9gFkgbaBQHzvbAnd9bPUjb3p6qmmGxaPbkQt43o6OWXIDbELXkqxz7zOY8kM3yDyW
+          6k2gr9hgkNPT8gDKOXVHYyD/Iars2z/LsBV15mH5Q2w9MnprwKGSYSE7lgzb2CCfMhaTMUtTOgQLB0kAE1HM5HgE5qDEBJK2iWQY2ksQpbDWHSVRGAXRcCpk
+          80UWoSqiGoGvsNba4lDo9OphAXhPaEraklYu2CVXhYyBR3Fek/6ecgL6BbnPAOXKkpAcHhGakjAb91lyeCRXqSmBnTUIKN+jsa6PTR8wuDC2PBYwIOch5Zcu
+          6cpW3lhFFBZKAf53KqBgGTuH/pF9eCRoLcxDgX8t5JJvh5K9t0KPnZgp4wf14xEy+4CDFembYgc8fjQYgCOR3G+vxjVwzNIB4G/ARTcWOi2BWmDjQz7agceR
+          NfZDvY3P8spO17A73XPge87ScdvO5o6g/bAF7XBp4dHRjuV7dpgFAUIfZKGIaqDNoXcrvDGiXPd8FepsqSJGXunRKlSVVvVaanrCHX3p7MsV5MsrAf3FqlEJ
+          d0EKeIBS7xCGr0ecR2NLunruDGiQMjkb+Cm/xwbl1I6VukkUBPcjCSf38ctu8wyBH5k09MegFJ7Nk4yZE58d70epL9hiXfmgkArX5GDloJl3H+MCOPaM2SlH
+          F2GsMGJ56N2YhTtNe7Y17Ty7FRCbfA7QQJjniIlXmI0JjmrsSGA/6i8UkhFYmX2PgRAt8XkHBg6PnNJfgDuAiDoAuTibJmQ+8CUnhJ/U5dQ1iZgSb67MXmk0
+          dxT6lhDC3YGOWJpyp8JFcIHya5tGLhCy4iwdSc5aaeC75UGG0etDYvK4VzS3bavJV241Ke5W2xorr6EQyWM2dfJHEHE7F3Ok8vLl4lFBUj4FAeZ5n7qPhwnk
+          Md4NcPyJ7eJnalHXBV0z3eZYf2gOIJI8YKghtnZ1c1Mriu28iQ9FXC4rKSmeFdc2EI/tCkPF88WFcrpounJBi9TSOtZlfp0eEJLXOnjp0rWfgY5XpA0CdvJh
+          5Qi0JDrWTArqHd6CHCy1NaSQJRqI3sPE55Mo8b8E+mhgd7fMIY3tq0Cewlmw8lYYZ1yqsJMLhS9IhA4nHDKcd9DT/rUcF5nXCBBlibM++/fZk9nv59/MnpPZ
+          d2T+97Mn8PtsvbkI9wsJOPk4A/sTv4sWLXZXyYOXa0vU7e5mUWxUuF7nwDoIRc46OAP3cT866UQZD/yQrZOA9lkAGP3T/Jezp/OvEJP5r8j869lL+Pd0/ovZ
+          2ewPs+fzX68TKXUnl99I6X4CSYWT1zElkLzdAzHp6GOMXuXkUCC68GIQbVbjhjlHjdC/AIu+n381/6VAaPZHQOc5oPX9ayGyeGIpBx1icX38tQ3Uj+0FZapS
+          p/8rZdoUyrT1zpWpqg/QuKFM6vsBFHu3Ff9/WzJ8SRlmvxcHwSEgoG/F6A+Nc19bRU3IGh74Hh/Z77fUVXipEorcXmMtXM6B/yWDgge9TSvxf3QxX5mjLIft
+          rr1ZbKxeXTyCeFU6qZUmNIGsuJPFta7+FgznbPYMTOiZYsiZ5Np3oLdPZs8U386WddfzUwpJs+fkKxORBeVuZDSQTZ1n4QI9DxKnGsH/nL0QCH47/8f/H/TO
+          w+7d2rjsMWiqJSI7IoiuxdMTzTxcI3pdb5p1JWWY1YwMNmbTWYhZ5TCufQxlxm1I0GSU9b0CQtfAyVXOBgylnIIlY1pb4JqPTngC2iks09keQx4rMDXfJjwV
+          ZcODZp74MfWFXP1wEDnb5+aUd0Vs1nMZo22Z7FOoGUzcaFGo5qGqRJ93W2jEe2JYZD9GO98sDEFZya1+lIBjkubvpzJ0MG9nC7JLKDVpEIVsZxPch1wnc5HG
+          ulZaYgP1O8OApqlYp7dzFuvKlmEvz6JHMq3uBwbyGpAi5yJ1erpQqjiODwQDb18X3VdAeMuElOy9HkUBo2AbYtqA6NXyqrUT/WDRQaNTlbssoC3h6QMfG3aH
+          h5qxo83+e/YSfN0P6OtXJAlkdjb/xfw3BJ7OpDk/Q+8CO34H/uU7sPYzsPSv57/WbHlE6WaLWgZ/9pgvFkUK0SYpIIUj0RTbsshnKSM0JOwETAw7K/Eo4hER
+          7VKKhXmipSROIuxMkjHzfAoFXj+hyRQbGnzE/ITQCVh5Yq10X3u4pfZf66rd+h7uvjUG29z33ccskQdq7CSOOj4Od2IxrvXWTfLmm/4mbG75GHCXnczmDqSo
+          k4rhjYANqTtt7MtxT3HOckCq1GOcguUeG9As4HVluswD8FHHIUtueeZjcD+meDCj8DrUM6aKIna5RJWwPVxpi92fwq+emLX7UgF7cq+NAWcS+V5PArH3oc7k
+          HNwZyWulfZtowtOuEPhnsYfe862i3VsAviMW7oMY/JRdww3birI6rFXUyI6ZJAP9l42RiXliwGhwAzLKdBq69cYxfczksSv2VZ0BQcfpaT9Lp6enSOMFx9GE
+          uaTaio4M5sSoNBDyWJjCMQK2hYlGo014qH0eDyGefh4z/IpD/Dxm/Vg7qjtvaL9VLb8bsIRbFD91DZLr0h/M/054hefgP+DrBfqMJ+gZIOt9goUTwJVVlHAb
+          z8lf7d80yf6dmwQcyAt4fsD6+xakJk1KigrP2oYsl0KKJWuLKJkaeRuh/5j/HAA+nX0vT/zX+T/Mfy6TcUjx5n8LOP5h9kT4McDyJbisb+bfAgHg5+qzi6rf
+          EWDfROnVKXbQnLKNJhpU10EWqpITQzyZtlseYx/SOpQEigp4u6MJR7GBv201LrhdTogHWz0IofRaAFNIKTyHHlOfN/yKhelsEFFvFxVLCjpLAvNcrl1+5ErT
+          60jn2bmYfwj6boXRsW4U1sUcg8+jqgUh2OCIswGuv4AShBsHEj2Bj14tMiycaDR1LuDz6Sl+bne33utubr0vPgw+gvKQfJQkELRlIPpm9hKV6CXI7HcgKnh4
+          WibBIgA9FVOYp3e3yOzfZr+xNKONFOCDN2kOlDzKOxQbryK13C05m8XITEGP1mZUqpkKtJkDkXZFromGZT9SsUhBNVH+JlJcLOAH2Tp4QiVIr2+hp9c1FejA
+          nq1MOCA9lwAf4tWhrU4uDIt9oWu+p5mKtmbvTEK2GLJTsbY51CZ00d1ZegWqbVb/LKUCBv0SzaoUElRMX6OBo5Bg7oXIF14SaWMN86/kU7giSLNFs0U/Aob4
+          DDa9EGb5q0XYz6X8G0A1kxE/xAzTZdFAKtAOs9RVjn0grBaOMpRBQ/1Fg2CaA5OEQhvoz1tWJBy4tCGxwoSSgkFE5ph8yizdkgSIOqsQVZVwAmXrZrFF/KMx
+          oVkelX9SZSG1uwXKcj3jPCoLRKhe0tFidyp/NPsvxTnJpIt55eqxd/nKYnERQSxMi8ZVrCoQjXpMjdi4OoVqJ25GthVE/Ghf6PMMUr/B9AZeuwGftTSmLuv0
+          GT9mLNTqPlAF+bWC1nmxz1jF15glaRR2XD9xIc1awd8Vqtjk8rLG/xjfhe4tBP5F3gtuvyMdaKFRdQneVC9kpq8S8904rjPxSluWMcMETSKGjQw3AS3Qc5HU
+          lQ5SM9UPOxXTlnosEPPeoj4un9Byek6Ozr4KjW8Jg6rGuWKRDxM6FPf74yz1XUgKQr8TB3QKJcQE3J/volsSV8gxCIUlE/BrHMoedfskw28wPafCQZjLFU4u
+          5IvdKZNg4WUSlE5ZUiR4v9ORb5m0apz8Q4hYwmRSyM5oeI+lcRRCzQ5PbwBwoT45J+FHzPeAGfuCF3peJfjYt4K8fik3x3Fbb6f7ypYKkaCqrAsveJePkrEN
+          M5Hq4vD0FH4reKenY0vVlnhOeQVXJnzqse3OxjQZ+mH7KkSOyQtK+y9XdLh/Wo79TAnf/kA1Ru5Rz89Su/tT85x7JjDUCeqs2WzFtNsqaiU6B1OGvddrxaOf
+          XarY/pwEp+710Xokc/Faf696atzqd7tbjR31hntsgIvga2GJBwZ6gD2RxemFNwOqugD4N2EOZgQyrRHe/ICBVgEKUcKsIePIXplLVDmktI+OcAMd4Qb6ArHO
+          pIsvQYzAzcgEf7tdRshrjzvibl6uaN2WIjKXLolxqAlRYS9dkostP/0YjgGeCBB1Fde6t6/allevmNX7CrUjQGJ07RjcH6iOYY3EhWane3XTVEB7FdAWr6vb
+          eTyk1xJW8zq/LPOWcqvG1aYYkkyXV/2Fevuj+UZGTNsvPTXdlwVeWuTTa6rZi9I+GEVZ4B0w3lwpKn7xBoBauhdN2OutbE7eTCjkMgLvSrsqhqxkU69YBQdP
+          t/WHbIItziFLgRvMWNQPkJ0E1xLla0hwqWo6TxuqE8wlajoKK8ub1qrwP1GElfTfA5dHUyY5uWRm6RubmanKgpUIGosquBKl+yyB3aBN7xKpwiiV/60GtDLn
+          sDXaT6Mg45DpBGzAMbAl4kUG+CERtxue+F0GuS/FhY19ZfONw53IWgX5uWVZ4D7w/yeQh0FRCnniOfe+Z+I28wf4xppAlaU/zJ5jp7wz+6NsTMy/Em0xAgUB
+          /MZ12JHC7Ly+AT4WhG29jxe9n8i3RN7vrrwlX6yQFmjAKiEKfbRhVSMkTDCrw4+julJw5RW34p24My5k9ybf6i5cCK7VKax8p7VMOuUb0gTfkFYvDbviDj4l
+          VLwj7VmQK4xjbNdjQkszz+fq7WDxSrTPsc3fI15E7ty9T/qZH3hkd/9TSzPW/gSPzQZJri0AAA==
+          '''.split())
+          exec(compile(gzip.decompress(base64.b64decode(payload)).decode('utf-8'),'phase10a_patch.py','exec'))
+          PY_FIX
+
+      - name: Validate TypeScript (NO Gradle or APK)
+        working-directory: native
+        shell: bash
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Commit verified source edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/src/ConnectNativeChat.tsx native/src/ConnectNativeMedia.tsx native/src/ConnectNativeMusic.tsx native/src/App.tsx
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(native): search navigation, profile-media avatar, movable mini-player'
+          git push origin HEAD:main
+
+      - name: Summary and release barrier
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native - phase 10A (NO APK)'
+            echo '- Real parity fixes: chat search with highlighted hits/navigation; avatar from media; movable music mini-player.'
+            echo '- Compilation confirms TypeScript only, not Android behavior.'
+            echo '- Still outstanding: recovery deep links, JSON file export, media downloads and further QA.'
+            echo '- Device validation 0/199; APK release gate stays closed.'
+          } >> "$GITHUB_STEP_SUMMARY"
