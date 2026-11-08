@@ -1,0 +1,253 @@
+# Connect Android — standalone offline pre-release APK. No TEST suffix or app ID.
+# Installs under com.connect.messenger; this is NOT a production-signed final release.
+name: Connect Android - standalone prerelease APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-android-prerelease-apk.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-android-prerelease-apk
+  cancel-in-progress: false
+
+jobs:
+  connect-apk:
+    name: Build standalone Connect APK (pre-release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g'
+      # Public browser/client values from the existing Connect Android QA workflow.
+      # Do NOT put the service_role key or any user secrets in Android builds.
+      EXPO_PUBLIC_SUPABASE_URL: 'https://tpwkmoxxzjfdsqsomhhr.supabase.co'
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa'
+      EXPO_PUBLIC_CONNECT_URL: 'https://connect-chat.duckdns.org'
+
+    steps:
+      - name: Check out current Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify current identity, Firebase client and source code
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_VERIFY'
+          import json,subprocess
+          from pathlib import Path
+          e=json.loads(Path('native/app.json').read_text(encoding='utf-8'))['expo']
+          assert e['name']=='Connect', 'Visible Android app name must be Connect'
+          assert e['android']['package']=='com.connect.messenger', 'Cannot build a renamed/suffixed app'
+          assert e['icon']=='./assets/connect-icon.png', 'Approved icon missing'
+          assert e['android']['adaptiveIcon']['foregroundImage']=='./assets/connect-adaptive-foreground.png'
+          for p in ('native/src/App.tsx','native/src/ConnectNativeSplash.tsx',
+                    'native/src/ConnectNativeVoice.tsx','native/src/ConnectNativeChat.tsx',
+                    'native/src/ConnectNativeAvatarCropper.tsx',
+                    'native/plugins/withConnectSounds.js','native/plugins/withConnectTelecom.js',
+                    'native/assets/connect-icon.png','native/assets/connect-splash-bubbles.png',
+                    'native/assets/connect-splash-wordmark.png','native/google-services.json'):
+              assert Path(p).is_file(), f'Missing required native source/asset: {p}'
+          services=json.loads(Path('native/google-services.json').read_text(encoding='utf-8'))
+          apps=[c.get('client_info',{}).get('android_client_info',{}).get('package_name') for c in services.get('client',[])]
+          assert 'com.connect.messenger' in apps, 'Firebase client does not match package'
+          icon_hash=subprocess.check_output(['git','hash-object','native/assets/connect-icon.png'],text=True).strip()
+          mask_hash=subprocess.check_output(['git','hash-object','native/assets/connect-adaptive-foreground.png'],text=True).strip()
+          assert icon_hash=='c6a66bc34ae81ac3b7d71b0845d1af4193cb6ae6',f'Launcher icon changed: {icon_hash}'
+          assert mask_hash=='ad33c7e7ed7d779b604098950d37d60848a74e9a',f'Adaptive icon changed: {mask_hash}'
+          print('Current Connect app identity, approved icon and Firebase configuration validated.')
+          PY_VERIFY
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK command line tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install pinned dependencies and check TypeScript
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          test -n "$EXPO_PUBLIC_SUPABASE_URL"
+          test -n "$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+
+      - name: Generate native Android project with approved assets
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install --clean
+          test -s android/app/build.gradle
+          test -s android/app/google-services.json
+          test -s android/app/src/main/AndroidManifest.xml
+          test -s android/app/src/main/java/com/connect/messenger/ConnectSoundModule.kt
+
+      - name: Configure standalone pre-release signing and disable incompatible R8
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_RELEASE'
+          import re
+          from pathlib import Path
+          g=Path('native/android/app/build.gradle')
+          if not g.is_file():raise SystemExit('Expected Groovy app/build.gradle from Expo prebuild')
+          s=g.read_text(encoding='utf-8')
+          blocks=list(re.finditer(r'(?m)^[ \t]*buildTypes\s*\{',s))
+          if len(blocks)!=1:raise SystemExit('Unexpected Gradle buildTypes layout')
+          def close_brace(content,start):
+              level=1
+              for i in range(start,len(content)):
+                  if content[i]=='{':level+=1
+                  if content[i]=='}':
+                      level-=1
+                      if level==0:return i
+              raise SystemExit('Unclosed Gradle block')
+          begin=blocks[0].end()
+          end=close_brace(s,begin)
+          section=s[begin:end]
+          releases=list(re.finditer(r'(?m)^([ \t]*)release\s*\{',section))
+          if len(releases)!=1:raise SystemExit('Unexpected Gradle release variant')
+          m=releases[0]
+          start=begin+m.end()
+          stop=close_brace(s,start)
+          body=s[start:stop]
+          if 'applicationIdSuffix' in body:raise SystemExit('Refusing package suffix')
+          if re.search(r'(?m)^\s*signingConfig\s+(?!signingConfigs\.debug\b)',body):
+              raise SystemExit('Unexpected release signing configuration')
+          # Debug signing is suitable only for this installable pre-release,
+          # never for the production-signed final build. The JS bundle is
+          # embedded by assembleRelease and does not require Metro at runtime.
+          settings=[]
+          if not re.search(r'\bsigningConfig\s+signingConfigs\.debug\b',body):
+              settings.append('signingConfig signingConfigs.debug')
+          settings+=['minifyEnabled false','shrinkResources false']
+          indent=m.group(1)+'    '
+          replacement=body.rstrip()+''.join('\n'+indent+option for option in settings)+'\n'+m.group(1)
+          updated=s[:start]+replacement+s[stop:]
+          g.write_text(updated,encoding='utf-8')
+          assert 'minifyEnabled false' in updated[start:close_brace(updated,start)]
+          assert 'shrinkResources false' in updated[start:close_brace(updated,start)]
+          print('Non-debuggable release build; debug-key signed, R8 off due to WebRTC issue.')
+          print('No change to source app.json or production package ID.')
+          PY_RELEASE
+
+      - name: Install Android SDK 37
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          command -v sdkmanager
+          if ! sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'; then
+            sdkmanager --channel=3 --install 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools'
+          fi
+          test -x "$SDK_ROOT/build-tools/37.0.0/aapt"
+          test -x "$SDK_ROOT/build-tools/37.0.0/apksigner"
+          test -s "$SDK_ROOT/platforms/android-37.0/android.jar" || test -s "$SDK_ROOT/platforms/android-37/android.jar"
+
+      - name: Build standalone Connect release APK with embedded JavaScript
+        working-directory: native/android
+        shell: bash
+        env:
+          JAVA_TOOL_OPTIONS: '-Dfile.encoding=UTF-8'
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace --max-workers=2 \
+            2>&1 | tee "$GITHUB_WORKSPACE/connect-android-prerelease-build.log"
+          test -s app/build/outputs/apk/release/app-release.apk
+
+      - name: Verify signature, package, name and offline JS bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='native/android/app/build/outputs/apk/release/app-release.apk'
+          test -s "$apk"
+          unzip -t "$apk" | tail -n 2
+          unzip -Z1 "$apk" | grep -Fx 'assets/index.android.bundle'
+          tools="$ANDROID_SDK_ROOT/build-tools/37.0.0"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > /tmp/connect-apk-signing.txt
+          info="$("$tools/aapt" dump badging "$apk")"
+          printf '%s\n' "$info" | grep '^package:'
+          printf '%s\n' "$info" | grep '^application-label:'
+          printf '%s\n' "$info" | grep -q "^package: name='com.connect.messenger'"
+          printf '%s\n' "$info" | grep -q "^application-label:'Connect'"
+          if printf '%s\n' "$info" | grep -q 'application-debuggable'; then
+            echo 'This APK unexpectedly requires a debug runtime' >&2
+            exit 1
+          fi
+          mkdir -p prerelease
+          cp "$apk" prerelease/Connect.apk
+          (cd prerelease && sha256sum Connect.apk > SHA256.txt)
+          printf '%s\n' \
+            'Connect — Android standalone pre-release' \
+            'Filename: Connect.apk' \
+            'Package: com.connect.messenger' \
+            'Display name: Connect' \
+            'Offline bundled JavaScript; no Metro, no USB required' \
+            'NOT final production release; signed with temporary Android debug key' \
+            'Subsequent updates require the same signing certificate; configure a persistent production signing key for final release' \
+            'Do not install over an existing differently signed Connect package without a migration plan' \
+            'Firebase push and phone call handling require real device validation' \
+            > prerelease/README.txt
+          printf '\nAPK verified. Signing certificate:\n'
+          grep -E 'Signer #1 certificate SHA-256 digest:' /tmp/connect-apk-signing.txt || true
+          test -s prerelease/Connect.apk
+          git diff --exit-code -- native/app.json native/package.json native/src
+
+      - name: Upload Connect.apk — pre-release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-PreRelease
+          path: prerelease/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload compilation log if build fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-PreRelease-Build-Log
+          path: connect-android-prerelease-build.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect — самостоятельный установочный Android APK'
+            echo ''
+            echo '- Artifact: **Connect-Android-PreRelease** → **Connect.apk**.'
+            echo '- Приложение называется **Connect**; ID **com.connect.messenger**.'
+            echo '- JavaScript включён в APK; Metro не нужен.'
+            echo '- Подпись: временный Android debug certificate (для предрелизной проверки, НЕ финальная подпись).'
+            echo '- APK не публикуется в GitHub Release, только в Actions Artifacts.'
+            echo '- Перед дальнейшими обновлениями потребуется постоянный signing key.'
+            echo '- Потребуются проверки на реальном Android: FCM, WebRTC, запись, экран блокировки, визуальная сверка.'
+          } >> "$GITHUB_STEP_SUMMARY"
