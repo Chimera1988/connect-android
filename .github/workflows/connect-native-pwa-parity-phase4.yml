@@ -239,7 +239,7 @@ jobs:
                         <Text numberOfLines={2} style={{fontSize:12,color:colors.muted}}>{quoteText}</Text>
                       </View>}""")
           chat=patch('chat close message wrapper',chat,
-              "        </Pressable>;\n      }}/>\n    {peerRecording&&",
+              "        </Pressable>;\n      }}/>\n    {(peerRecording||peerTyping)&&",
               """          </Pressable>
                   </View>;
                 }}/>
@@ -248,7 +248,7 @@ jobs:
                 style={{alignSelf:'flex-end',flexDirection:'row',alignItems:'center',gap:6,marginRight:18,marginBottom:5,paddingHorizontal:13,paddingVertical:8,borderRadius:18,backgroundColor:glassColor(colors.surface,.92),borderWidth:1,borderColor:colors.line}}>
                 <Ionicons name="arrow-down" size={18} color={colors.accent}/><Text style={{fontSize:12,color:colors.text}}>Вниз</Text>
               </Pressable>}
-              {peerRecording&&""")
+              {(peerRecording||peerTyping)&&""")
 
           # Validate every replacement before writing either source file.
           APP.write_text(app,encoding='utf-8')
