@@ -1,0 +1,196 @@
+# Connect Native phase 10C: corrective parity, NOT a release.
+# This workflow does not invoke Gradle, build an APK, or deploy anything.
+name: Connect Native - Phase 10C REPAIR (CSV fix and verified source; NO APK)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-pwa-parity-phase10c-repair.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-native-parity-phase10c-repair
+  cancel-in-progress: false
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout current source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Validate NO-APK guard and required sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY_GUARD'
+          from pathlib import Path
+          import re
+          p=Path('.github/workflows/android-apk.yml')
+          if not p.is_file():raise SystemExit('STOP: legacy APK workflow status unknown')
+          s=p.read_text()
+          if re.search(r'^\s{2}push\s*:',s,re.M) or re.search(r'\b(?:assembleRelease|assembleDebug|gradlew|eas build)\b',s,re.I):
+              raise SystemExit('STOP: legacy APK automatic build may still be enabled')
+          for file in ['native/src/App.tsx','native/src/ConnectNativeChat.tsx',
+               'native/src/ConnectNativeMedia.tsx','native/src/backend.ts',
+               'native/src/ConnectNativeReadSync.ts','native/src/ConnectNativeVideoNote.tsx',
+               'native/phase10_tools/phase10_audit.py','native/package-lock.json']:
+              if not Path(file).is_file():raise SystemExit('STOP: prerequisite missing '+file)
+          print('No APK build is enabled in the legacy workflow.')
+          PY_GUARD
+
+      - name: Apply exact source patches (abort on changed anchors)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_PATCH'
+          import base64,gzip
+          data=''.join('''
+          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
+          '''.split())
+          exec(compile(gzip.decompress(base64.b64decode(data)).decode('utf-8'),'phase10c_patch.py','exec'))
+          PY_PATCH
+
+      - name: Prepare Node and validate TypeScript
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: TypeScript check (NO Android compilation)
+        working-directory: native
+        shell: bash
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Repair CSV line endings in the audit generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_CSV_FIX'
+          from pathlib import Path
+          path=Path('native/phase10_tools/phase10_audit.py')
+          text=path.read_text(encoding='utf-8')
+          before='writer=csv.DictWriter(h,fieldnames='
+          after="writer=csv.DictWriter(h,lineterminator="+repr(chr(10))+",fieldnames="
+          if text.count(before)==1:
+              path.write_text(text.replace(before,after),encoding='utf-8')
+              print('Fixed CSV writer: LF instead of CRLF')
+          elif after in text:
+              print('CSV generator already uses LF; no change needed')
+          else:
+              raise SystemExit('STOP: audit generator changed; unsafe to patch')
+          PY_CSV_FIX
+
+      - name: Re-run conservative PWA evidence audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 native/phase10_tools/phase10_audit.py
+          python3 - <<'PY_AUDIT'
+          from pathlib import Path
+          import json
+          data=json.loads(Path('native/phase10-audit/phase10_parity_199.json').read_text())
+          assert len(data['cases'])==199
+          assert data['runtime_acceptance_confirmed']==0
+          assert data['release_status'].startswith('NOT READY')
+          print('199 source hints reviewed. Device acceptance still 0/199.')
+          PY_AUDIT
+
+      - name: Upload 199-point audit as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-native-phase10c-repair-source-audit
+          path: native/phase10-audit/
+          retention-days: 14
+
+      - name: Commit only successfully validated sources and audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/src/backend.ts native/src/App.tsx native/src/ConnectNativeChat.tsx native/src/ConnectNativePresence.ts native/src/ConnectNativeMedia.tsx native/phase10_tools/phase10_audit.py native/phase10-audit/
+          if git diff --cached --quiet; then
+            echo 'Phase 10C and CSV repair already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(native): phase 10C parity and LF audit CSV output'
+          git push origin HEAD:main
+
+      - name: Report phase results (NO RELEASE)
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native — этап 10В (NO APK)'
+            echo '- PWA-compatible online status: foreground heartbeat, 45-second lease, offline when backgrounded.'
+            echo '- Status visible in contacts, profile and chat header.'
+            echo '- Media attachments can be downloaded and passed to Android file sharing/Save chooser.'
+            echo '- Chat images preserve intrinsic aspect ratio; video notes show loaded duration.'
+            echo '- Source validation and 199-point *static* audit complete; 0/199 device cases accepted.'
+            echo '- APK and release are still blocked until device and visual testing.'
+          } >> "$GITHUB_STEP_SUMMARY"
