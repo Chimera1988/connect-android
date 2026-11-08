@@ -1,4 +1,4 @@
-name: Connect Native - Standalone Test APK with JS bundle and icon
+name: Connect Native - Standalone QA APK (WebRTC R8 fix)
 
 on:
   workflow_dispatch:
@@ -22,16 +22,17 @@ jobs:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
       EXPO_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
-      # Public client key only. NEVER put a service-role key in a mobile APK.
+      # Publishable CLIENT key only: never put service_role in an APK.
       EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
       EXPO_PUBLIC_CONNECT_URL: https://connect-chat.duckdns.org
+
     steps:
-      - name: Checkout Connect Native, without modifying the repository
+      - name: Check out current Connect Native sources
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Check native sources and original Connect icon
+      - name: Verify sources, production identity and artwork
         shell: bash
         run: |
           set -euo pipefail
@@ -44,10 +45,10 @@ jobs:
           python3 - <<'PY_CHECK'
           import json
           from pathlib import Path
-          config=json.loads(Path('native/app.json').read_text())
-          assert config['expo']['android']['package']=='com.connect.messenger', 'Native package was changed unexpectedly'
-          assert config['expo']['android']['googleServicesFile']=='../app/google-services.json', 'Firebase config path changed'
-          print('Source package and original icon verified; legacy WebView will not be changed')
+          c=json.loads(Path('native/app.json').read_text())['expo']
+          assert c['android']['package']=='com.connect.messenger', 'Unexpected production application ID'
+          assert c['android']['googleServicesFile']=='../app/google-services.json', 'Unexpected Firebase config path'
+          print('Verified. Existing Connect package and app/ remain untouched.')
           PY_CHECK
 
       - name: Node.js 24
@@ -74,7 +75,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run typecheck
 
-      - name: Set the existing Connect icon in this CI build only
+      - name: Set original Connect icon for test build only
         shell: bash
         run: |
           set -euo pipefail
@@ -84,26 +85,25 @@ jobs:
           from pathlib import Path
           import json
           p=Path('native/app.json')
-          value=json.loads(p.read_text())
-          expo=value['expo']
-          expo['name']='Connect Native Test'
-          expo['icon']='./assets/connect-icon.png'
-          expo['android']['adaptiveIcon']={
+          v=json.loads(p.read_text())
+          v['expo']['name']='Connect Native Test'
+          v['expo']['icon']='./assets/connect-icon.png'
+          v['expo']['android']['adaptiveIcon']={
               'foregroundImage':'./assets/connect-icon.png',
               'backgroundColor':'#07121b',
           }
-          p.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
-          print('Original Connect 512px icon selected for Android launcher and adaptive icon')
+          p.write_text(json.dumps(v,ensure_ascii=False,indent=2)+'\n')
+          print('Launcher icon configured from existing Connect artwork')
           PY_ICON
 
-      - name: Generate Android project for a self-contained installable APK
+      - name: Generate Android project with offline JavaScript bundle support
         working-directory: native
         shell: bash
         run: |
           set -euo pipefail
           npx expo prebuild --platform android --no-install --clean
 
-      - name: Use the isolated TEST package for the RELEASE build type
+      - name: Isolate test package and disable R8 only in QA release build
         shell: bash
         run: |
           set -euo pipefail
@@ -111,8 +111,6 @@ jobs:
           from pathlib import Path
           import json,copy,re
 
-          # Modify generated Android files on the runner ONLY.
-          # assembleRelease bundles JavaScript into the APK; assembleDebug does NOT.
           production='com.connect.messenger'
           preview=production+'.native'
           root=Path('native/android/app')
@@ -121,93 +119,85 @@ jobs:
           if groovy.exists():
               path=groovy
               suffix='applicationIdSuffix ".native"'
-              debug_signing='signingConfig signingConfigs.debug'
+              signing='signingConfig signingConfigs.debug'
+              shrink=['minifyEnabled false','shrinkResources false']
               matcher=r'(?m)^([ \t]*)release\s*\{'
           elif kotlin.exists():
               path=kotlin
               suffix='applicationIdSuffix = ".native"'
-              debug_signing='signingConfig = signingConfigs.getByName("debug")'
+              signing='signingConfig = signingConfigs.getByName("debug")'
+              shrink=['isMinifyEnabled = false','isShrinkResources = false']
               matcher=r'(?m)^([ \t]*)(?:getByName\(\s*"release"\s*\)|named\(\s*"release"\s*\)|release)\s*\{'
           else:
-              raise SystemExit('Android Gradle application file was not generated')
-          content=path.read_text()
-          types=list(re.finditer(r'(?m)^[ \t]*buildTypes\s*\{',content))
+              raise SystemExit('Generated Android Gradle application file not found')
+          source=path.read_text()
+          types=list(re.finditer(r'(?m)^[ \t]*buildTypes\s*\{',source))
           if len(types)!=1:
-              raise SystemExit(f'Expected exactly one buildTypes block, found {len(types)}')
+              raise SystemExit(f'Expected exactly one buildTypes block; found {len(types)}')
           begin=types[0].end()
-          depth=1
-          end=None
-          for pos in range(begin,len(content)):
-              if content[pos]=='{': depth+=1
-              elif content[pos]=='}':
-                  depth-=1
-                  if depth==0:
-                      end=pos
-                      break
-          if end is None:
-              raise SystemExit('Unclosed buildTypes block')
-          section=content[begin:end]
-          hits=list(re.finditer(matcher,section))
-          if len(hits)!=1:
-              raise SystemExit(f'Expected exactly one buildTypes.release block, found {len(hits)}')
-          match=hits[0]
-          release_start=begin+match.end()
-          # Detect a real closing brace, not the enclosing buildTypes closing brace.
-          depth=1
-          release_end=None
-          for pos in range(release_start,len(content)):
-              if content[pos]=='{': depth+=1
-              elif content[pos]=='}':
-                  depth-=1
-                  if depth==0:
-                      release_end=pos
-                      break
-          if release_end is None:
-              raise SystemExit('Unclosed buildTypes.release block')
-          body=content[release_start:release_end]
+          def close_brace(source,begin):
+              level=1
+              for idx in range(begin,len(source)):
+                  if source[idx]=='{':level+=1
+                  elif source[idx]=='}':
+                      level-=1
+                      if level==0:return idx
+              raise SystemExit('Unclosed Gradle block')
+          end=close_brace(source,begin)
+          section=source[begin:end]
+          matches=list(re.finditer(matcher,section))
+          if len(matches)!=1:
+              raise SystemExit(f'Expected one buildTypes.release block; found {len(matches)}')
+          match=matches[0]
+          release_begin=begin+match.end()
+          release_end=close_brace(source,release_begin)
+          body=source[release_begin:release_end]
           if 'applicationIdSuffix' in body:
-              raise SystemExit('Unexpected existing release applicationIdSuffix; refusing to make an unsafe APK')
-          # QA-only APK: sign the release variant with Android's temporary debug
-          # keystore so it can be installed without requiring production credentials.
-          additions=[suffix]
+              raise SystemExit('Unexpected existing release suffix; cannot ensure safe separation')
+          changes=[suffix]
           if not re.search(r'\bsigningConfig\b',body):
-              additions.append(debug_signing)
+              changes.append(signing)
           elif not ('signingConfigs.debug' in body or 'signingConfigs.getByName("debug")' in body):
-              raise SystemExit('Unknown release signing setup. Do not overwrite production signing configuration.')
+              raise SystemExit('Unexpected release signing configuration')
+          # Override Expo's existing minify/shrink flags at the END of buildTypes.release.
+          # R8 fails on org.webrtc.Dav1dDecoder$Natives (CI 42430386516).
+          # This is strictly a QA release-variant workaround, not a production setting.
+          changes.extend(shrink)
           indent=match.group(1)+'    '
-          insertion='\n'+''.join(indent+line+'\n' for line in additions)
-          content=content[:release_start]+insertion+content[release_start:]
-          if content.count(suffix)!=1:
-              raise SystemExit('Incorrect test applicationId suffix')
-          path.write_text(content)
-          print('Configured RELEASE JavaScript bundle + isolated test package + QA debug signing')
+          updated=source[:release_begin]+body.rstrip()+''.join('\n'+indent+x for x in changes)+'\n'+match.group(1)+source[release_end:]
+          if updated.count(suffix)!=1:
+              raise SystemExit('Incorrect package suffix insertion')
+          result_body=updated[release_begin:close_brace(updated,release_begin)]
+          assert all(x in result_body for x in changes)
+          assert result_body.rfind(shrink[0]) > result_body.find('minifyEnabled')
+          path.write_text(updated)
+          print('Isolated applicationId:',preview)
+          print('Standalone release JS bundle enabled; R8 and resource shrinking disabled for TEST ONLY')
 
-          # Firebase Gradle plugin otherwise rejects the new package. This
-          # temporary cloned client ONLY allows compilation. It does not create
-          # a real Firebase registration for the test app, so FCM needs separate testing.
+          # Android Google Services Gradle plugin requires a matching client entry.
+          # A temporary build-only copy DOES NOT register this separate app with Firebase.
           services=root/'google-services.json'
-          data=json.loads(services.read_text())
-          clients=data.get('client') or []
+          value=json.loads(services.read_text())
+          clients=value.get('client') or []
           base=next((x for x in clients if x.get('client_info',{}).get('android_client_info',{}).get('package_name')==production),None)
           if base is None:
-              raise SystemExit('Original Firebase app is missing')
+              raise SystemExit('Production Firebase client was not found')
           if not any(x.get('client_info',{}).get('android_client_info',{}).get('package_name')==preview for x in clients):
-              test=copy.deepcopy(base)
-              test['client_info']['android_client_info']['package_name']=preview
-              clients.append(test)
-          services.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
-          print('Generated test package:',preview)
-          print('FCM push requires a separately registered Firebase test app to be fully verified')
+              clone=copy.deepcopy(base)
+              clone['client_info']['android_client_info']['package_name']=preview
+              clients.append(clone)
+          services.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
+          print('Note: FCM on this isolated test app still requires a real Firebase registration')
           PY_VARIANT
 
-      - name: Install preview Android SDK 37 used by prior successful builds
+      - name: Install Android SDK 37 used by previous native builds
         shell: bash
         run: |
           set -euo pipefail
           sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
           test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
 
-      - name: Build standalone release-variant APK with bundled JavaScript
+      - name: Build self-contained test APK with embedded JavaScript
         working-directory: native/android
         shell: bash
         run: |
@@ -216,7 +206,7 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon --stacktrace
           test -s app/build/outputs/apk/release/app-release.apk
 
-      - name: Verify offline JavaScript bundle, APK signature, icon and identity
+      - name: Verify offline bundle, icon, signing and isolated application ID
         shell: bash
         run: |
           set -euo pipefail
@@ -229,33 +219,31 @@ jobs:
           test -x "$aapt"
           test -x "$signer"
           "$signer" verify --verbose "$apk"
-          package_line="$("$aapt" dump badging "$apk" | sed -n '/^package:/p')"
-          echo "$package_line"
-          if [[ "$package_line" != *"name='com.connect.messenger.native'"* ]]; then
-            echo 'Incorrect test package name; refusing to publish.' >&2
+          info="$("$aapt" dump badging "$apk")"
+          echo "$info" | sed -n '/^package:/p'
+          if [[ "$info" != *"name='com.connect.messenger.native'"* ]]; then
+            echo 'Wrong APK package; refusing to publish or overwrite original Connect' >&2
             exit 1
           fi
-          if "$aapt" dump badging "$apk" | grep -q 'application-debuggable'; then
-            echo 'APK still has a debuggable manifest; not a standalone QA release.' >&2
+          if echo "$info" | grep -q 'application-debuggable'; then
+            echo 'App is still debuggable and might require Metro; refusing to publish' >&2
             exit 1
           fi
-          # Confirm launcher icon resources exist in the compiled APK.
-          "$aapt" dump badging "$apk" | grep -E 'application-icon|application: label' | sed -n '1,5p'
+          echo "$info" | grep -E 'application-icon|application: label' | head -n 5
           git diff --exit-code -- app/
           mkdir -p test-apk
           cp "$apk" test-apk/Connect-Native-TEST.apk
           (cd test-apk && sha256sum Connect-Native-TEST.apk > SHA256.txt)
           printf '%s\n' \
-            'Connect Native standalone Android TEST APK' \
-            'Package: com.connect.messenger.native' \
-            'Build type: release code bundle (no Metro required), signed with disposable QA debug key' \
-            'This does NOT replace the original com.connect.messenger application.' \
-            'Icon: original Connect artwork.' \
-            'FCM push requires a real Firebase registration for the test application.' \
-            'Not a production-signed update. Test login, chats, media, calls, Bluetooth and notifications.' \
+            'Connect Native TEST - standalone APK with icon' \
+            'Package: com.connect.messenger.native (separate from old Connect)' \
+            'Embedded index.android.bundle, Metro and USB not needed' \
+            'Test-only RELEASE variant, QA debug keystore, no R8 minification' \
+            'FCM/push not guaranteed without a separate Firebase Android app registration' \
+            'Not production-signed; please test on an Android device' \
             > test-apk/README.txt
 
-      - name: Upload installable Connect Native test APK
+      - name: Upload Connect Native standalone TEST APK
         uses: actions/upload-artifact@v4
         with:
           name: Connect-Native-TEST-APK
@@ -268,13 +256,12 @@ jobs:
         shell: bash
         run: |
           {
-            echo '### Connect Native: standalone Android APK ready for testing'
+            echo '### Connect Native: standalone Android test APK'
             echo ''
-            echo '- Download artifact **Connect-Native-TEST-APK**.'
-            echo '- Install **Connect-Native-TEST.apk** from the archive.'
-            echo '- Includes **index.android.bundle**: no Metro / USB / computer required.'
-            echo '- Includes original Connect launcher icon.'
-            echo '- Test-only package: `com.connect.messenger.native` (safe alongside old Connect).'
-            echo '- Signed with a disposable QA/debug key, **not** a production release.'
-            echo '- Firebase push in this isolated package is not guaranteed; it needs separate registration.'
+            echo '- Artifact **Connect-Native-TEST-APK** contains **Connect-Native-TEST.apk**.'
+            echo '- JS included: Metro is not required.'
+            echo '- Original Connect icon included.'
+            echo '- Package `com.connect.messenger.native` installs next to existing Connect.'
+            echo '- QA build only: R8 disabled for the isolated test variant; signed with temporary debug key.'
+            echo '- Firebase push notifications still need their own real Android app registration.'
           } >> "$GITHUB_STEP_SUMMARY"
