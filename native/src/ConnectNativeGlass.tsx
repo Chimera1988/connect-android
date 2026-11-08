@@ -23,6 +23,14 @@ export default function ConnectNativeGlass({colors,theme}:{colors:Palette;theme:
     return()=>motion.stop();
   },[progress,theme]);
   if(theme==='minimal')return null;
+  const scenePrimary:Record<Exclude<ThemeName,'minimal'>,string>={
+    waves:'#4aabf0',aurora:'#88b8f9',moon:'#88a6e9',sunset:'#e5a074',lagoon:'#4ac7b9',nebula:'#9c80e6'
+  };
+  const sceneSecondary:Record<Exclude<ThemeName,'minimal'>,string>={
+    waves:'#7cc5fa',aurora:'#7bd1bd',moon:'#bbc6ff',sunset:'#ffa79b',lagoon:'#83e7d5',nebula:'#d9a7f4'
+  };
+  const tint=scenePrimary[theme];
+  const glow=sceneSecondary[theme];
   const shift=progress.interpolate({inputRange:[0,1],outputRange:[-15,14]});
   return <View pointerEvents="none" style={[({position:"absolute" as const,top:0,right:0,bottom:0,left:0}),{overflow:'hidden'}]}>
     <Svg width="100%" height="100%" viewBox="0 0 390 820" preserveAspectRatio="none">
@@ -44,19 +52,19 @@ export default function ConnectNativeGlass({colors,theme}:{colors:Palette;theme:
         <Defs>
           <LinearGradient id="waveA" x1="0" y1="1" x2="1" y2="0">
             <Stop offset="0" stopColor={colors.accent} stopOpacity="0.33"/>
-            <Stop offset="0.46" stopColor="#4879b6" stopOpacity="0.17"/>
+            <Stop offset="0.46" stopColor={tint} stopOpacity="0.17"/>
             <Stop offset="1" stopColor={colors.accent} stopOpacity="0"/>
           </LinearGradient>
           <LinearGradient id="waveB" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor="#568fd5" stopOpacity="0"/>
-            <Stop offset="0.52" stopColor="#568fd5" stopOpacity="0.25"/>
+            <Stop offset="0" stopColor={tint} stopOpacity="0"/>
+            <Stop offset="0.52" stopColor={glow} stopOpacity="0.25"/>
             <Stop offset="1" stopColor={colors.accent} stopOpacity="0.20"/>
           </LinearGradient>
         </Defs>
         <Path d="M-25 440 C110 275 196 602 477 340 L477 630 L-25 630 Z" fill="url(#waveA)"/>
         <Path d="M-20 512 C115 355 267 539 475 386 L475 625 L-20 625 Z" fill="url(#waveB)"/>
         <Path d="M-22 463 C150 307 270 598 473 411" stroke={colors.accent} strokeWidth="1.5" strokeOpacity="0.26" fill="none"/>
-        <Path d="M-14 534 C145 390 273 554 457 407" stroke="#85c2fa" strokeWidth="1.3" strokeOpacity="0.18" fill="none"/>
+        <Path d="M-14 534 C145 390 273 554 457 407" stroke={glow} strokeWidth="1.3" strokeOpacity="0.18" fill="none"/>
       </Svg>
     </Animated.View>
   </View>;

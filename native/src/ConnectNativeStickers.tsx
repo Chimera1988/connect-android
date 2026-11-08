@@ -76,10 +76,11 @@ export function ConnectNativeStickerBubble({body,colors}:{body:string;colors:Pal
   </View>;
 }
 
-export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,onEmoji,onClose}:{
-  colors:Palette;ownerId:string;busy:boolean;onSend:(body:string)=>Promise<void>;onEmoji:(emoji:string)=>void;onClose:()=>void;
+export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,onEmoji,onClose,enabledPacks=packs.map(p=>p.id)}:{
+  colors:Palette;ownerId:string;busy:boolean;onSend:(body:string)=>Promise<void>;onEmoji:(emoji:string)=>void;onClose:()=>void;enabledPacks?:string[];
 }) {
   const [selected,setSelected]=useState('speed');
+  useEffect(()=>{if(packs.some(p=>p.id===selected)&&!enabledPacks.includes(selected))setSelected(enabledPacks[0]||'emoji');},[selected,enabledPacks]);
   const [customPacks,setCustomPacks]=useState<CustomPack[]>([]);
   const [customStickers,setCustomStickers]=useState<CustomSticker[]>([]);
   const [customUrls,setCustomUrls]=useState<Record<string,string>>({});
@@ -136,7 +137,7 @@ export default function ConnectNativeStickerPicker({colors,ownerId,busy,onSend,o
     </View>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" style={{flexGrow:0,marginBottom:9}}>
       {toggleButton('emoji','☺ Эмодзи')}
-      {packs.map(p=>toggleButton(p.id,`${p.emoji} ${p.name}`))}
+      {packs.filter(p=>enabledPacks.includes(p.id)).map(p=>toggleButton(p.id,`${p.emoji} ${p.name}`))}
       {customPacks.map(p=>toggleButton(p.id,`${p.name===FAVORITE_NAME?'⭐':p.emoji||'🎨'} ${p.name===FAVORITE_NAME?'Избранное':p.name}`))}
     </ScrollView>
     {loading&&<ActivityIndicator color={colors.accent} style={{marginTop:30}}/>}

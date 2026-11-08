@@ -9,7 +9,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { Session } from '@supabase/supabase-js';
 import { configured, db, mediaUrl, type Conversation, type Message, type Profile } from './backend';
-import { palettes, themeNames, type Palette, type ThemeName } from './theme';
+import type {Palette} from './theme';
+import {useConnectNativeAppearance} from './ConnectNativeAppearance';
+import ConnectNativeSettings from './ConnectNativeSettings';
 import ConnectNativeChat from './ConnectNativeChat';
 import ConnectNativeCalls from './ConnectNativeCalls';
 import ConnectNativeMedia from './ConnectNativeMedia';
@@ -20,7 +22,6 @@ import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversa
 import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
 import ConnectNativeGlass,{glassColor} from './ConnectNativeGlass';
 import ConnectNativeInvites,{hasInviteAdminAccess,type InvitationMode} from './ConnectNativeInvites';
-import * as SecureStore from 'expo-secure-store';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
 
 type Tab = 'chats' | 'contacts' | 'calls' | 'settings';
@@ -61,19 +62,9 @@ function AppMain(){
   const [inviteMode,setInviteMode]=useState<InvitationMode|null>(null);
   const [inviteAdmin,setInviteAdmin]=useState(false);
   const [tab,setTab]=useState<Tab>('chats');const [screen,setScreen]=useState<Screen>({kind:'tab'});
-  const [theme,setTheme]=useState<ThemeName>('waves');
-  const [themeLoaded,setThemeLoaded]=useState(false);
-  useEffect(()=>{
-    let active=true;
-    void SecureStore.getItemAsync('connect-native-theme-v1').then(saved=>{
-      if(active&&themeNames.some(item=>item.id===saved))setTheme(saved as ThemeName);
-    }).catch(()=>{}).finally(()=>{if(active)setThemeLoaded(true);});
-    return()=>{active=false;};
-  },[]);
-  useEffect(()=>{
-    if(themeLoaded)void SecureStore.setItemAsync('connect-native-theme-v1',theme).catch(()=>{});
-  },[theme,themeLoaded]);
-  const colors=palettes[theme];
+  const appearance=useConnectNativeAppearance();
+  const colors=appearance.colors;
+  const theme=appearance.prefs.scene;
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [avatars,setAvatars]=useState<Record<string,string>>({});
   const [conversations,setConversations]=useState<Conversation[]>([]);
@@ -221,6 +212,7 @@ function AppMain(){
     if(screen.kind==='chat')return <ConnectNativeChat key={screen.conversation.id}
       conversation={screen.conversation} peer={screen.peer} ownerId={ownId} profiles={profiles}
       avatarUrl={avatars[screen.peer.id]} colors={colors}
+      wallpaperUri={appearance.prefs.wallpaper} enabledPacks={appearance.prefs.enabledPacks}
       onBack={()=>setScreen({kind:'tab'})}
       onOpenProfile={()=>setScreen({kind:'profile',profile:screen.peer})}
       onCall={()=>void voice.dial(screen.conversation.id,screen.peer.id,screen.peer.display_name)} />;
@@ -245,22 +237,12 @@ function AppMain(){
         </View>
       </ScrollView>
     </View>;
-    if(tab==='settings')return <ScrollView style={{flex:1}} contentContainerStyle={s.pad}>
-      <Text style={s.title}>Настройки</Text>
-      <View style={[s.entry,{marginTop:19}]}><Avatar name={own?.display_name||'Connect'} url={avatars[ownId]} colors={colors}/><View style={{flex:1}}><Text style={s.entryTitle}>{own?.display_name||'Мой профиль'}</Text><Text style={s.subtitle}>{session?.user.email}</Text></View></View>
-      <Text style={[s.headerLabel,{marginTop:25}]}>Оформление</Text>
-      <View style={s.colorGrid}>{themeNames.map(item=><Pressable key={item.id} onPress={()=>setTheme(item.id)} style={[s.colorChip,{borderColor:theme===item.id?colors.accent:colors.line,backgroundColor:palettes[item.id].surface}]}>
-        <View style={{width:10,height:10,borderRadius:5,backgroundColor:palettes[item.id].accent}}/><Text style={{color:theme===item.id?colors.text:colors.muted,fontSize:12}}>{item.name}</Text>
-      </Pressable>)}</View>
-      <ConnectNativeSoundSettings colors={colors}/>
-       {inviteAdmin&&<Pressable accessibilityRole="button" onPress={()=>setInviteMode('admin')} style={[s.entry,{marginTop:12}]}>
-         <Ionicons name="person-add-outline" size={22} color={colors.accent}/>
-         <View style={{flex:1}}><Text style={s.entryTitle}>Управление участниками</Text>
-           <Text style={s.subtitle}>Приглашения в Connect</Text></View>
-         <Ionicons name="chevron-forward" size={18} color={colors.muted}/>
-       </Pressable>}
-      <Pressable style={[s.mainAction,{backgroundColor:colors.elevated,marginTop:32}]} onPress={()=>void logout()}><Text style={s.actionText}>Выйти из аккаунта</Text></Pressable>
-    </ScrollView>;
+    if(tab==='settings')return <ConnectNativeSettings
+      owner={own||null} email={session?.user.email||''} colors={colors}
+      appearance={appearance} admin={inviteAdmin}
+      onInvite={()=>setInviteMode('admin')}
+      onProfile={()=>{if(own)setScreen({kind:'profile',profile:own});}}
+      onLogout={()=>void logout()} onProfileSaved={loadDirectory}/>;
     if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}
       onDial={(conversationId,peer)=>void voice.dial(conversationId,peer.id,peer.display_name)}/>;
     if(tab==='contacts')return <FlatList data={profiles.filter(p=>p.id!==ownId&&p.display_name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))} keyExtractor={x=>x.id} contentContainerStyle={[s.pad,{gap:5}]} ListHeaderComponent={<><Text style={s.title}>Контакты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Найти пользователя" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>} renderItem={({item})=><Pressable style={s.entry} onPress={()=>void openPerson(item)}><Avatar name={item.display_name} url={avatars[item.id]} colors={colors}/><Text style={[s.entryTitle,{flex:1}]}>{item.display_name}</Text><Ionicons name="chatbubble-outline" color={colors.accent} size={20}/></Pressable>}/>;
@@ -314,7 +296,7 @@ function AppMain(){
         </Pressable>;
       }}/>;
   }
-  return <View style={s.root}><ConnectNativeGlass colors={colors} theme={theme}/><StatusBar style="light"/>
+  return <View style={s.root}><ConnectNativeGlass colors={colors} theme={theme}/><StatusBar style={appearance.prefs.mode==='light'?'dark':'light'}/>
     <View style={{flex:1}}>{content()}</View>
     {screen.kind==='tab'&&<View style={s.bottom}>
       {tabButton('chats','chatbubbles-outline','Чаты')}
