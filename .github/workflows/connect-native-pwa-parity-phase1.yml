@@ -94,7 +94,16 @@ jobs:
           set -euo pipefail
           sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
           test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
-      - name: Compile native Android (validation only)
+      - name: Restore Gradle distributions and downloaded dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+          key: connect-native-gradle-${{ runner.os }}-${{ hashFiles('native/package-lock.json') }}-v2
+          restore-keys: |
+            connect-native-gradle-${{ runner.os }}-
+      - name: Compile native Android with download retries (validation only)
         working-directory: native/android
         env:
           CI: '1'
@@ -102,8 +111,45 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
-          test -s app/build/outputs/apk/debug/app-debug.apk
+          # The original CI failed on short wrapper timeout (attempt 1),
+          # then on an upstream 504 downloading Kotlin (attempt 2).
+          # Change only generated CI files; project sources remain untouched.
+          wrapper='gradle/wrapper/gradle-wrapper.properties'
+          if grep -q '^networkTimeout=' "$wrapper"; then
+            sed -i 's/^networkTimeout=.*/networkTimeout=120000/' "$wrapper"
+          else
+            printf '\nnetworkTimeout=120000\n' >> "$wrapper"
+          fi
+          mkdir -p "$HOME/.gradle"
+          cat >> "$HOME/.gradle/gradle.properties" <<'GRADLE_NETWORK'
+          systemProp.org.gradle.internal.http.connectionTimeout=120000
+          systemProp.org.gradle.internal.http.socketTimeout=120000
+          systemProp.org.gradle.internal.repository.max.retries=4
+          systemProp.org.gradle.internal.repository.initial.backoff=500
+          GRADLE_NETWORK
+          for attempt in 1 2 3 4; do
+            echo "=== Android Gradle verification, attempt $attempt of 4 ==="
+            set +e
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/connect-native-gradle.log
+            code=${PIPESTATUS[0]}
+            set -e
+            if [ "$code" -eq 0 ]; then
+              test -s app/build/outputs/apk/debug/app-debug.apk
+              echo 'Android compilation passed'
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo 'Android compilation failed after retries' >&2
+              exit "$code"
+            fi
+            # Retry only transient upstream download/network failures.
+            if ! grep -Eiq '504|502 Bad Gateway|503 Service Unavailable|Gateway Time-out|Read timed out|SocketTimeoutException|Connection reset|Could not download|Downloading from .* failed: timeout|Could not GET|Connection timed out' /tmp/connect-native-gradle.log; then
+              echo 'Non-network Gradle error: do not hide a real compilation failure' >&2
+              exit "$code"
+            fi
+            echo 'Temporary dependency download failure; retrying with Gradle cache'
+            sleep $((attempt * 15))
+          done
       - name: Commit only the verified native source changes
         shell: bash
         run: |
