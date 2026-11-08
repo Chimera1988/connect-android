@@ -19,6 +19,7 @@ import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
 import ConnectNativeGlass,{glassColor} from './ConnectNativeGlass';
+import ConnectNativeInvites,{hasInviteAdminAccess,type InvitationMode} from './ConnectNativeInvites';
 import * as SecureStore from 'expo-secure-store';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
 
@@ -57,6 +58,8 @@ function AppMain(){
   const [initializing,setInitializing]=useState(true);
   const [email,setEmail]=useState('');const [password,setPassword]=useState('');
   const [authBusy,setAuthBusy]=useState(false);
+  const [inviteMode,setInviteMode]=useState<InvitationMode|null>(null);
+  const [inviteAdmin,setInviteAdmin]=useState(false);
   const [tab,setTab]=useState<Tab>('chats');const [screen,setScreen]=useState<Screen>({kind:'tab'});
   const [theme,setTheme]=useState<ThemeName>('waves');
   const [themeLoaded,setThemeLoaded]=useState(false);
@@ -78,6 +81,12 @@ function AppMain(){
   const [notice,setNotice]=useState('');
   const [pushDestination,setPushDestination]=useState<NativePushDestination|null>(null);
   const ownId=session?.user.id||'';
+  useEffect(()=>{
+    let alive=true;
+    if(!ownId){setInviteAdmin(false);return;}
+    void hasInviteAdminAccess().then(allowed=>{if(alive)setInviteAdmin(allowed);});
+    return()=>{alive=false;};
+  },[ownId]);
   const voice=useConnectNativeVoice(ownId,profiles);
   const voiceRef=useRef(voice);
   voiceRef.current=voice;
@@ -192,7 +201,11 @@ function AppMain(){
     <TextInput style={s.field} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholder="Почта" placeholderTextColor={colors.muted} value={email} onChangeText={setEmail}/>
     <TextInput style={s.field} secureTextEntry placeholder="Пароль" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword}/>
     <Pressable style={s.mainAction} onPress={()=>void login()} disabled={authBusy}><Text style={s.actionText}>{authBusy?'Вход…':'Войти'}</Text></Pressable>
+    <Pressable accessibilityRole="button" onPress={()=>setInviteMode('register')} style={{marginTop:18,paddingVertical:12,paddingHorizontal:15}}>
+      <Text style={{color:colors.accent,fontSize:15,fontWeight:'700'}}>У меня есть код приглашения</Text>
+    </Pressable>
     {!!notice&&<Text style={s.error}>{notice}</Text>}
+    <ConnectNativeInvites visible={inviteMode==='register'} mode="register" colors={colors} onClose={()=>setInviteMode(null)}/>
   </View>;
 
   function tabButton(which:Tab,icon:keyof typeof Ionicons.glyphMap,title:string){const active=tab===which;
@@ -240,6 +253,12 @@ function AppMain(){
         <View style={{width:10,height:10,borderRadius:5,backgroundColor:palettes[item.id].accent}}/><Text style={{color:theme===item.id?colors.text:colors.muted,fontSize:12}}>{item.name}</Text>
       </Pressable>)}</View>
       <ConnectNativeSoundSettings colors={colors}/>
+       {inviteAdmin&&<Pressable accessibilityRole="button" onPress={()=>setInviteMode('admin')} style={[s.entry,{marginTop:12}]}>
+         <Ionicons name="person-add-outline" size={22} color={colors.accent}/>
+         <View style={{flex:1}}><Text style={s.entryTitle}>Управление участниками</Text>
+           <Text style={s.subtitle}>Приглашения в Connect</Text></View>
+         <Ionicons name="chevron-forward" size={18} color={colors.muted}/>
+       </Pressable>}
       <Pressable style={[s.mainAction,{backgroundColor:colors.elevated,marginTop:32}]} onPress={()=>void logout()}><Text style={s.actionText}>Выйти из аккаунта</Text></Pressable>
     </ScrollView>;
     if(tab==='calls')return <ConnectNativeCalls ownerId={ownId} profiles={profiles} avatars={avatars} colors={colors}
@@ -303,6 +322,7 @@ function AppMain(){
       {tabButton('calls','call-outline','Звонки')}
       {tabButton('settings','settings-outline','Настройки')}
     </View>}
+    <ConnectNativeInvites visible={inviteMode==='admin'} mode="admin" colors={colors} onClose={()=>setInviteMode(null)}/>
     <ConnectNativeVoicePanel voice={voice} colors={colors}/>
     {!!notice&&<Pressable style={s.toast} onPress={()=>setNotice('')}><Text style={{color:colors.text}}>{notice}</Text><Ionicons name="close" color={colors.text} size={15}/></Pressable>}
   </View>;
