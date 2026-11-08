@@ -19,7 +19,11 @@
         "MODIFY_AUDIO_SETTINGS",
         "BLUETOOTH_CONNECT"
       ],
-      "googleServicesFile": "../app/google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/connect-icon.png",
+        "backgroundColor": "#07121b"
+      }
     },
     "plugins": [
       "expo-secure-store",
@@ -55,6 +59,7 @@
         }
       ],
       "./plugins/withConnectSounds"
-    ]
+    ],
+    "icon": "./assets/connect-icon.png"
   }
 }

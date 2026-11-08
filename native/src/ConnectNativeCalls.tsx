@@ -80,7 +80,7 @@ export default function ConnectNativeCalls({ownerId,profiles,avatars,colors,onDi
     <Pressable disabled={disabled} onPress={onPress} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:12,borderWidth:1,borderColor:colors.line,backgroundColor:colors.surface,opacity:disabled ? 0.4 : 1}}>
       <Text style={{color:colors.text,fontSize:12}}>{label}</Text>
     </Pressable>;
-  return <View style={{flex:1,backgroundColor:colors.bg}}>
+  return <View style={{flex:1,backgroundColor:'transparent'}}>
     <View style={{padding:13,flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
       <Text style={{color:colors.text,fontSize:26,fontWeight:'800'}}>Звонки</Text>
       <View style={{flexDirection:'row',alignItems:'center'}}>

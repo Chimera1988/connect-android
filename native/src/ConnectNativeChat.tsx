@@ -15,6 +15,7 @@ import ConnectNativeAlbum,{parseAlbumReference} from './ConnectNativeAlbum';
 import ConnectNativeStickerPicker,{ConnectNativeStickerBubble,parseStickerReference} from './ConnectNativeStickers';
 import {uploadFile,type LocalUpload} from './nativeMediaUtils';
 import type {Palette} from './theme';
+import {glassColor} from './ConnectNativeGlass';
 
 const FORWARD_PREFIX='[[connect-forward:';
 const forwardMeta=(body:string):{from:string|null;text:string}=>{
@@ -329,8 +330,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     finally{setForwardBusy(false);}
   }
   const menuStyle={backgroundColor:colors.surface,borderRadius:17,padding:12,marginHorizontal:20,maxHeight:'80%' as const};
-  return <KeyboardAvoidingView style={{flex:1,backgroundColor:colors.bg}} behavior={Platform.OS==='ios'?'padding':undefined}>
-    <View style={{flexDirection:'row',alignItems:'center',gap:5,padding:9,borderBottomWidth:.6,borderBottomColor:colors.line}}>
+  return <KeyboardAvoidingView style={{flex:1,backgroundColor:'transparent'}} behavior={Platform.OS==='ios'?'padding':undefined}>
+    <View style={{flexDirection:'row',alignItems:'center',gap:5,padding:7,marginHorizontal:8,marginTop:5,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),borderRadius:23,backgroundColor:glassColor(colors.surface,.84)}}>
       <Btn name="chevron-back" label="Назад" colors={colors} onPress={onBack}/>
       <Pressable style={{flexDirection:'row',alignItems:'center',gap:8,flex:1,minWidth:0}} onPress={onOpenProfile}>
         <ChatAvatar name={peer.display_name} url={avatarUrl} colors={colors}/>
@@ -361,7 +362,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const standalone=Boolean(sticker||keyboardSticker)&&!item.deleted_at;
         const isSelected=selected.includes(item.id);
         return <Pressable onLongPress={()=>action(item)} onPress={()=>{if(selectionMode)action(item);}} style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
-          borderWidth:isSelected?2:standalone?0:1,borderColor:isSelected?colors.accent:own?colors.accent:colors.line,backgroundColor:standalone?'transparent':own?colors.elevated:colors.surface}}>
+          borderWidth:isSelected?2:standalone?0:1,borderColor:isSelected?colors.accent:own?glassColor(colors.accent,.32):glassColor(colors.text,.15),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.84):glassColor(colors.surface,.82)}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
             {item.reply_to&&<Text style={{fontSize:10,color:colors.accent,marginBottom:4}}>↩ Ответ на сообщение</Text>}
@@ -381,13 +382,13 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     </View>}
     {stickerPickerOpen&&<ConnectNativeStickerPicker colors={colors} ownerId={ownerId} busy={busy||uploading}
       onClose={()=>setStickerPickerOpen(false)} onEmoji={emoji=>setDraft(text=>text+emoji)} onSend={sendSticker}/>}
-    <View style={{flexDirection:'row',alignItems:'center',padding:8,borderTopWidth:.6,borderTopColor:colors.line,gap:2}}>
+    <View style={{flexDirection:'row',alignItems:'center',padding:7,marginHorizontal:8,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),backgroundColor:glassColor(colors.surface,.86),borderRadius:24,gap:2}}>
       <Btn name="happy-outline" colors={colors} label="Стикеры и эмодзи" disabled={uploading||recorderState.isRecording}
         onPress={()=>{Keyboard.dismiss();setStickerPickerOpen(open=>!open);}}/>
       <Btn name="attach-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={uploading||busy}/>
       <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={uploading||busy||recorderState.isRecording}/>
       <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение'} placeholderTextColor={mutedColor}
-        value={draft} onChangeText={setDraft} style={{backgroundColor:colors.surface,color:textColor,borderRadius:16,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
+        value={draft} onChangeText={setDraft} style={{backgroundColor:glassColor(colors.bg,.30),color:textColor,borderRadius:18,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
       {Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={busy} onPress={()=>void submit()}/>
       :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
         label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} onPress={()=>void toggleRecord()}/>}

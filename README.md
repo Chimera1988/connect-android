@@ -1,12 +1,17 @@
-# Connect Android — WebView оболочка
+# Connect Native — Android
 
-Это исходный Android-проект с автоматической сборкой APK через GitHub Actions. Компьютер и Android Studio не нужны для облачной сборки.
+This repository now contains **only the native React Native / Expo Android client** in `native/`. The old WebView Android sources and Gradle build have been retired. The Connect Messenger PWA is a separate repository and is **not** deleted or changed here.
 
-## Сборка через GitHub
-1. Создайте **отдельный** репозиторий GitHub (например, `connect-android`).
-2. Загрузите в корень репозитория **содержимое** этой папки, включая скрытую `.github/workflows/android-apk.yml`. Не загружайте ZIP как один файл: GitHub Actions не распаковывает его автоматически.
-3. Откройте вкладку **Actions** → **Build Connect APK** → **Run workflow** (или дождитесь запуска после push в main).
-4. После зелёной отметки откройте сборку → **Artifacts** → **Connect-Android-APK**. Скачайте ZIP с `app-debug.apk`.
-5. Передайте APK на Android и установите его, разрешив установку из выбранного источника, если телефон запросит разрешение.
+## Native test APK
 
-Приложение открывает `https://connect-messenger-mu.vercel.app/` через Android WebView. Наличие APK не устраняет ограничения доступа к сайту со стороны оператора. Это **debug APK**, не подписанный релиз для Google Play. Для приватного тестирования подходит. Push-уведомления и полноценные загрузки файлов пока не реализованы. Сборка ещё не проверена запуском GitHub Actions.
+The previous QA build workflow depends on the deleted WebView resources and is deactivated. A fresh Native-only APK workflow will replace it; do not run the old one. The QA application ID will remain `com.connect.messenger.native`, distinct from the production `com.connect.messenger`.
+
+The test APK is signed with a disposable debug key and **is not a final production release**. Firebase push in the QA package needs separately registered Firebase Android configuration and real-device tests. Audio calls, Bluetooth, background notifications, camera and media require real-device checks.
+
+The native app uses the same users and Connect backend as the PWA. Its Firebase config and launcher icon now live inside `native/` rather than the deleted WebView project.
+
+## Development
+
+`cd native && npm ci && npx expo prebuild --platform android`
+
+The old `app/` and root Android Gradle scripts have been deleted. Old GitHub Actions workflows are retained only as disabled history because the default Actions token cannot remove workflow definitions. Legacy source can be restored from Git history if needed.

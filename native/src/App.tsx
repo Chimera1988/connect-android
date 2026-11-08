@@ -18,6 +18,7 @@ import {subscribeSystemTelecom} from './ConnectNativeTelecom';
 import type { MediaKind } from './nativeMediaUtils';
 import {subscribeNativePush,disableNativePush,dismissChatPush,setVisibleConversation,type NativePushDestination} from './ConnectNativePush';
 import ConnectNativeSoundSettings from './ConnectNativeSoundSettings';
+import ConnectNativeGlass,{glassColor} from './ConnectNativeGlass';
 import * as SecureStore from 'expo-secure-store';
 import {useConnectNativeInbox} from './ConnectNativeInbox';
 
@@ -185,7 +186,7 @@ function AppMain(){
   const s=makeStyles(colors);
   if(initializing)return <View style={[s.root,s.center]}><ActivityIndicator color={colors.accent}/></View>;
   if(!configured)return <View style={[s.root,s.center,s.pad]}><Label colors={colors}>Новый клиент пока не настроен: добавь публичный ключ Supabase в конфигурацию сборки.</Label></View>;
-  if(!session)return <View style={[s.root,s.center,s.pad]}>
+  if(!session)return <View style={[s.root,s.center,s.pad]}><ConnectNativeGlass colors={colors} theme={theme}/>
     <Ionicons name="chatbubbles-outline" size={70} color={colors.accent}/><Text style={s.loginTitle}>Connect</Text>
     <Text style={s.subtitle}>Вход в нативное приложение</Text>
     <TextInput style={s.field} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholder="Почта" placeholderTextColor={colors.muted} value={email} onChangeText={setEmail}/>
@@ -195,7 +196,7 @@ function AppMain(){
   </View>;
 
   function tabButton(which:Tab,icon:keyof typeof Ionicons.glyphMap,title:string){const active=tab===which;
-    return <Pressable onPress={()=>{setScreen({kind:'tab'});setTab(which);}} style={s.tab} accessibilityRole="tab" accessibilityState={{selected:active}}>
+    return <Pressable onPress={()=>{setScreen({kind:'tab'});setTab(which);}} style={[s.tab,active&&s.tabActive]} accessibilityRole="tab" accessibilityState={{selected:active}}>
       <Ionicons name={icon} size={23} color={active?colors.accent:colors.muted}/>
       {which==='chats'&&unreadTotal>0&&<View style={{position:'absolute',top:-7,right:'20%',backgroundColor:colors.accent,borderRadius:10,minWidth:18,height:18,paddingHorizontal:4,alignItems:'center',justifyContent:'center'}}>
         <Text style={{fontSize:10,color:colors.bg,fontWeight:'800'}}>{unreadTotal>99?'99+':unreadTotal}</Text>
@@ -250,7 +251,27 @@ function AppMain(){
       return !q||item.peer.display_name.toLocaleLowerCase('ru-RU').includes(q)||
         (last&&textOf(last).toLocaleLowerCase('ru-RU').includes(q));
     })} keyExtractor={x=>x.conversation.id} contentContainerStyle={[s.pad,{gap:7}]}
-      ListHeaderComponent={<><Text style={s.title}>Чаты</Text><TextInput style={[s.field,{marginVertical:14}]} placeholder="Поиск по контактам и последним сообщениям" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/></>}
+      ListHeaderComponent={<>
+        <View style={{flexDirection:'row',alignItems:'center',gap:11,paddingTop:8,paddingBottom:14}}>
+          <Image source={require('../assets/connect-icon.png')} style={{width:42,height:42,borderRadius:12}}/>
+          <Text style={{fontSize:28,fontWeight:'800',color:colors.text,letterSpacing:-0.8,flex:1}}>Connect</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Новая переписка" onPress={()=>{setSearch('');setTab('contacts');}}
+            style={{width:43,height:43,borderRadius:15,backgroundColor:glassColor(colors.surface,.8),borderWidth:1,borderColor:glassColor(colors.text,.16),alignItems:'center',justifyContent:'center'}}>
+            <Ionicons name="create-outline" size={23} color={colors.accent}/>
+          </Pressable>
+        </View>
+        <View style={{flexDirection:'row',alignItems:'center',gap:9,marginBottom:13}}>
+          <Text style={s.title}>Чаты</Text>
+          <View style={{borderRadius:12,backgroundColor:glassColor(colors.surface,.85),paddingHorizontal:8,paddingVertical:3}}>
+            <Text style={{fontSize:12,fontWeight:'700',color:colors.accent}}>{orderedChats.length}</Text>
+          </View>
+        </View>
+        <View style={[s.field,{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:0,marginBottom:13}]}>
+          <Ionicons name="search" size={20} color={colors.muted}/>
+          <TextInput style={{flex:1,height:44,color:colors.text,fontSize:15}} placeholder="Поиск в Connect" placeholderTextColor={colors.muted} value={search} onChangeText={setSearch}/>
+          {!!search&&<Pressable accessibilityRole="button" accessibilityLabel="Очистить поиск" onPress={()=>setSearch('')}><Ionicons name="close-circle" color={colors.muted} size={20}/></Pressable>}
+        </View>
+      </>}
       ListEmptyComponent={<Text style={s.subtitle}>Нет подходящих переписок.</Text>}
       renderItem={({item})=>{
         const summary=inbox[item.conversation.id];
@@ -274,7 +295,7 @@ function AppMain(){
         </Pressable>;
       }}/>;
   }
-  return <View style={s.root}><StatusBar style="light"/>
+  return <View style={s.root}><ConnectNativeGlass colors={colors} theme={theme}/><StatusBar style="light"/>
     <View style={{flex:1}}>{content()}</View>
     {screen.kind==='tab'&&<View style={s.bottom}>
       {tabButton('chats','chatbubbles-outline','Чаты')}
@@ -290,19 +311,19 @@ function makeStyles(p:Palette){return StyleSheet.create({
   root:{flex:1,backgroundColor:p.bg},center:{flex:1,alignItems:'center',justifyContent:'center',gap:12},pad:{padding:16},
   loginTitle:{fontSize:36,fontWeight:'800',color:p.text,marginTop:8},title:{fontSize:26,fontWeight:'700',color:p.text},
   subtitle:{fontSize:12,color:p.muted,lineHeight:17},headerLabel:{color:p.muted,fontSize:12,letterSpacing:1,textTransform:'uppercase'},
-  field:{color:p.text,borderWidth:1,borderColor:p.line,backgroundColor:p.surface,borderRadius:14,paddingHorizontal:15,paddingVertical:12,fontSize:16,minHeight:48,width:'100%'},
+  field:{color:p.text,borderWidth:1,borderColor:glassColor(p.text,.15),backgroundColor:glassColor(p.surface,.77),borderRadius:15,paddingHorizontal:15,paddingVertical:12,fontSize:16,minHeight:48,width:'100%'},
   mainAction:{backgroundColor:p.accent,borderRadius:16,padding:15,alignItems:'center',justifyContent:'center',minWidth:170,marginTop:8},
   actionText:{color:'#051a22',fontWeight:'800',fontSize:15},error:{color:p.danger,fontSize:13},
   top:{minHeight:60,flexDirection:'row',alignItems:'center',paddingHorizontal:8,borderBottomWidth:.5,borderColor:p.line},
   bubble:{maxWidth:'85%',borderWidth:1,borderRadius:18,paddingHorizontal:12,paddingVertical:9},
   compose:{flexDirection:'row',alignItems:'center',paddingHorizontal:13,paddingVertical:10,borderTopWidth:.6,borderColor:p.line},
   composeInput:{flex:1,backgroundColor:p.surface,borderRadius:16,color:p.text,paddingHorizontal:14,paddingVertical:11,maxHeight:115,fontSize:16},
-  bottom:{flexDirection:'row',justifyContent:'space-around',paddingTop:9,paddingBottom:6,borderTopWidth:1,borderColor:p.line,backgroundColor:p.surface},
-  tab:{alignItems:'center',justifyContent:'center',flex:1,gap:3,paddingVertical:2},tabLabel:{fontSize:10,fontWeight:'600'},
-  entry:{flexDirection:'row',gap:13,alignItems:'center',padding:11,borderWidth:1,borderColor:p.line,backgroundColor:p.surface,borderRadius:18,minHeight:66},
+  bottom:{flexDirection:'row',justifyContent:'space-around',padding:6,marginHorizontal:13,marginBottom:10,minHeight:67,borderWidth:1,borderColor:glassColor(p.text,.17),backgroundColor:glassColor(p.surface,.85),borderRadius:25,overflow:'hidden'},
+  tab:{alignItems:'center',justifyContent:'center',flex:1,gap:3,paddingVertical:5,borderRadius:20,borderWidth:1,borderColor:'transparent'},tabActive:{backgroundColor:glassColor(p.accent,.15),borderColor:glassColor(p.accent,.26)},tabLabel:{fontSize:10,fontWeight:'600'},
+  entry:{flexDirection:'row',gap:13,alignItems:'center',padding:11,borderWidth:1,borderColor:glassColor(p.text,.14),backgroundColor:glassColor(p.surface,.82),borderRadius:20,minHeight:66},
   entryTitle:{fontWeight:'700',fontSize:15,color:p.text},
   colorGrid:{flexDirection:'row',flexWrap:'wrap',gap:9,marginTop:13},
-  colorChip:{flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:11,paddingVertical:11,borderWidth:1,borderRadius:12},
+  colorChip:{flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:11,paddingVertical:11,borderWidth:1,borderColor:glassColor(p.text,.14),backgroundColor:glassColor(p.surface,.65),borderRadius:14},
   toast:{position:'absolute',bottom:87,left:15,right:15,padding:14,borderWidth:1,borderColor:p.danger,backgroundColor:p.elevated,borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
 });}
 export default function App(){return <SafeAreaProvider><SafeAreaView style={{flex:1,backgroundColor:'#07121b'}} edges={['top','bottom']}><AppMain/></SafeAreaView></SafeAreaProvider>;}
