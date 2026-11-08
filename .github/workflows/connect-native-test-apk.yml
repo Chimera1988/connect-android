@@ -1,0 +1,204 @@
+name: Connect Native - Safe Android Test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-native-test-apk.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-native-safe-test-apk
+  cancel-in-progress: false
+
+jobs:
+  native-test-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
+      # Publishable CLIENT key, not a service-role or database secret.
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
+      EXPO_PUBLIC_CONNECT_URL: https://connect-chat.duckdns.org
+    steps:
+      - name: Checkout latest Connect Native sources
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Confirm this is the native project, not legacy WebView
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s native/src/ConnectNativeInbox.ts
+          test -s native/src/ConnectNativeSoundSettings.tsx
+          test -s native/src/ConnectNativeAlbum.tsx
+          test -s native/src/ConnectNativeTelecom.ts
+          test -s native/plugins/withConnectSounds.js
+          test -s app/google-services.json
+          python3 - <<'PY_CHECK'
+          import json
+          from pathlib import Path
+          config=json.loads(Path('native/app.json').read_text())
+          assert config['expo']['android']['package']=='com.connect.messenger', 'Unexpected native production package; stop for review'
+          assert config['expo']['android']['googleServicesFile']=='../app/google-services.json', 'Firebase path changed; stop for review'
+          print('Native source layout and original package confirmed')
+          PY_CHECK
+
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install native dependencies and check TypeScript
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Generate a fresh Android native build (no changes to repository)
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install --clean
+
+      - name: Isolate the TEST Android package from existing Connect
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_VARIANT'
+          from pathlib import Path
+          import json,copy,re
+
+          # Important: only alter generated files in this GitHub Actions runner.
+          # Source app.json and the legacy app/ project remain untouched.
+          original='com.connect.messenger'
+          preview=original+'.native'
+          root=Path('native/android/app')
+          groovy=root/'build.gradle'
+          kotlin=root/'build.gradle.kts'
+          if groovy.exists():
+              path=groovy
+              insertion='applicationIdSuffix ".native"'
+          elif kotlin.exists():
+              path=kotlin
+              insertion='applicationIdSuffix = ".native"'
+          else:
+              raise SystemExit('Android Gradle application file not generated')
+          content=path.read_text()
+          hits=list(re.finditer(r'(?m)^([ \t]*)debug\s*\{',content))
+          if len(hits)!=1:
+              raise SystemExit(f'Expected one debug build-type block, found {len(hits)}')
+          found=hits[0]
+          indent=found.group(1)+'    '
+          updated=content[:found.end()]+'\n'+indent+insertion+content[found.end():]
+          path.write_text(updated)
+          assert updated.count(insertion)==1
+
+          # Google Services Gradle plugin matches applicationId; the existing
+          # Firebase file has only the production client. Add a build-only
+          # entry for this isolated QA package so Gradle can compile.
+          # This does NOT register the QA package in Firebase. FCM reception
+          # needs testing, and may require a properly registered Firebase app.
+          services=root/'google-services.json'
+          value=json.loads(services.read_text())
+          clients=value.get('client') or []
+          base=next((x for x in clients if x.get('client_info',{}).get('android_client_info',{}).get('package_name')==original),None)
+          if base is None:
+              raise SystemExit('Production Firebase client was not found')
+          if not any(x.get('client_info',{}).get('android_client_info',{}).get('package_name')==preview for x in clients):
+              test_client=copy.deepcopy(base)
+              test_client['client_info']['android_client_info']['package_name']=preview
+              clients.append(test_client)
+          services.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
+          print('Isolated Android QA applicationId:',preview)
+          print('WARNING: QA Firebase configuration is not a separate Firebase app registration; test push delivery on a device.')
+          PY_VARIANT
+
+      - name: Install Android SDK 37 (as in the successful native CI builds)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          test -s "${ANDROID_SDK_ROOT}/platforms/android-37.0/android.jar"
+
+      - name: Build separate installable TEST APK
+        working-directory: native/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify APK identity, integrity and source isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='native/android/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          unzip -t "$apk" | tail -n 2
+          aapt="${ANDROID_SDK_ROOT}/build-tools/37.0.0/aapt"
+          test -x "$aapt"
+          package_line="$("$aapt" dump badging "$apk" | sed -n '/^package:/p')"
+          echo "$package_line"
+          if [[ "$package_line" != *"name='com.connect.messenger.native'"* ]]; then
+            echo 'ERROR: APK package is NOT the isolated test package. Do not distribute.' >&2
+            exit 1
+          fi
+          # The legacy WebView app must be unchanged in the checked-out sources.
+          git diff --exit-code -- app/
+          mkdir -p test-apk
+          cp "$apk" test-apk/Connect-Native-TEST.apk
+          (cd test-apk && sha256sum Connect-Native-TEST.apk > SHA256.txt)
+          printf 'Connect Native Android test build\n' > test-apk/README.txt
+          printf 'Package: com.connect.messenger.native\n' >> test-apk/README.txt
+          printf 'Source commit: %s\n' "$(git rev-parse HEAD)" >> test-apk/README.txt
+          printf 'This is a DEBUG/QA APK, NOT the production replacement.\n' >> test-apk/README.txt
+          printf 'Install alongside the existing Connect without replacing it.\n' >> test-apk/README.txt
+          printf 'FCM push delivery on the QA package is not guaranteed; a separate Firebase app registration may be required.\n' >> test-apk/README.txt
+          printf 'A final release requires real-device testing and a persistent release signing key.\n' >> test-apk/README.txt
+
+      - name: Upload Connect Native TEST APK (separate from legacy)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Native-TEST-APK
+          path: test-apk/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Explain result in GitHub Actions summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Native test APK built successfully'
+            echo ''
+            echo '- Artifact: **Connect-Native-TEST-APK**'
+            echo '- File inside: **Connect-Native-TEST.apk**'
+            echo '- Android package: `com.connect.messenger.native` (different from existing `com.connect.messenger`)'
+            echo '- App is configured with the Connect public Supabase client key and HTTPS proxy.'
+            echo '- **NOT a production release; old WebView APK/source is unchanged.**'
+            echo '- Test login, chats, media, calls, microphones and Bluetooth on an actual Android phone.'
+            echo '- Push/FCM needs independent verification because this isolated QA package is not registered separately in Firebase.'
+            echo '- Hardware checks and final signed release are still required.'
+          } >> "$GITHUB_STEP_SUMMARY"
