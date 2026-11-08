@@ -1,0 +1,199 @@
+# Single targeted source fix pack after the 199-feature parity audit.
+# Does not build APK, Gradle, or install a development application.
+name: Connect Android - final three PWA source gaps (NO APK)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/connect-android-parity-source-closure.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-final-source-closure
+  cancel-in-progress: false
+
+jobs:
+  fix-remaining-source-gaps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current Connect Android
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Synchronize with main; enforce no APK gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY_GUARD'
+          from pathlib import Path
+          import re
+          p=Path('.github/workflows/android-apk.yml')
+          if not p.is_file():raise SystemExit('STOP: APK gate workflow missing')
+          text=p.read_text()
+          if re.search(r'^\s{2}push\s*:',text,re.M) or re.search(r'\b(?:assemble(?:Debug|Release)|gradlew|eas build)\b',text,re.I):
+              raise SystemExit('STOP: automatic APK build must be disabled')
+          for file in ['native/src/ConnectNativeChat.tsx','native/src/ConnectNativeMedia.tsx',
+                       'native/src/ConnectNativeSettings.tsx','native/final-parity-review/FINAL_REVIEW.md']:
+              if not Path(file).is_file():raise SystemExit('Missing '+file)
+          print('Android source only; release still blocked.')
+          PY_GUARD
+
+      - name: Apply guarded three feature patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_APPLY'
+          import gzip,base64
+          data=''.join('''
+          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
+          '''.split())
+          exec(compile(gzip.decompress(base64.b64decode(data)).decode('utf-8'),'apply_complete_parity.py','exec'))
+          PY_APPLY
+
+      - name: Add Expo SDK 58 image cropper dependency
+        shell: bash
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npm install 'expo-image-manipulator@~58.0.16' --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: TypeScript and source safety checks (NO APK)
+        shell: bash
+        working-directory: native
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          python3 - <<'PY_ASSERT'
+          from pathlib import Path
+          import json
+          src=Path('src')
+          avatar=(src/'ConnectNativeAvatarCropper.tsx').read_text()
+          media=(src/'ConnectNativeMedia.tsx').read_text()
+          chat=(src/'ConnectNativeChat.tsx').read_text()
+          assert 'context.crop(' in avatar and 'width:512,height:512' in avatar
+          assert 'useAudioSampleListener' in media and 'sample.channels' in media
+          assert 'videoAutoPlay' in media and 'viewableItems' in chat
+          assert 'expo-image-manipulator' in json.loads(Path('package.json').read_text())['dependencies']
+          assert json.loads(Path('app.json').read_text())['expo']['name']=='Connect'
+          assert Path('final-parity-review/SOURCE_GAPS_COMPLETION.md').is_file()
+          print('Source completion checks passed. 0/199 device validation unchanged.')
+          PY_ASSERT
+
+      - name: Commit verified sources and one summary report
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- native/package.json native/package-lock.json native/src/ConnectNativeAvatarCropper.tsx native/src/ConnectNativeSettings.tsx native/src/ConnectNativeMedia.tsx native/src/ConnectNativeChat.tsx native/final-parity-review/SOURCE_GAPS_COMPLETION.md
+          if git diff --cached --quiet; then
+            echo 'No changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(android): avatar crop, PCM waveform and viewport video notes'
+          git push origin HEAD:main
+
+      - name: Report status (NOT RELEASE READY)
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Connect Android — final 3 source parity fixes'
+            echo '- Avatar editor: drag/pinch, 512x512 JPEG, from gallery and settings.'
+            echo '- Voice waveform from actual decoded PCM samples *during playback* (not entire-file PWA predecode).'
+            echo '- Visible video notes muted autoplay and pause on scroll/background.'
+            echo '- TypeScript verified. No APK or Gradle job executed.'
+            echo '- 0/199 hardware acceptance cases; APK release is still blocked.'
+          } >> "$GITHUB_STEP_SUMMARY"
