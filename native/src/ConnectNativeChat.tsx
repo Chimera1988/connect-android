@@ -758,7 +758,11 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const sticker=parseStickerReference(f.text);
         const album=parseAlbumReference(f.text);
         const keyboardSticker=item.attachment_kind==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(item.attachment_name||'');
-        const standalone=Boolean(sticker||keyboardSticker)&&!item.deleted_at;
+        const isVoiceMessage=Boolean(item.attachment_path&&(item.attachment_kind==='audio'||(item.attachment_type||'').startsWith('audio/')))&&!item.deleted_at;
+        const isVideoNote=Boolean(item.attachment_path&&item.attachment_kind==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(item.attachment_name||''))&&!item.deleted_at;
+        const standalone=Boolean(sticker||keyboardSticker||isVoiceMessage||isVideoNote)&&!item.deleted_at;
+        const receiptRead=Boolean(peerReceipts.read&&peerReceipts.read>=item.created_at);
+        const receiptMark=own&&!item.deleted_at?(receiptRead||(peerReceipts.delivered&&peerReceipts.delivered>=item.created_at)?'✓✓':'✓'):undefined;
         const isSelected=selected.includes(item.id);
         const dayBreak=index===0||dayKey(shown[index-1].created_at)!==dayKey(item.created_at);
         const original=item.reply_to?messages.find(row=>row.id===item.reply_to):null;
@@ -775,7 +779,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             if(dx>75&&Math.abs(dx)>Math.abs(dy)*1.5){setReply(item);setEdit(null);setActionMessage(null);}
           }}
           onTouchCancel={()=>{swipeStart.current=null;}}
-          style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
+          style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?0:10,borderRadius:17,
           borderWidth:isSelected||activeSearchId===item.id?2:standalone?0:1,borderColor:isSelected||activeSearchId===item.id?colors.accent:own?glassColor(colors.accent,.20):glassColor(colors.text,.12),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.73):glassColor(colors.surface,.74)}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
@@ -785,14 +789,14 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
               <Text style={{fontSize:11,color:colors.accent,fontWeight:'700'}}>{original?.sender_id===ownerId?'Вы':peer.display_name}</Text>
               <Text numberOfLines={2} style={{fontSize:12,color:colors.muted}}>{quoteText}</Text>
             </Pressable>}
-            {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={!mediaViewer&&visibleMessageIds.includes(item.id)} onOpenMedia={setMediaViewer}/>}
+            {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={!mediaViewer&&visibleMessageIds.includes(item.id)} onOpenMedia={setMediaViewer} sentTime={isVoiceMessage?time(item.created_at):undefined} receiptMark={isVoiceMessage?receiptMark:undefined} receiptRead={receiptRead}/>}
             {album?<ConnectNativeAlbum items={album} colors={colors} onOpenMedia={setMediaViewer}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
               Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':highlightedText(f.text)}</Text>}
           </>}
-          <View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>
+          {!isVoiceMessage&&<View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>
             <Text style={{color:mutedColor,fontSize:10}}>{time(item.created_at)}{item.edited_at?' · изм.':''}</Text>
             {own&&!item.deleted_at&&<Text accessibilityLabel={peerReceipts.read&&peerReceipts.read>=item.created_at?'Прочитано':peerReceipts.delivered&&peerReceipts.delivered>=item.created_at?'Доставлено':'Отправлено'} style={{fontSize:11,color:peerReceipts.read&&peerReceipts.read>=item.created_at?colors.accent:mutedColor}}>{peerReceipts.read&&peerReceipts.read>=item.created_at?'✓✓':peerReceipts.delivered&&peerReceipts.delivered>=item.created_at?'✓✓':'✓'}</Text>}
-          </View>
+          </View>}
           </Pressable>
         </View>;
       }}/>

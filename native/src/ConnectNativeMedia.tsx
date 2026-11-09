@@ -33,7 +33,7 @@ const audioClock=(value:number)=>{
   return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;
 };
 const activeVoicePlayers=new Set<{pause:()=>void}>();
-function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
+function AudioClip({uri,colors,sentTime,receiptMark,receiptRead=false}:{uri:string;colors:Palette;sentTime?:string;receiptMark?:string;receiptRead?:boolean}) {
   const player=useAudioPlayer(uri,{updateInterval:250});
   const state=useAudioPlayerStatus(player);
   const [speed,setSpeed]=useState(1);
@@ -77,7 +77,13 @@ function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
         <Text style={{color:colors.accent,fontWeight:'700',fontSize:12}}>{speed}×</Text>
       </Pressable>
     </View>
-    <Text style={{color:colors.muted,fontSize:11,marginLeft:7}}>{audioClock(position)} / {audioClock(duration)}</Text>
+    <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginHorizontal:7,gap:6}}>
+      <Text style={{color:colors.muted,fontSize:11}}>{audioClock(position)} / {audioClock(duration)}</Text>
+      {!!sentTime&&<View style={{flexDirection:'row',alignItems:'center',gap:3}}>
+        <Text style={{color:colors.muted,fontSize:10}}>{sentTime}</Text>
+        {!!receiptMark&&<Text accessibilityLabel={receiptRead?'Прочитано':receiptMark==='✓'?'Отправлено':'Доставлено'} style={{color:receiptRead?colors.accent:colors.muted,fontSize:10}}>{receiptMark}</Text>}
+      </View>}
+    </View>
   </View>;
 }
 /** Share a downloaded attachment through Android's file chooser.
@@ -284,7 +290,7 @@ export function ConnectNativeMediaViewer({url,kind,title,onClose,colors,onPrevio
   </Modal>;
 }
 export type ConnectNativeGalleryItem={path:string;name:string;kind:'image'|'video'};
-export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOpenMedia}:{message:Message;colors:Palette;videoAutoPlay?:boolean;onOpenMedia?:(item:ConnectNativeGalleryItem)=>void}) {
+export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOpenMedia,sentTime,receiptMark,receiptRead=false}:{message:Message;colors:Palette;videoAutoPlay?:boolean;onOpenMedia?:(item:ConnectNativeGalleryItem)=>void;sentTime?:string;receiptMark?:string;receiptRead?:boolean}) {
   const [url,setUrl]=useState<string|null>(null);
   const [view,setView]=useState(false);
   useEffect(()=>{
@@ -311,7 +317,7 @@ export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOp
   if(k==='video')return <><ConnectNativeInlineVideo uri={url} path={message.attachment_path} colors={colors} active={videoAutoPlay&&!view} onOpen={()=>open('video')}/>
     <SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="videos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
-  if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:280}}><AudioClip uri={url} colors={colors}/></View>;
+  if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <AudioClip uri={url} colors={colors} sentTime={sentTime} receiptMark={receiptMark} receiptRead={receiptRead}/>;
   return <View><Pressable onPress={()=>void Linking.openURL(url).catch(()=>Alert.alert('Не удалось открыть файл'))} style={{flexDirection:'row',alignItems:'center',gap:8}}>
     <Ionicons name="document-attach-outline" size={22} color={colors.accent}/><Text numberOfLines={2} style={{color:colors.text,flexShrink:1}}>{name}</Text>
   </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'application/octet-stream'} colors={colors}/></View>;
