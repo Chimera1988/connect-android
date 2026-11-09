@@ -72,7 +72,7 @@ jobs:
               start=chat.index(start_marker)
               end=chat.index(end_marker,start)+len(end_marker)
               previous=chat[start:end]
-              for sentinel in ('showAttachmentMenu','setVideoNoteOpen(true)','toggleRecord()','stickerPickerOpen','submit()'):
+              for sentinel in ('showAttachmentMenu','setVideoNoteOpen(true)','toggleRecord()','setStickerPickerOpen(open=>!open)','submit()'):
                   if sentinel not in previous:
                       raise SystemExit('Composer signature is incomplete: '+sentinel)
               replacement="""<ConnectNativeGlassPanel colors={colors} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:6,paddingVertical:6,marginHorizontal:8,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.16),backgroundColor:glassColor(colors.surface,.83),borderRadius:25,gap:1,minHeight:58}}>
