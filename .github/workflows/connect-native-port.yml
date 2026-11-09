@@ -22,6 +22,7 @@ concurrency:
 env:
   CI: '1'
   EXPO_NO_TELEMETRY: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
   # Immutable reference actually reviewed for this port; update after a new audit.
   CONNECT_PWA_REFERENCE_SHA: df71ca06e615ca5f981ae9276bd3642587f76e1a
 
@@ -4406,7 +4407,7 @@ jobs:
           npx expo prebuild --platform android --no-install --clean
           test -s android/app/google-services.json
           test -s android/app/src/main/java/com/connect/waveform/ConnectWaveformModule.java
-          rg -q 'ConnectWaveformPackage' android/app/src/main/java/com/connect/messenger/MainApplication.kt
+          grep -Fq 'ConnectWaveformPackage' android/app/src/main/java/com/connect/messenger/MainApplication.kt
 
       - name: Save source archive even when a verification step fails
         if: always()
