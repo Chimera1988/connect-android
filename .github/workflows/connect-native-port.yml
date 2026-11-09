@@ -4486,8 +4486,54 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx expo prebuild --platform android --no-install --clean
+      - name: Download verified Gradle with mirrors and retries (no APK)
+        working-directory: native/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Expo SDK 58 currently generates Gradle 9.4.1 for this application.
+          # Only this known version is allowed; never silently change Gradle.
+          wrapper=gradle/wrapper/gradle-wrapper.properties
+          grep -Eq '^distributionUrl=.*gradle-9\.4\.1-bin\.zip' "$wrapper"
+          expected_sha=2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb
+          archive="$RUNNER_TEMP/gradle-9.4.1-bin.zip"
+          for host in \
+            https://downloads.gradle.org/distributions \
+            https://services.gradle.org/distributions \
+            https://downloads.gradle-dn.com/distributions; do
+            echo "Fetching Gradle 9.4.1 from $host (with retries)"
+            rm -f "$archive.part"
+            if curl --fail --location --silent --show-error \
+                 --retry 3 --retry-all-errors --retry-delay 5 \
+                 --connect-timeout 20 --max-time 300 \
+                 "$host/gradle-9.4.1-bin.zip" --output "$archive.part"; then
+              if printf '%s  %s\n' "$expected_sha" "$archive.part" | sha256sum --check --status; then
+                mv "$archive.part" "$archive"
+                break
+              fi
+              echo "SHA-256 mismatch from $host; discarding download" >&2
+            fi
+          done
+          rm -f "$archive.part"
+          test -s "$archive" || { echo 'Gradle distribution unavailable from all mirrors' >&2; exit 1; }
+          # Use the verified local archive for this generated Android build only.
+          # The repository's Expo config and committed Gradle files stay unchanged.
+          python3 - "$wrapper" "$archive" <<'PY_GRADLE_WRAPPER'
+          from pathlib import Path
+          import re, sys
+          properties=Path(sys.argv[1])
+          current=properties.read_text()
+          url=Path(sys.argv[2]).resolve().as_uri()
+          changed,count=re.subn(r'(?m)^distributionUrl=.*$', 'distributionUrl='+url, current)
+          assert count==1, 'Expected one Gradle wrapper distributionUrl'
+          properties.write_text(changed)
+          print('Gradle wrapper configured for verified local distribution')
+          PY_GRADLE_WRAPPER
+
       - name: Compile Java and Kotlin without packaging an APK
         working-directory: native/android
+        shell: bash
         run: |
+          set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:compileDebugJavaWithJavac :app:compileDebugKotlin --no-daemon --stacktrace
+          ./gradlew :app:compileDebugJavaWithJavac :app:compileDebugKotlin --no-daemon --stacktrace --max-workers=2
