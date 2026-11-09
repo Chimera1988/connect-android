@@ -776,7 +776,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
           }}
           onTouchCancel={()=>{swipeStart.current=null;}}
           style={{alignSelf:own?'flex-end':'flex-start',maxWidth:'90%',padding:standalone?4:10,borderRadius:17,
-          borderWidth:isSelected||activeSearchId===item.id?2:standalone?0:1,borderColor:isSelected||activeSearchId===item.id?colors.accent:own?glassColor(colors.accent,.32):glassColor(colors.text,.15),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.84):glassColor(colors.surface,.82)}}>
+          borderWidth:isSelected||activeSearchId===item.id?2:standalone?0:1,borderColor:isSelected||activeSearchId===item.id?colors.accent:own?glassColor(colors.accent,.20):glassColor(colors.text,.12),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.73):glassColor(colors.surface,.74)}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
             {item.reply_to&&<Pressable accessibilityRole="button" accessibilityLabel="Перейти к исходному сообщению"
@@ -811,15 +811,15 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     {peer.is_blocked&&<Text style={{color:colors.muted,textAlign:'center',padding:9}}>Этот аккаунт заблокирован. История переписки доступна для просмотра.</Text>}
     {stickerPickerOpen&&<ConnectNativeStickerPicker colors={colors} ownerId={ownerId} busy={busy||uploading} enabledPacks={enabledPacks}
       onClose={()=>setStickerPickerOpen(false)} onEmoji={emoji=>setDraft(text=>text+emoji)} onSend={sendSticker}/>}
-    <ConnectNativeGlassPanel colors={colors} style={{flexDirection:'row',alignItems:'center',padding:7,marginHorizontal:8,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),backgroundColor:glassColor(colors.surface,.86),borderRadius:24,gap:2}}>
+    <ConnectNativeGlassPanel colors={colors} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:6,paddingVertical:6,marginHorizontal:8,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.16),backgroundColor:glassColor(colors.surface,.83),borderRadius:25,gap:1,minHeight:58}}>
       <Btn name="happy-outline" colors={colors} label="Стикеры и эмодзи" disabled={peer.is_blocked||uploading||recorderState.isRecording}
         onPress={()=>{Keyboard.dismiss();setStickerPickerOpen(open=>!open);}}/>
-      <Btn name="attach-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={peer.is_blocked||uploading||busy||recorderState.isRecording||!!edit}/>
-      <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={peer.is_blocked||uploading||busy||recorderState.isRecording||!!edit}/>
-      <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение'} placeholderTextColor={mutedColor}
-        value={draft} onChangeText={setDraft} editable={!peer.is_blocked} style={{backgroundColor:glassColor(colors.bg,.30),color:textColor,borderRadius:18,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
+      <Btn name="add-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={peer.is_blocked||uploading||busy||recorderState.isRecording||!!edit}/>
+      <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение…'} placeholderTextColor={mutedColor}
+        value={draft} onChangeText={setDraft} editable={!peer.is_blocked} style={{backgroundColor:glassColor(colors.bg,.28),color:textColor,borderRadius:21,paddingHorizontal:11,paddingVertical:10,fontSize:15,maxHeight:110,minWidth:0,flex:1}}/>
+      <Btn name="camera-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={peer.is_blocked||uploading||busy||recorderState.isRecording||!!edit}/>
       {!recorderState.isRecording&&Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={peer.is_blocked||busy||uploading} onPress={()=>void submit()}/>
-      :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
+        :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
         label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} disabled={peer.is_blocked||busy||uploading||!!edit} onPress={()=>void toggleRecord()}/>}
     </ConnectNativeGlassPanel>
     {pendingFiles.length>0&&<View style={{marginHorizontal:10,marginBottom:7,padding:10,borderRadius:15,backgroundColor:glassColor(colors.surface,.93),borderWidth:1,borderColor:colors.line}}>

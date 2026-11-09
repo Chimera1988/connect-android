@@ -10,6 +10,7 @@ import {useAudioPlayer, useAudioPlayerStatus} from 'expo-audio';
 import {useVideoPlayer, VideoView} from 'expo-video';
 import {db} from './backend';
 import {getAudioWaveform} from './nativeWaveform';
+import {glassColor} from './ConnectNativeGlass';
 import {ConnectNativeMusicLibrary} from './ConnectNativeMusic';
 import ConnectNativeAvatarCropper,{type AvatarSource,type CroppedAvatar} from './ConnectNativeAvatarCropper';
 import {DIRECT_UPLOAD_LIMIT, fileExtension, listMedia, nameForStorage, signedObject, uploadFile, type ListedMedia, type LocalUpload, type MediaKind} from './nativeMediaUtils';
@@ -58,7 +59,7 @@ function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
     for(const other of activeVoicePlayers)if(other!==player)other.pause();
     player.play();
   }
-  return <View style={{width:260,maxWidth:'100%',gap:4}}>
+  return <View style={{width:260,maxWidth:'100%',gap:6,paddingHorizontal:10,paddingVertical:8,borderRadius:20,backgroundColor:glassColor(colors.surface,.77),borderWidth:1,borderColor:glassColor(colors.text,.12)}}>
     <View style={{flexDirection:'row',alignItems:'center',gap:5}}>
       <IconButton name={state.playing?'pause-circle':'play-circle'} label={state.playing?'Пауза':'Воспроизвести'} colors={colors}
         onPress={()=>void togglePlayer()}/>
@@ -306,11 +307,11 @@ export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOp
       <AttachmentImage url={url}/>
     </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'image/jpeg'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
-  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <View><VideoNoteBubble uri={url} colors={colors} active={videoAutoPlay}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/></View>;
+  if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <View><VideoNoteBubble uri={url} colors={colors} active={videoAutoPlay}/></View>;
   if(k==='video')return <><ConnectNativeInlineVideo uri={url} path={message.attachment_path} colors={colors} active={videoAutoPlay&&!view} onOpen={()=>open('video')}/>
     <SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="videos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
-  if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:255}}><Text numberOfLines={1} style={{color:colors.text}}>{name}</Text><AudioClip uri={url} colors={colors}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'audio/mpeg'} colors={colors}/></View>;
+  if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:280}}><AudioClip uri={url} colors={colors}/></View>;
   return <View><Pressable onPress={()=>void Linking.openURL(url).catch(()=>Alert.alert('Не удалось открыть файл'))} style={{flexDirection:'row',alignItems:'center',gap:8}}>
     <Ionicons name="document-attach-outline" size={22} color={colors.accent}/><Text numberOfLines={2} style={{color:colors.text,flexShrink:1}}>{name}</Text>
   </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'application/octet-stream'} colors={colors}/></View>;
