@@ -1,0 +1,140 @@
+name: Connect Android - PWA standalone voice and video notes (NO APK)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-chat-media-standalone.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-chat-media-standalone-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch-and-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout latest Connect Android
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Remove surrounding media bubbles and move voice timestamp inside
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_PATCH'
+          from pathlib import Path
+
+          chat_path = Path('native/src/ConnectNativeChat.tsx')
+          media_path = Path('native/src/ConnectNativeMedia.tsx')
+          for path in (chat_path, media_path):
+              if not path.is_file():
+                  raise SystemExit(f'Missing original source: {path}')
+          chat = chat_path.read_text(encoding='utf-8')
+          media = media_path.read_text(encoding='utf-8')
+
+          def patch(source: str, old: str, new: str, label: str) -> str:
+              # Stop on unknown source structure rather than modify the wrong component.
+              found = source.count(old)
+              if found == 1:
+                  return source.replace(old, new, 1)
+              if found == 0 and new in source:
+                  print('Already applied:', label)
+                  return source
+              raise SystemExit(f'Unexpected source for {label} (matches={found})')
+
+          chat = patch(chat,
+              "const standalone=Boolean(sticker||keyboardSticker)&&!item.deleted_at;",
+              '\n'.join([
+                  "const isVoiceMessage=Boolean(item.attachment_path&&(item.attachment_kind==='audio'||(item.attachment_type||'').startsWith('audio/')))&&!item.deleted_at;",
+                  "        const isVideoNote=Boolean(item.attachment_path&&item.attachment_kind==='video'&&/^connect-video-note-\\d+\\.(?:mp4|webm)$/i.test(item.attachment_name||''))&&!item.deleted_at;",
+                  "        const standalone=Boolean(sticker||keyboardSticker||isVoiceMessage||isVideoNote)&&!item.deleted_at;",
+                  "        const receiptRead=Boolean(peerReceipts.read&&peerReceipts.read>=item.created_at);",
+                  "        const receiptMark=own&&!item.deleted_at?(receiptRead||(peerReceipts.delivered&&peerReceipts.delivered>=item.created_at)?'✓✓':'✓'):undefined;",
+              ]),
+              'voice/video note standalone without outer message bubble')
+
+          chat = patch(chat,
+              "maxWidth:'90%',padding:standalone?4:10,borderRadius:17,",
+              "maxWidth:'90%',padding:standalone?0:10,borderRadius:17,",
+              'remove padding around standalone media')
+
+          chat = patch(chat,
+              "<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={!mediaViewer&&visibleMessageIds.includes(item.id)} onOpenMedia={setMediaViewer}/>",
+              "<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={!mediaViewer&&visibleMessageIds.includes(item.id)} onOpenMedia={setMediaViewer} sentTime={isVoiceMessage?time(item.created_at):undefined} receiptMark={isVoiceMessage?receiptMark:undefined} receiptRead={receiptRead}/>",
+              'send voice timestamp and delivery receipt to voice player')
+
+          chat = patch(chat,
+              "          <View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>",
+              "          {!isVoiceMessage&&<View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>",
+              'hide external footer for voice message only')
+
+          # Match the nearby closing sequence of this message Pressable, not the other Views.
+          chat = patch(chat,
+              "          </View>\n          </Pressable>\n        </View>;",
+              "          </View>}\n          </Pressable>\n        </View>;",
+              'close voice-conditional footer')
+
+          media = patch(media,
+              "function AudioClip({uri,colors}:{uri:string;colors:Palette}) {",
+              "function AudioClip({uri,colors,sentTime,receiptMark,receiptRead=false}:{uri:string;colors:Palette;sentTime?:string;receiptMark?:string;receiptRead?:boolean}) {",
+              'voice player metadata props')
+
+          media = patch(media,
+              "    <Text style={{color:colors.muted,fontSize:11,marginLeft:7}}>{audioClock(position)} / {audioClock(duration)}</Text>",
+              '\n'.join([
+                  "    <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginHorizontal:7,gap:6}}>",
+                  "      <Text style={{color:colors.muted,fontSize:11}}>{audioClock(position)} / {audioClock(duration)}</Text>",
+                  "      {!!sentTime&&<View style={{flexDirection:'row',alignItems:'center',gap:3}}>",
+                  "        <Text style={{color:colors.muted,fontSize:10}}>{sentTime}</Text>",
+                  "        {!!receiptMark&&<Text accessibilityLabel={receiptRead?'Прочитано':receiptMark==='✓'?'Отправлено':'Доставлено'} style={{color:receiptRead?colors.accent:colors.muted,fontSize:10}}>{receiptMark}</Text>}",
+                  "      </View>}",
+                  "    </View>",
+              ]),
+              'voice duration and sent time on one row inside player')
+
+          media = patch(media,
+              "export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOpenMedia}:{message:Message;colors:Palette;videoAutoPlay?:boolean;onOpenMedia?:(item:ConnectNativeGalleryItem)=>void}) {",
+              "export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOpenMedia,sentTime,receiptMark,receiptRead=false}:{message:Message;colors:Palette;videoAutoPlay?:boolean;onOpenMedia?:(item:ConnectNativeGalleryItem)=>void;sentTime?:string;receiptMark?:string;receiptRead?:boolean}) {",
+              'attachment metadata props')
+
+          media = patch(media,
+              "if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:280}}><AudioClip uri={url} colors={colors}/></View>;",
+              "if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <AudioClip uri={url} colors={colors} sentTime={sentTime} receiptMark={receiptMark} receiptRead={receiptRead}/>;",
+              'remove redundant voice media wrapper')
+
+          # Write the two files only after all expected anchors have matched.
+          chat_path.write_text(chat, encoding='utf-8')
+          media_path.write_text(media, encoding='utf-8')
+          print('PWA standalone media: no outer bubbles, voice timestamp in player. No APK.')
+          PY_PATCH
+
+      - name: Validate diff, TypeScript and unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          cd native
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm test
+
+      - name: Commit only the changed Android chat sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add native/src/ConnectNativeChat.tsx native/src/ConnectNativeMedia.tsx
+          if git diff --cached --quiet; then
+            echo 'Changes already installed; nothing to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(android): remove outer voice and video-note bubbles; inline voice message time'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
