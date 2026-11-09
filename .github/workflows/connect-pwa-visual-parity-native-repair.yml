@@ -1,0 +1,276 @@
+# PWA native visual parity, no WebView and no APK build.
+# PWA CSS and SVG geometry source: Chimera1988/connect-messenger @ df71ca06e615ca5f981ae9276bd3642587f76e1a
+name: Connect Android - PWA native visual transfer REPAIR (NO APK)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-pwa-visual-parity-native-repair.yml'
+permissions:
+  contents: write
+concurrency:
+  group: connect-native-pwa-visual-port-repair-no-apk
+  cancel-in-progress: false
+jobs:
+  native-visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+    steps:
+      - name: Checkout and synchronize Connect native main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Validate repository identity and prevent unrelated changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          app=json.loads(Path('native/app.json').read_text())['expo']
+          assert app['android']['package']=='com.connect.messenger'
+          assert app['name']=='Connect'
+          assert (Path('native/src/ConnectNativePush.ts')).exists()
+          assert (Path('native/src/ConnectNativeCalls.tsx')).exists()
+          assert (Path('native/src/ConnectNativeGlass.tsx')).exists()
+          print('Production package and native calling/push files preserved')
+          PY
+      - name: Stage original PWA scene geometry and masks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,zlib
+          payload=''.join([
+          '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',
+          'jdd1bFqmWORvmqKqBS5yjSU7m+B/x0mbTw==',
+          ])
+          data=zlib.decompress(base64.b64decode(payload))
+          from pathlib import Path
+          Path('/tmp/connect-pwa-visual-glass.tsx').write_bytes(data)
+          PY
+      - name: Transplant PWA layout and theme sources into native React Native
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,zlib
+          payload=''.join([
+          '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',
+          ])
+          data=zlib.decompress(base64.b64decode(payload))
+          exec(compile(data,'<Connect native PWA visual installer REPAIR>','exec'))
+          PY
+      - name: Prepare safe-area adaptive icon from approved PWA art
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/connect-native-icon-env
+          /tmp/connect-native-icon-env/bin/pip install --disable-pip-version-check --quiet Pillow==11.3.0
+          /tmp/connect-native-icon-env/bin/python - <<'PY'
+          import base64,zlib
+          payload=''.join([
+          'eNp9VWFv20YM/a5fwcUoLA2y7NTwWiTTB7cDhgJBF6QZBqwYClpipGtOd7e7k2z3148nyZa7DHMsRD5SJB/fIzX7Ydk6u9wJtSTVgTn6Wqt1dHV1dYetKmqy4PCJFt+0',
+          'Iih0Y7QTXmiVgrHkyHbkQOpKL/falg3aZ3iyugE0xuqOSrj/YwtoPVufs+ixJtiq0mpRApZovOgIGnTPUEhhHOjWO1ESePYrSHlLfXIOQHgLijquxpIq+R+7RE63tmCX',
+          'v1t2APRwvVq9AqxQqAx+d1yZtqISCiW810pR4UEUoXSlPVSkyKLnEs/lMeior/7+wx0Ihmo9fGiwouHUoK+l2J0s9/wzGu+/Oq0iq7XPw2k8VxigzZPI2SIP58s5Okfe',
+          'LYuhkEUoJDOqmkfBwCHYM6ODcN7FSRSseZ8604ZUzMYk4zNugI/nD7++23LsGXwigwHDhHPHN7UPkAYeysBIiAY7LJ4rq1tVZvBYCwf81Uoe4UkP3Zy9pIZNNDxzC5Iq',
+          'LI5DLEuee+x6nuiA3NdAc2XR1KLI+uozX7fNTqGQcby5fp3ylaQDogdy2BgpVJXdbT++//O3TwHLw5nXCU3QmyTGN6oI9sLXQp0KnbtePIteI1wpyzILVCk/9k7RfuxW',
+          'OhURr9L+LwlZ37BgClQdOgarvbFC+ZSxYsflBUnxrWNhbV5xsyAI8AhUcujIFSipzHusPAniG8XxevM25ev/gf4SKJnYAMYTQI9iDsQoz9pnMCiZHm9ROaaZj06uEy0p',
+          'x9vXQg4j84K/UBw3KSQLcAotdRigpidvtnq72l1fZ5ERB5IuHwBlUmPJCgyqOIaEnL6ieDTWFOSV3ETAn+ByeOGyF6WvR4/wsWmV7lLMhyyfD+nxr7NtBu8GvU6IAPvL',
+          'C5QCXajatbZjMLeDlielj6CEuwhnyUgseKZ3xwuR8ErhgMX40Ng5wI6tPcvgiBvFD7XeBwmd4g3DpMi5vMFD3CNJzlbxdOEAP8N6cwOYr852kv/2+Kn3YHpj/DGeLIv1',
+          'JlmuV1Pki1bl8di/ZBB2htLU+OW0iE9dT/shW3xHwXL5Or08Hbnj4+QUzGFH8X+up5OEFhMz/bZKNR83LPb80bYU5Hw37IWd8A2am/NbIYwst57zm8OwNMLs8oJnwXzl',
+          'DKHxdGBxQx+cyiiwV3iWkiSXncLK8SXkoHV0QaneqyEqvyPQN8wv6zgMbzzfvtxe0JqyX/Whhstd1attjDqsEX6Fsb4cr9d/AIvgZ/k=',
+          ])
+          data=zlib.decompress(base64.b64decode(payload))
+          exec(compile(data,'<Connect adaptive icon safe-area>','exec'))
+          PY
+      - name: Track PWA visual provenance and remaining device verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p native/final-parity-review
+          cat > native/final-parity-review/PWA_NATIVE_VISUAL.md <<'EOF'
+          # Connect PWA → native Android visual source port
+
+          PWA reference: `Chimera1988/connect-messenger` at `df71ca06e615ca5f981ae9276bd3642587f76e1a`.
+          Native Android original app ID and all business logic have been preserved.
+
+          Native layout was changed at source level, not by color overlays:
+          - Replaced invented waves with the exact PWA SVG path geometry for all six animated scenes
+          - Mirrored seven PWA dynamic accent palettes and theme backdrops
+          - Rebuilt login layout and copy using the current PWA login form
+          - Adjusted chat list, headers, bubbles, composer, and bottom navigation geometry
+          - Matched three main PWA navigation tabs; native-only journal remains accessible from Contacts
+          - Replaced placeholder scene thumbnails with original PWA scene geometry and labels
+          - Improved settings layout and scroll reachability
+          - Brought native calls list onto the common Liquid Glass palette
+          - Reworked Android adaptive-icon safe area using the original approved PWA icon
+
+          **NOT YET VERIFIED:** Pixel-identical rendering on physical devices, density/font differences,
+          blur/filter fidelity, device keyboard, and all secondary screens. React Native cannot
+          directly execute PWA CSS: native SVG reproduces paths but not browser Gaussian filters.
+          Neither APK nor AAB is created in this workflow. User must explicitly request a fresh
+          installable APK and compare with real PWA screenshots before calling the port 1:1.
+          EOF
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Full native TypeScript validation; do not create APK
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+      - name: Expo native prebuild and Kotlin Java validation; no APK
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install --clean
+          test -s android/app/src/main/java/com/connect/messenger/ConnectSoundModule.kt
+          if ! sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'; then
+            sdkmanager --channel=3 --install 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools'
+          fi
+          chmod +x android/gradlew
+          (cd android && ./gradlew :app:processDebugMainManifest :app:compileDebugKotlin :app:compileDebugJavaWithJavac --no-daemon --max-workers=2) 2>&1 | tee "$GITHUB_WORKSPACE/connect-pwa-visual-compile.log"
+          if find android -name '*.apk' -o -name '*.aab' | grep -q .; then echo 'Forbidden APK output' >&2; exit 1; fi
+      - name: Commit only passing visual source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- native/src/App.tsx native/src/ConnectNativeAppearance.ts native/src/ConnectNativeGlass.tsx native/src/ConnectNativeSettings.tsx native/src/ConnectNativeChat.tsx native/src/ConnectNativeCalls.tsx native/src/theme.ts native/assets/connect-adaptive-foreground.png native/final-parity-review/PWA_NATIVE_VISUAL.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(android): native visual composition ported from actual Connect PWA'
+            git push origin main
+          else
+            echo 'Visual native source already matches the approved patch'
+          fi
+      - name: Upload compilation diagnostics only on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connect-PWA-Native-Visual-Compile-Log
+          path: connect-pwa-visual-compile.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Result
+        if: success()
+        shell: bash
+        run: |
+          echo '### Connect: native visual port from PWA (NO APK)' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Authentic PWA SVG paths, 7 theme previews and glass layout now in native source.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- No APK/AAB generated or uploaded. Chat/FCM/WebRTC logic untouched.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Still requires actual Android screenshot comparison before claiming pixel parity.' >> "$GITHUB_STEP_SUMMARY"
