@@ -4486,54 +4486,50 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx expo prebuild --platform android --no-install --clean
-      - name: Download verified Gradle with mirrors and retries (no APK)
-        working-directory: native/android
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Expo SDK 58 currently generates Gradle 9.4.1 for this application.
-          # Only this known version is allowed; never silently change Gradle.
-          wrapper=gradle/wrapper/gradle-wrapper.properties
-          grep -Eq '^distributionUrl=.*gradle-9\.4\.1-bin\.zip' "$wrapper"
-          expected_sha=2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb
-          archive="$RUNNER_TEMP/gradle-9.4.1-bin.zip"
-          for host in \
-            https://downloads.gradle.org/distributions \
-            https://services.gradle.org/distributions \
-            https://downloads.gradle-dn.com/distributions; do
-            echo "Fetching Gradle 9.4.1 from $host (with retries)"
-            rm -f "$archive.part"
-            if curl --fail --location --silent --show-error \
-                 --retry 3 --retry-all-errors --retry-delay 5 \
-                 --connect-timeout 20 --max-time 300 \
-                 "$host/gradle-9.4.1-bin.zip" --output "$archive.part"; then
-              if printf '%s  %s\n' "$expected_sha" "$archive.part" | sha256sum --check --status; then
-                mv "$archive.part" "$archive"
-                break
-              fi
-              echo "SHA-256 mismatch from $host; discarding download" >&2
-            fi
-          done
-          rm -f "$archive.part"
-          test -s "$archive" || { echo 'Gradle distribution unavailable from all mirrors' >&2; exit 1; }
-          # Use the verified local archive for this generated Android build only.
-          # The repository's Expo config and committed Gradle files stay unchanged.
-          python3 - "$wrapper" "$archive" <<'PY_GRADLE_WRAPPER'
-          from pathlib import Path
-          import re, sys
-          properties=Path(sys.argv[1])
-          current=properties.read_text()
-          url=Path(sys.argv[2]).resolve().as_uri()
-          changed,count=re.subn(r'(?m)^distributionUrl=.*$', 'distributionUrl='+url, current)
-          assert count==1, 'Expected one Gradle wrapper distributionUrl'
-          properties.write_text(changed)
-          print('Gradle wrapper configured for verified local distribution')
-          PY_GRADLE_WRAPPER
-
-      - name: Compile Java and Kotlin without packaging an APK
+      - name: Compile Java and Kotlin without packaging an APK (Maven mirror and network retries)
         working-directory: native/android
         shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:compileDebugJavaWithJavac :app:compileDebugKotlin --no-daemon --stacktrace --max-workers=2
+          # CI-only Maven fallback for Kotlin compiler artifacts. Original native sources are unchanged.
+          cat > "$RUNNER_TEMP/connect-kotlin-mirrors.init.gradle" <<'CONNECT_MIRRORS'
+          gradle.beforeProject { project ->
+            project.repositories.maven {
+              url 'https://maven.aliyun.com/repository/central'
+              content { includeGroup('org.jetbrains.kotlin') }
+            }
+            project.repositories.maven {
+              url 'https://maven-central.storage-download.googleapis.com/maven2/'
+              content { includeGroup('org.jetbrains.kotlin') }
+            }
+          }
+          CONNECT_MIRRORS
+          log="$RUNNER_TEMP/connect-native-gradle-compile.log"
+          for attempt in 1 2 3 4; do
+            echo "Android native compile: attempt $attempt of 4"
+            if ./gradlew :app:compileDebugJavaWithJavac :app:compileDebugKotlin \
+               --init-script "$RUNNER_TEMP/connect-kotlin-mirrors.init.gradle" \
+               --no-daemon --stacktrace --max-workers=2 --console=plain 2>&1 | tee "$log"; then
+              echo 'Java and Kotlin compilation succeeded. No APK/AAB was assembled.'
+              exit 0
+            fi
+            # Only repeat when the failure is a transient download/network issue.
+            if ! grep -Eiq '(^|[[:space:]])(HTTP|status code) 5[0-9][0-9]|Gateway Time-out|Read timed out|Connection reset|Could not GET|Could not download|Temporary failure|UnknownHostException|SocketTimeoutException|Remote host terminated|502 Bad Gateway|503 Service Unavailable' "$log"; then
+              echo 'Gradle reported a compilation/configuration error, not a transient network failure.' >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo 'Compilation blocked by external dependency download after four attempts.' >&2
+              exit 1
+            fi
+            sleep $((attempt * 12))
+          done
+      - name: Upload native compilation log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-native-gradle-compile-failure
+          path: ${{ runner.temp }}/connect-native-gradle-compile.log
+          if-no-files-found: ignore
+          retention-days: 14
