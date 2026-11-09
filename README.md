@@ -1,5 +1,7 @@
 # Connect Native — Android
 
+Текущая сверка и исправления PWA: [native/PWA_PARITY_REVIEW.md](native/PWA_PARITY_REVIEW.md). Старые отчёты phase10/final-parity-review описывают предыдущие снимки; они не подтверждают текущую работоспособность.
+
 This repository now contains **only the native React Native / Expo Android client** in `native/`. The old WebView Android sources and Gradle build have been retired. The Connect Messenger PWA is a separate repository and is **not** deleted or changed here.
 
 ## Native test APK

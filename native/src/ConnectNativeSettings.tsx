@@ -1,22 +1,24 @@
 /** PWA settings hierarchy ported to native React Native: no WebView, no APK build. */
 import React,{useEffect,useState} from 'react';
-import {ActivityIndicator,Alert,Image,Pressable,ScrollView,Switch,Text,TextInput,View} from 'react-native';
+import {ActivityIndicator,Alert,BackHandler,Image,Pressable,ScrollView,Switch,Text,TextInput,View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import {File} from 'expo-file-system';
 import {db} from './backend';
 import {uploadFile} from './nativeMediaUtils';
 import ConnectNativeAvatarCropper,{type AvatarSource,type CroppedAvatar} from './ConnectNativeAvatarCropper';
 import {glassColor} from './ConnectNativeGlass';
+import ConnectNativeGlassPanel from './ConnectNativeGlassPanel';
 import {BUILTIN_PACKS,ACCENTS,type AppearanceController} from './ConnectNativeAppearance';
 import {palettes,themeNames,type Palette} from './theme';
 import ConnectNativeSoundSettings,{previewBuiltinSound} from './ConnectNativeSoundSettings';
 import {testNativeMessagePush} from './ConnectNativePush';
 import ConnectNativeStickerManager from './ConnectNativeStickerManager';
+import {resetNativeStickerPreferences} from './ConnectNativeStickers';
 import ConnectNativeSonicRunner from './ConnectNativeSonicRunner';
+import ConnectNativeColorPicker from './ConnectNativeColorPicker';
 
 type Page='home'|'appearance'|'stickers'|'notifications'|'data'|'privacy'|'about';
 type Profile={id:string;display_name:string;bio:string|null;avatar_path:string|null};
@@ -35,23 +37,79 @@ function errorOf(e:unknown){return e instanceof Error?e.message:String(e);}
 
 function Row({icon,title,subtitle,onPress,colors,danger=false}: {icon:keyof typeof Ionicons.glyphMap;title:string;subtitle?:string;onPress:()=>void;colors:Palette;danger?:boolean}){
   return <Pressable accessibilityRole="button" onPress={onPress}
-    style={{minHeight:66,padding:13,borderRadius:18,borderWidth:1,borderColor:glassColor(colors.text,.13),backgroundColor:glassColor(colors.surface,.9),flexDirection:'row',alignItems:'center',gap:13,marginBottom:8}}>
+    style={{marginBottom:8,borderRadius:18}}>
+    <ConnectNativeGlassPanel colors={colors} style={{minHeight:66,padding:13,borderRadius:18,borderWidth:1,borderColor:glassColor(colors.text,.13),flexDirection:'row',alignItems:'center',gap:13}}>
     <Ionicons name={icon} size={22} color={danger?colors.danger:colors.accent}/>
     <View style={{flex:1,gap:4}}><Text style={{fontSize:15,fontWeight:'700',color:danger?colors.danger:colors.text}}>{title}</Text>
       {!!subtitle&&<Text style={{fontSize:12,color:colors.muted}}>{subtitle}</Text>}</View>
     <Ionicons name="chevron-forward" size={18} color={colors.muted}/>
+    </ConnectNativeGlassPanel>
   </Pressable>;
 }
 function Heading({children,colors}:{children:string;colors:Palette}){
   return <Text style={{fontSize:17,fontWeight:'700',color:colors.text,marginTop:22,marginBottom:10}}>{children}</Text>;
 }
 function Panel({children,colors}:{children:React.ReactNode;colors:Palette}){
-  return <View style={{borderWidth:1,borderColor:glassColor(colors.text,.12),backgroundColor:glassColor(colors.surface,.83),borderRadius:19,padding:14,gap:10}}>{children}</View>;
+  return <ConnectNativeGlassPanel colors={colors} style={{borderWidth:1,borderColor:glassColor(colors.text,.12),borderRadius:19,padding:14,gap:10}}>{children}</ConnectNativeGlassPanel>;
 }
 function SmallButton({label,onPress,colors,disabled=false,danger=false}:{label:string;onPress:()=>void;colors:Palette;disabled?:boolean;danger?:boolean}){
   return <Pressable accessibilityRole="button" onPress={onPress} disabled={disabled} style={{paddingVertical:11,paddingHorizontal:13,borderRadius:13,backgroundColor:danger?glassColor(colors.danger,.15):glassColor(colors.accent,.14),opacity:disabled ? .5 : 1}}>
     <Text style={{color:danger?colors.danger:colors.accent,textAlign:'center',fontWeight:'700'}}>{label}</Text>
   </Pressable>;
+}
+
+/** Shared editor for the profile page and Settings. Uploads use the signed-in user's storage access. */
+export function ConnectNativeProfileEditor({owner,colors,onProfileSaved}:{owner:Profile;colors:Palette;onProfileSaved:()=>Promise<void>}){
+  const [newName,setNewName]=useState(owner.display_name||'');
+  const [newBio,setNewBio]=useState(owner.bio||'');
+  const [working,setWorking]=useState(false);
+  const [notices,setNotices]=useState('');
+  const [cropAsset,setCropAsset]=useState<AvatarSource|null>(null);
+  useEffect(()=>{setNewName(owner.display_name||'');setNewBio(owner.bio||'');},[owner.id,owner.display_name,owner.bio]);
+  async function saveProfile(){
+    if(!owner||!newName.trim()||working)return;
+    setWorking(true);setNotices('Сохраняем профиль…');
+    try{
+      const result=await db.from('profiles').update({display_name:newName.trim().slice(0,60),bio:newBio.trim().slice(0,160)}).eq('id',owner.id);
+      if(result.error)throw result.error;
+      await onProfileSaved();setNotices('Профиль сохранён');
+    }catch(e){setNotices('Ошибка профиля: '+errorOf(e));}finally{setWorking(false);}
+  }
+  async function chooseAvatar(){
+    if(!owner||working)return;
+    try{
+      const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:false,quality:1});
+      if(picked.canceled||!picked.assets[0])return;
+      const item=picked.assets[0];
+      const extension=(item.fileName||item.uri).split('.').pop()?.toLowerCase()||'';
+      const mime=item.mimeType?.toLowerCase()||({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp'} as Record<string,string>)[extension];
+      if(!['image/jpeg','image/png','image/webp'].includes(mime||''))throw Error('Выберите JPG, PNG или WebP');
+      if(!item.width||!item.height)throw Error('Не удалось прочитать размеры фотографии');
+      setCropAsset({uri:item.uri,width:item.width,height:item.height});
+    }catch(e){setNotices('Не удалось открыть фотографию: '+errorOf(e));}
+  }
+  async function saveCroppedAvatar(file:CroppedAvatar){
+    if(!owner||working)return;
+    setWorking(true);
+    try{
+      const path=`${owner.id}/avatar-${Date.now()}.jpg`;
+      await uploadFile('connect-avatars',path,{uri:file.uri,name:'avatar.jpg',mime:'image/jpeg',size:file.size});
+      const result=await db.from('profiles').update({avatar_path:path}).eq('id',owner.id);
+      if(result.error)throw result.error;
+      await onProfileSaved();setCropAsset(null);setNotices('Аватар обновлён');
+    }finally{setWorking(false);}
+  }
+  return <>
+    <Panel colors={colors}>
+      <TextInput accessibilityLabel="Имя профиля" style={{color:colors.text,borderWidth:1,borderColor:colors.line,borderRadius:12,padding:12}} placeholder="Имя" placeholderTextColor={colors.muted} maxLength={60} value={newName} onChangeText={setNewName} editable={!working}/>
+      <TextInput accessibilityLabel="О себе" style={{color:colors.text,borderWidth:1,borderColor:colors.line,borderRadius:12,padding:12,minHeight:80}} placeholder="О себе" placeholderTextColor={colors.muted} maxLength={160} value={newBio} onChangeText={setNewBio} multiline editable={!working}/>
+      <SmallButton label="Изменить фотографию профиля" onPress={()=>void chooseAvatar()} colors={colors} disabled={working}/>
+      <SmallButton label="Сохранить профиль" onPress={()=>void saveProfile()} colors={colors} disabled={working||!newName.trim()}/>
+      {!!notices&&<Text accessibilityRole="alert" style={{color:colors.accent,fontSize:13}}>{notices}</Text>}
+      {working&&<ActivityIndicator color={colors.accent}/>}
+    </Panel>
+    <ConnectNativeAvatarCropper source={cropAsset} colors={colors} busy={working} onClose={()=>setCropAsset(null)} onSave={saveCroppedAvatar}/>
+  </>;
 }
 
 export default function ConnectNativeSettings({owner,email,colors,appearance,admin,onInvite,onProfile,onLogout,onProfileSaved}:Props){
@@ -64,12 +122,19 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
   const [working,setWorking]=useState(false);
   const [deletePassword,setDeletePassword]=useState('');
   const [exportSummary,setExportSummary]=useState('');
-  const [newName,setNewName]=useState(owner?.display_name||'');
-  const [newBio,setNewBio]=useState(owner?.bio||'');
   const [profileEdit,setProfileEdit]=useState(false);
-  const [cropAsset,setCropAsset]=useState<AvatarSource|null>(null);
+  const [customAccent,setCustomAccent]=useState(appearance.prefs.accent);
   const a=appearance.prefs;
-  useEffect(()=>{setNewName(owner?.display_name||'');setNewBio(owner?.bio||'');},[owner?.display_name,owner?.bio]);
+  useEffect(()=>setCustomAccent(a.accent),[a.accent]);
+  useEffect(()=>{
+    if(page==='home'&&!profileEdit)return;
+    const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{
+      if(page!=='home'){setPage('home');setNotices('');}
+      else setProfileEdit(false);
+      return true;
+    });
+    return()=>subscription.remove();
+  },[page,profileEdit]);
   useEffect(()=>{
     let alive=true;
     void (async()=>{
@@ -114,13 +179,18 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
     if(old)await FileSystem.deleteAsync(old,{idempotent:true}).catch(()=>{});
   }
   async function resetLocal(){
-    Alert.alert('Сбросить настройки?','Тема, цвет, фон и выбранные наборы стикеров вернутся к значениям по умолчанию. Сообщения останутся.',[
+    Alert.alert('Сбросить настройки?','Тема, цвет, фон, избранные и недавние стикеры вернутся к значениям по умолчанию. Сообщения останутся.',[
       {text:'Отмена',style:'cancel'},
-      {text:'Сбросить',style:'destructive',onPress:()=>{void clearWallpaper();appearance.reset();setNotices('Локальные настройки сброшены');}},
+      {text:'Сбросить',style:'destructive',onPress:()=>{void (async()=>{
+        try{
+          if(owner)await resetNativeStickerPreferences(owner.id);
+          await clearWallpaper();appearance.reset();setNotices('Локальные настройки сброшены');
+        }catch(e){setNotices('Не удалось сбросить настройки: '+errorOf(e));}
+      })();}},
     ]);
   }
   async function exportChats(){
-    if(!owner)return;
+    if(!owner||working)return;
     setWorking(true);setExportSummary('Подготавливаем данные…');
     try{
       const c=await db.from('conversations').select('id,user_a,user_b,created_at').or(`user_a.eq.${owner.id},user_b.eq.${owner.id}`).limit(1000);
@@ -128,11 +198,13 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       const conversations=c.data||[];
       const messages:unknown[]=[];
       for(const row of conversations){
-        for(let start=0;start<50000-messages.length;start+=500){
-          const data=await db.from('messages').select('*').eq('conversation_id',row.id).order('created_at',{ascending:true}).range(start,start+499);
+        for(let start=0;messages.length<50000;){
+          const pageSize=Math.min(500,50000-messages.length);
+          const data=await db.from('messages').select('*').eq('conversation_id',row.id).order('created_at',{ascending:true}).order('id',{ascending:true}).range(start,start+pageSize-1);
           if(data.error)throw data.error;
           messages.push(...(data.data||[]));
-          if(!data.data||data.data.length<500)break;
+          if(!data.data||data.data.length<pageSize)break;
+          start+=data.data.length;
         }
         if(messages.length>=50000)break;
       }
@@ -143,40 +215,10 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       const filename=`connect-chats-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
       const uri=FileSystem.documentDirectory+filename;
       await FileSystem.writeAsStringAsync(uri,json,{encoding:FileSystem.EncodingType.UTF8});
-      setExportSummary(`Подготовлено ${messages.length} сообщений (${Math.round(json.length/1024)} КБ). Выберите, куда сохранить JSON.`);
+      setExportSummary(`Подготовлено ${messages.length} сообщений (${Math.round(json.length/1024)} КБ). ${messages.length>=50000?'Экспорт ограничен 50 000 сообщений. ':''}Выберите, куда сохранить JSON.`);
       await Sharing.shareAsync(uri,{mimeType:'application/json',dialogTitle:'Экспорт переписок Connect'});
     }catch(e){setExportSummary('Ошибка подготовки экспорта: '+errorOf(e));}
     finally{setWorking(false);}
-  }
-  async function saveProfile(){
-    if(!owner||!newName.trim()||working)return;
-    setWorking(true);setNotices('Сохраняем профиль…');
-    try{
-      const result=await db.from('profiles').update({display_name:newName.trim().slice(0,60),bio:newBio.trim().slice(0,160)}).eq('id',owner.id);
-      if(result.error)throw result.error;
-      await onProfileSaved();setProfileEdit(false);setNotices('Профиль сохранён');
-    }catch(e){setNotices('Ошибка профиля: '+errorOf(e));}finally{setWorking(false);}
-  }
-  async function chooseAvatar(){
-    if(!owner||working)return;
-    try{
-      const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:false,quality:1});
-      if(picked.canceled||!picked.assets[0])return;
-      const item=picked.assets[0];
-      if(!item.width||!item.height)throw Error('Не удалось прочитать размеры фотографии');
-      setCropAsset({uri:item.uri,width:item.width,height:item.height});
-    }catch(e){setNotices('Не удалось открыть фотографию: '+errorOf(e));}
-  }
-  async function saveCroppedAvatar(file:CroppedAvatar){
-    if(!owner||working)return;
-    setWorking(true);
-    try{
-      const path=`${owner.id}/avatar-${Date.now()}.jpg`;
-      await uploadFile('connect-avatars',path,{uri:file.uri,name:'avatar.jpg',mime:'image/jpeg',size:file.size});
-      const result=await db.from('profiles').update({avatar_path:path}).eq('id',owner.id);
-      if(result.error)throw result.error;
-      await onProfileSaved();setCropAsset(null);setNotices('Аватар обновлён');
-    }finally{setWorking(false);}
   }
   async function deleteAccount(){
     if(!deletePassword||working)return;
@@ -233,7 +275,9 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
         <Heading colors={colors}>Цветовая схема</Heading>
         <Panel colors={colors}>
           <View style={{flexDirection:'row',flexWrap:'wrap',gap:11}}>{ACCENTS.map(color=><Pressable key={color} onPress={()=>appearance.update({accent:color})} accessibilityRole="button" accessibilityLabel={'Цвет '+color} style={{width:37,height:37,borderRadius:19,backgroundColor:color,borderWidth:a.accent===color?3:0,borderColor:colors.text,alignItems:'center',justifyContent:'center'}}>{a.accent===color&&<Ionicons name="checkmark" size={19} color="#fff"/>}</Pressable>)}</View>
-          <TextInput placeholder="Свой цвет, например #087dff" value={a.accent} onChangeText={value=>{if(/^#[\da-f]{6}$/i.test(value))appearance.update({accent:value});}} placeholderTextColor={colors.muted} autoCapitalize="none" style={{color:colors.text,borderWidth:1,borderColor:colors.line,borderRadius:11,padding:12}}/>
+          <ConnectNativeColorPicker value={a.accent} colors={colors} onChange={accent=>appearance.update({accent})}/>
+          <TextInput accessibilityLabel="Свой цвет HEX" placeholder="Свой цвет, например #087dff" value={customAccent} onChangeText={value=>{setCustomAccent(value);if(/^#[\da-f]{6}$/i.test(value))appearance.update({accent:value});}} placeholderTextColor={colors.muted} autoCapitalize="none" autoCorrect={false} maxLength={7} style={{color:colors.text,borderWidth:1,borderColor:colors.line,borderRadius:11,padding:12}}/>
+          {!/^#[\da-f]{6}$/i.test(customAccent)&&<Text style={{color:colors.muted,fontSize:12}}>Введите # и шесть символов 0–9, A–F. Цвет применится после ввода.</Text>}
         </Panel>
         <Heading colors={colors}>Фон переписок</Heading>
         <Panel colors={colors}>
@@ -290,16 +334,10 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
       </>}
       {page==='about'&&<Panel colors={colors}><Text style={{fontWeight:'800',fontSize:21,color:colors.text}}>Connect Messenger</Text><Text style={{color:colors.text}}>Эталонное PWA: версия {PWA_VERSION}</Text><Text style={{color:colors.text}}>Android-клиент: Connect Native (перенос в процессе)</Text><Text style={{color:colors.muted}}>Разработчики: Алина и Кирилл</Text><Text style={{color:colors.muted}}>Мессенджер для личного общения.</Text></Panel>}
       {page==='home'&&<SmallButton colors={colors} label={profileEdit?'Закрыть редактирование профиля':'Редактировать мой профиль'} onPress={()=>setProfileEdit(v=>!v)}/>}
-      {page==='home'&&profileEdit&&<Panel colors={colors}>
-        <TextInput style={{color:colors.text,borderWidth:1,borderColor:colors.line,borderRadius:12,padding:12}} placeholder="Имя" placeholderTextColor={colors.muted} maxLength={60} value={newName} onChangeText={setNewName}/>
-        <TextInput style={{color:colors.text,borderWidth:1,borderColor:colors.line,borderRadius:12,padding:12,minHeight:80}} placeholder="О себе" placeholderTextColor={colors.muted} maxLength={160} value={newBio} onChangeText={setNewBio} multiline/>
-        <SmallButton label="Изменить фотографию профиля" onPress={()=>void chooseAvatar()} colors={colors} disabled={working}/>
-        <SmallButton label="Сохранить профиль" onPress={()=>void saveProfile()} colors={colors} disabled={working||!newName.trim()}/>
-      </Panel>}
+      {page==='home'&&profileEdit&&owner&&<ConnectNativeProfileEditor owner={owner} colors={colors} onProfileSaved={onProfileSaved}/>}
       {!!notices&&<Text accessibilityRole="alert" style={{marginTop:14,color:colors.accent,fontSize:13}}>{notices}</Text>}
       {working&&<ActivityIndicator color={colors.accent} style={{marginTop:12}}/>}
     </ScrollView>
     <ConnectNativeSonicRunner visible={gameOpen} colors={colors} onClose={()=>setGameOpen(false)}/>
-    <ConnectNativeAvatarCropper source={cropAsset} colors={colors} busy={working} onClose={()=>setCropAsset(null)} onSave={saveCroppedAvatar}/>
   </View>;
 }

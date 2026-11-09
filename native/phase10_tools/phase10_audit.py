@@ -19,7 +19,7 @@ SCRIPT_DIR=Path(__file__).resolve().parent
 sys.path.insert(0,str(SCRIPT_DIR))
 from probes import PROBES
 
-SOURCE_SHA_PWA='98e33db66cd105818a0bfaded268f921b634d97b'
+SOURCE_SHA_PWA=os.environ.get('CONNECT_PWA_REFERENCE_SHA','df71ca06e615ca5f981ae9276bd3642587f76e1a')
 CRITICAL={
  '01.01','01.05','02.01','02.02','02.03','02.06','02.08','03.04',
  '04.04','05.02','05.05','05.07','05.10','05.11','05.15','05.16',

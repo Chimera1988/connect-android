@@ -37,7 +37,7 @@ export function useConnectNativeReadSync(ownerId:string){
           if(!alert.createdAt||!Number.isFinite(Date.parse(alert.createdAt)))continue;
           if(Date.parse(read)>=Date.parse(alert.createdAt)){
             await rememberReadAt(alert.conversationId,read);
-            if(alive)await dismissChatPush(alert.conversationId);
+            if(alive)await dismissChatPush(alert.conversationId,read);
           }
         }
       }catch(e){console.warn('Connect notification read reconciliation:',e);}

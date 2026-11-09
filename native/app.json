@@ -73,7 +73,8 @@
             "image": "./assets/connect-splash-bubbles.png"
           }
         }
-      ]
+      ],
+      "./plugins/withConnectWaveform"
     ],
     "icon": "./assets/connect-icon.png",
     "androidStatusBar": {

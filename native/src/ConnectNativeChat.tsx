@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {Alert,AppState,FlatList,Image,Keyboard,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
+import {Alert,AppState,BackHandler,FlatList,Image,Keyboard,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -10,15 +10,18 @@ import {AudioModule,RecordingPresets,setAudioModeAsync,useAudioRecorder,useAudio
 import {File} from 'expo-file-system';
 import {randomUUID} from 'expo-crypto';
 import {db,MESSAGE_COLUMNS,type Conversation,type Message,type Profile} from './backend';
-import {ConnectNativeAttachment} from './ConnectNativeMedia';
+import {ConnectNativeAttachment,ConnectNativeMediaViewer,type ConnectNativeGalleryItem} from './ConnectNativeMedia';
 import ConnectNativeVideoNote from './ConnectNativeVideoNote';
 import {dismissChatPush,rememberReadAt} from './ConnectNativePush';
 import ConnectNativeAlbum,{parseAlbumReference} from './ConnectNativeAlbum';
 import ConnectNativeStickerPicker,{ConnectNativeStickerBubble,parseStickerReference} from './ConnectNativeStickers';
 import {saveKeyboardStickerFavorite} from './ConnectNativeStickerLibrary';
-import {uploadFile,type LocalUpload} from './nativeMediaUtils';
+import {signedObject,uploadFile,type LocalUpload} from './nativeMediaUtils';
 import type {Palette} from './theme';
 import {glassColor} from './ConnectNativeGlass';
+import {chatReadingEntry,latestVisibleIncoming} from './ConnectNativeChatReading';
+import ConnectNativeGlassPanel from './ConnectNativeGlassPanel';
+import {prepareChatMediaPreview,discardChatMediaPreview,type ChatMediaPreview} from './nativeMediaPreview';
 
 const FORWARD_PREFIX='[[connect-forward:';
 const forwardMeta=(body:string):{from:string|null;text:string}=>{
@@ -70,7 +73,13 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const [toolsOpen,setToolsOpen]=useState(false);
   const [showJump,setShowJump]=useState(false);
   const [visibleMessageIds,setVisibleMessageIds]=useState<string[]>([]);
-  const nearBottom=useRef(true);
+  const nearBottom=useRef(false);
+  const readingEntry=useRef<{chatId:string;anchorId:string|null;readAt:string}|null>(null);
+  const positioned=useRef(false);
+  const loadingMessages=useRef(false);
+  const positionRetry=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [firstUnreadId,setFirstUnreadId]=useState<string|null>(null);
+  const [foreground,setForeground]=useState(AppState.currentState==='active');
   const swipeStart=useRef<{id:string;x:number;y:number}|null>(null);
   const [query,setQuery]=useState('');
   const [forwardItems,setForwardItems]=useState<Message[]>([]);
@@ -90,13 +99,15 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
 
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [stickerPickerOpen,setStickerPickerOpen]=useState(false);
+  const [mediaViewer,setMediaViewer]=useState<ConnectNativeGalleryItem|null>(null);
+  const [viewerSource,setViewerSource]=useState<{path:string;url:string}|null>(null);
   const listRef=useRef<FlatList<Message>>(null);
   const onViewableMessages=useRef(({viewableItems}:{viewableItems:ReadonlyArray<{item:Message;isViewable:boolean|null}>})=>{
     setVisibleMessageIds(viewableItems.filter(row=>row.isViewable).map(row=>row.item.id));
   }).current;
   const videoViewConfig=useRef({itemVisiblePercentThreshold:35}).current;
   const lastSyncedRead=useRef<Record<string,string>>({});
-  const seenIncoming=useRef<Record<string,string>>({});
+  const readQueue=useRef<Promise<void>>(Promise.resolve());
   const recorder=useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState=useAudioRecorderState(recorder);
   // CONNECT_NATIVE_PWA_PHASE5_MEDIA: recording may be sent or cancelled; never auto-send on cancel.
@@ -109,7 +120,11 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     return()=>clearInterval(timer);
   },[recorderState.isRecording]);
   const id=conversation.id;
-  const localHiddenKey=`connect-native-chat-hidden-v1:${ownerId}:${id}`;
+  const localHiddenKey=`connect-native-chat-hidden-v1.${ownerId}.${id}`;
+  useEffect(()=>{
+    const sub=AppState.addEventListener('change',state=>setForeground(state==='active'));
+    return()=>{sub.remove();if(positionRetry.current)clearTimeout(positionRetry.current);};
+  },[]);
   // PWA compatibility: recording presence is a short, renewed lease (8 s), not
   // a 2-minute stale status if Android loses microphone access or gets killed.
   useEffect(()=>{
@@ -126,7 +141,11 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     };
     pulse();
     const interval=setInterval(pulse,2000);
-    return()=>{alive=false;clearInterval(interval);};
+    return()=>{
+      alive=false;clearInterval(interval);
+      void db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,recording_until:null},
+        {onConflict:'conversation_id,user_id'}).then(()=>{});
+    };
   },[ownerId,id,recorderState.isRecording]);
   useEffect(()=>{
     let alive=true;hiddenLoaded.current=false;setHidden([]);
@@ -167,12 +186,15 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const mutedColor=colors.muted;
   const markChatRead=useCallback(async(iso:string)=>{
     if(!ownerId||AppState.currentState!=='active')return;
-    if(lastSyncedRead.current[id] && lastSyncedRead.current[id]>=iso)return;
+    if(lastSyncedRead.current[id] && Date.parse(lastSyncedRead.current[id])>=Date.parse(iso))return;
     lastSyncedRead.current[id]=iso;
+    // Serialize writes: an older in-flight request must not land after a newer
+    // receipt and move the server's read boundary backwards.
+    const write=readQueue.current.catch(()=>{}).then(async()=>{
     const saved=await db.from('conversation_user_state').upsert(
       {conversation_id:id,user_id:ownerId,last_read_at:iso},{onConflict:'conversation_id,user_id'});
-    if(saved.error){delete lastSyncedRead.current[id];return;}
-    await dismissChatPush(id).catch(()=>{});
+    if(saved.error){if(lastSyncedRead.current[id]===iso)delete lastSyncedRead.current[id];return;}
+    await dismissChatPush(id,iso).catch(()=>{});
     await rememberReadAt(id,iso).catch(()=>{});
     try{
       const {data:{session}}=await db.auth.getSession();
@@ -182,11 +204,39 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         body:JSON.stringify({conversationId:id,readAt:iso}),
       }).catch(()=>{});
     }catch{}
+    });
+    readQueue.current=write.catch(error=>{
+      if(lastSyncedRead.current[id]===iso)delete lastSyncedRead.current[id];
+      console.warn('Connect read receipt:',error);
+    });
+    await readQueue.current;
   },[id,ownerId]);
   const load=useCallback(async()=>{
-    const result=await db.from('messages').select(MESSAGE_COLUMNS).eq('conversation_id',id).order('created_at',{ascending:false}).limit(300);
+    if(loadingMessages.current||AppState.currentState!=='active')return;
+    loadingMessages.current=true;
+    try{
+    const initial=readingEntry.current?.chatId!==id;
+    const [result,entry]=await Promise.all([
+      db.from('messages').select(MESSAGE_COLUMNS).eq('conversation_id',id).order('created_at',{ascending:false}).limit(500),
+      initial?db.from('conversation_user_state').select('last_read_at').eq('conversation_id',id).eq('user_id',ownerId).maybeSingle():Promise.resolve(null),
+    ]);
     if(result.error){setNotice('Сообщения: '+result.error.message);return;}
+    // A failed boundary lookup must not silently turn old unread messages into
+    // read ones. Retry with the next refresh before displaying the conversation.
+    if(entry?.error){setNotice('Прочтение: '+entry.error.message);return;}
     const rows=((result.data||[]) as Message[]).reverse();
+    if(initial){
+      const saved=await SecureStore.getItemAsync(localHiddenKey).catch(()=>null);
+      let hiddenIds:string[]=[];
+      try{const value:unknown=JSON.parse(saved||'[]');if(Array.isArray(value))hiddenIds=value.filter((x):x is string=>typeof x==='string');}catch{}
+      const readAt=entry?.data?.last_read_at||'';
+      lastSyncedRead.current[id]=readAt;
+      const boundary=chatReadingEntry(rows,ownerId,readAt,hiddenIds,clearedAt);
+      readingEntry.current={chatId:id,anchorId:boundary.anchorId,readAt};
+      positioned.current=!boundary.anchorId;
+      nearBottom.current=!boundary.anchorId;
+      setFirstUnreadId(boundary.firstUnreadId);
+    }
     setMessages(rows);
     const latest=[...rows].reverse().find(m=>!m.deleted_at&&m.sender_id!==ownerId);
     // PWA delivery timestamp is the latest incoming message creation time.
@@ -195,12 +245,8 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       void db.from('conversation_user_state').upsert({conversation_id:id,user_id:ownerId,last_delivered_at:latest.created_at},
         {onConflict:'conversation_id,user_id'}).then(({error})=>{if(error)deliveredLastSent.current='';});
     }
-
-    if(latest && latest.created_at>(seenIncoming.current[id]||'')){
-      seenIncoming.current[id]=latest.created_at;
-      if(AppState.currentState==='active')void markChatRead(new Date().toISOString());
-    }
-  },[id,ownerId,markChatRead]);
+    }finally{loadingMessages.current=false;}
+  },[id,ownerId,localHiddenKey,clearedAt]);
   useEffect(()=>{
     let alive=true;
     void load();
@@ -208,26 +254,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     const timer=setInterval(()=>{if(alive)void load();},4500);
     return()=>{alive=false;clearInterval(timer);};
   },[load]);
-  useEffect(()=>{
-    if(!ownerId)return;
-    void markChatRead(new Date().toISOString());
-    const subscription=AppState.addEventListener('change',state=>{
-      if(state==='active')void markChatRead(new Date().toISOString());
-    });
-    return()=>subscription.remove();
-  },[id,ownerId,markChatRead]);
-  useEffect(()=>{
-    if(!ownerId||!recorderState.isRecording)return;
-    // Keep the existing PWA "recording_until" indicator alive during long recordings.
-    const refresh=()=>{
-      void db.from('conversation_user_state').upsert({
-        conversation_id:id,user_id:ownerId,recording_until:new Date(Date.now()+45000).toISOString(),
-      },{onConflict:'conversation_id,user_id'}).then(()=>{});
-    };
-    refresh();
-    const interval=setInterval(refresh,15000);
-    return()=>clearInterval(interval);
-  },[id,ownerId,recorderState.isRecording]);
+  useEffect(()=>{if(foreground)void load();},[foreground,load]);
   useEffect(()=>{
     let active=true;
     const check=async()=>{
@@ -247,6 +274,57 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   const visible=useMemo(()=>messages.filter(m=>!hidden.includes(m.id) && (!clearedAt || m.created_at>clearedAt)),[messages,hidden,clearedAt]);
   // Keep messages in context while searching: filtering loses chronology and quoted replies.
   const shown=visible;
+  const shownRef=useRef(shown);shownRef.current=shown;
+  const gallery=useMemo(()=>shown.filter(m=>!m.deleted_at).flatMap<ConnectNativeGalleryItem>(m=>{
+    const album=parseAlbumReference(forwardMeta(m.body||'').text);
+    if(album)return album;
+    const kind=m.attachment_kind;
+    if(!m.attachment_path||(kind!=='image'&&kind!=='video'))return [];
+    if(kind==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(m.attachment_name||''))return [];
+    if(kind==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(m.attachment_name||''))return [];
+    return [{path:m.attachment_path,name:m.attachment_name||'Медиа',kind}];
+  }),[shown]);
+  const galleryIndex=mediaViewer?gallery.findIndex(item=>item.path===mediaViewer.path):-1;
+  function moveGallery(direction:number){
+    if(!gallery.length)return;
+    setMediaViewer(gallery[(Math.max(0,galleryIndex)+direction+gallery.length)%gallery.length]);
+  }
+  useEffect(()=>{
+    let alive=true;setViewerSource(null);
+    if(mediaViewer)void signedObject('connect-attachments',mediaViewer.path).then(url=>{
+      if(!alive)return;
+      if(url)setViewerSource({path:mediaViewer.path,url});
+      else{setMediaViewer(null);setNotice('Файл недоступен');}
+    }).catch(()=>{if(alive){setMediaViewer(null);setNotice('Не удалось открыть файл');}});
+    return()=>{alive=false;};
+  },[mediaViewer?.path]);
+  useEffect(()=>{
+    const handler=BackHandler.addEventListener('hardwareBackPress',()=>{
+      if(mediaViewer){setMediaViewer(null);return true;}
+      if(stickerPickerOpen){setStickerPickerOpen(false);return true;}
+      if(selectionMode){setSelectionMode(false);setSelected([]);return true;}
+      if(searchOpen){setSearchOpen(false);setQuery('');return true;}
+      if(reply||edit){if(edit)setDraft('');setReply(null);setEdit(null);return true;}
+      onBack();return true;
+    });
+    return()=>handler.remove();
+  },[mediaViewer,stickerPickerOpen,selectionMode,searchOpen,reply,edit,onBack]);
+  useEffect(()=>{
+    const entry=readingEntry.current;
+    if(!foreground||entry?.chatId!==id)return;
+    if(!positioned.current){
+      if(entry.anchorId&&!visibleMessageIds.includes(entry.anchorId))return;
+      positioned.current=true;
+    }
+    const latest=latestVisibleIncoming(shown,ownerId,visibleMessageIds);
+    if(latest)void markChatRead(latest);
+  },[id,shown,visibleMessageIds,foreground,markChatRead]);
+  function positionAtEntry(){
+    const entry=readingEntry.current;
+    if(entry?.chatId!==id||positioned.current)return;
+    const index=shown.findIndex(m=>m.id===entry.anchorId);
+    if(index>=0)listRef.current?.scrollToIndex({index,animated:false,viewPosition:0});
+  }
   const searchMatches=useMemo(()=>{
     const needle=query.trim().toLocaleLowerCase('ru-RU');
     if(!needle)return [] as number[];
@@ -299,7 +377,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
   };
   async function submit(){
     const value=draft.trim();
-    if(!value||busy)return;
+    if(!value||busy||uploading||recorderState.isRecording||peer.is_blocked)return;
     setBusy(true);
     try{
       if(edit){
@@ -309,7 +387,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const result=await db.from('messages').insert({conversation_id:id,sender_id:ownerId,body:value,reply_to:reply?.id||null});
         if(result.error)throw result.error;
       }
-      setDraft('');setReply(null);setEdit(null);await load();
+      setDraft('');setReply(null);setEdit(null);nearBottom.current=true;await load();
     }catch(e){setNotice('Не отправлено: '+(e instanceof Error?e.message:String(e)));}
     finally{setBusy(false);}
   }
@@ -318,23 +396,35 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     setActionMessage(item);
   }
   async function sendAttachment(file:LocalUpload,kind?:'image'|'video'|'file'|'audio'):Promise<boolean>{
-    if(uploading||busy)return false;
+    if(uploading||busy||peer.is_blocked)return false;
     setUploading(true);setUploadProgress('Подготавливаем вложение…');
-    const path=`${id}/${ownerId}/${randomUUID()}`;
+    let path=`${id}/${ownerId}/${randomUUID()}`;
+    let preview:ChatMediaPreview={suffix:''};
+    const created:string[]=[];
     try{
       const type=kind||(file.mime.startsWith('image/')?'image':file.mime.startsWith('video/')?'video':'file');
+      preview=await prepareChatMediaPreview(file,type);
+      path+=preview.suffix;
       const size=await uploadFile('connect-attachments',path,file,(sent,total)=>{
         setUploadProgress(`Отправка: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
       });
+      created.push(path);
+      if(preview.poster){
+        try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}
+        catch{/* A poster is optional; retain the original video. */}
+      }
       const result=await db.from('messages').insert({
         conversation_id:id,sender_id:ownerId,body:'',attachment_path:path,attachment_name:file.name.slice(0,240),
         attachment_type:file.mime,attachment_size:size,attachment_kind:type,reply_to:reply?.id||null,
       });
-      if(result.error){await db.storage.from('connect-attachments').remove([path]);throw result.error;}
-      setReply(null);await load();
+      if(result.error)throw result.error;
+      setReply(null);nearBottom.current=true;await load();
       return true;
-    }catch(e){setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;}
-    finally{setUploading(false);setUploadProgress('');}
+    }catch(e){
+      if(created.length)await db.storage.from('connect-attachments').remove(created).catch(()=>{});
+      setNotice('Вложение: '+(e instanceof Error?e.message:String(e)));return false;
+    }
+    finally{await discardChatMediaPreview(preview);setUploading(false);setUploadProgress('');}
   }
   // CONNECT_NATIVE_PWA_PHASE6_STICKER_LIBRARY: persist received keyboard images as private stickers.
   async function addKeyboardFavorite(item:Message){
@@ -347,20 +437,20 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     finally{setBusy(false);}
   }
   async function sendSticker(body:string):Promise<boolean>{
-    if(busy||uploading||!parseStickerReference(body))return false;
+    if(busy||uploading||peer.is_blocked||!parseStickerReference(body))return false;
     setBusy(true);
     try{
       const result=await db.from('messages').insert({
         conversation_id:id,sender_id:ownerId,body,reply_to:reply?.id||null,
       });
       if(result.error)throw result.error;
-      setReply(null);setStickerPickerOpen(false);await load();
+      setReply(null);setStickerPickerOpen(false);nearBottom.current=true;await load();
       return true;
     }catch(e){setNotice('Стикер не отправлен: '+(e instanceof Error?e.message:String(e)));return false;}
     finally{setBusy(false);}
   }
   async function sendAlbum(files:LocalUpload[]):Promise<boolean>{
-    if(uploading||busy||files.length<2||files.length>20)return false;
+    if(uploading||busy||peer.is_blocked||files.length<2||files.length>20)return false;
     setUploading(true);setAlbumProgress('Подготавливаем альбом…');
     const created:string[]=[];
     try{
@@ -374,12 +464,19 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const kind=f.mime.startsWith('video/')?'video':f.mime.startsWith('image/')?'image':null;
         if(!kind)throw new Error('Альбом поддерживает только фото и видео.');
         setAlbumProgress(`Загружаем ${i+1} из ${files.length}…`);
-        const path=`${id}/${ownerId}/${randomUUID()}`;
-        await uploadFile('connect-attachments',path,f,(sent,total)=>{
-          setAlbumProgress(`Загружаем ${i+1} из ${files.length}: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
-        });
-        created.push(path);
-        items.push({path,name:f.name.slice(0,240),kind});
+        const preview=await prepareChatMediaPreview(f,kind);
+        const path=`${id}/${ownerId}/${randomUUID()}${preview.suffix}`;
+        try{
+          await uploadFile('connect-attachments',path,f,(sent,total)=>{
+            setAlbumProgress(`Загружаем ${i+1} из ${files.length}: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
+          });
+          created.push(path);
+          if(preview.poster){
+            try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}
+            catch{/* Optional thumbnail. */}
+          }
+          items.push({path,name:f.name.slice(0,240),kind});
+        }finally{await discardChatMediaPreview(preview);}
       }
       const result=await db.from('messages').insert({
         conversation_id:id,sender_id:ownerId,
@@ -387,7 +484,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         reply_to:reply?.id||null,
       });
       if(result.error)throw result.error;
-      setReply(null);
+      setReply(null);nearBottom.current=true;
       await load();
       return true;
     }catch(e){
@@ -409,7 +506,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     });
   }
   async function sendPending(){
-    if(!pendingFiles.length||uploading||busy)return;
+    if(!pendingFiles.length||uploading||busy||peer.is_blocked)return;
     const files=[...pendingFiles];
     const media=files.filter(f=>f.mime.startsWith('image/')||f.mime.startsWith('video/'));
     const documents=files.filter(f=>!f.mime.startsWith('image/')&&!f.mime.startsWith('video/'));
@@ -433,7 +530,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         const permission=await ImagePicker.requestCameraPermissionsAsync();
         if(!permission.granted){setNotice('Нужен доступ к камере');return;}
         const result=await ImagePicker.launchCameraAsync({mediaTypes:['images','videos'],quality:0.92});
-        if(!result.canceled)for(const a of result.assets){await sendAttachment({uri:a.uri,name:a.fileName||`camera-${Date.now()}.jpg`,mime:a.mimeType||'image/jpeg',size:a.fileSize});}
+        if(!result.canceled)queueAttachments(result.assets.map(a=>({uri:a.uri,name:a.fileName||`camera-${Date.now()}.${a.type==='video'?'mp4':'jpg'}`,mime:a.mimeType||(a.type==='video'?'video/mp4':'image/jpeg'),size:a.fileSize})));
       }else{
         const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsMultipleSelection:true,quality:0.92});
         if(!result.canceled){
@@ -501,7 +598,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     finally{recordingTransition.current=false;}
   }
   async function toggleRecord(){
-    if(uploading||recordingTransition.current)return;
+    if(uploading||busy||recordingTransition.current||(!recorderState.isRecording&&peer.is_blocked))return;
     recordingTransition.current=true;
     try{
       if(recorderState.isRecording){
@@ -534,38 +631,81 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       const [user_a,user_b]=[ownerId,profile.id].sort();
       const cr=await db.from('conversations').upsert({user_a,user_b},{onConflict:'user_a,user_b'}).select('id').single();
       if(cr.error||!cr.data)throw cr.error||new Error('Не удалось создать чат');
+      const destinationId=cr.data.id;
+      let count=0;
       for(const m of forwardItems){
         const author=profiles.find(p=>p.id===m.sender_id)?.display_name||'Пользователь';
         const original=forwardMeta(m.body||'');
-        let path:string|null=null;
-        if(m.attachment_path){
-          path=`${cr.data.id}/${ownerId}/${randomUUID()}`;
-          const copied=await db.storage.from('connect-attachments').copy(m.attachment_path,path);
-          if(copied.error)throw copied.error;
+        const copiedPaths:string[]=[];
+        const bucket=db.storage.from('connect-attachments');
+        const copy=async(source:string,size?:number|null,mime?:string|null,name='forwarded.bin')=>{
+          const dimensions=source.match(/__(?:img|vid)_\d{1,5}x\d{1,5}$/)?.[0]||'';
+          const path=`${destinationId}/${ownerId}/${randomUUID()}${dimensions}`;
+          const result=await bucket.copy(source,path);
+          if(result.error){
+            // Some installations allow signed reads and INSERT but forbid
+            // server-side copy. Match the PWA's bounded 6 MiB retry path.
+            if(!size||size>6*1024*1024||!FileSystem.cacheDirectory)throw new Error('Не удалось скопировать вложение: '+result.error.message);
+            const url=await signedObject('connect-attachments',source);
+            if(!url)throw new Error('Не удалось прочитать пересылаемое вложение');
+            const uri=FileSystem.cacheDirectory+`connect-forward-${randomUUID()}`;
+            try{
+              const download=await FileSystem.downloadAsync(url,uri);
+              const actual=new File(uri).size;
+              if(download.status!==200||actual<=0||actual>6*1024*1024)throw new Error('Размер скачанного вложения недопустим');
+              await uploadFile('connect-attachments',path,{uri,name,mime:mime||'application/octet-stream',size:actual});
+            }finally{await FileSystem.deleteAsync(uri,{idempotent:true}).catch(()=>{});}
+          }
+          copiedPaths.push(path);
+          if(/__vid_\d{1,5}x\d{1,5}$/.test(source)){
+            try{
+              const poster=await bucket.copy(source+'__poster.jpg',path+'__poster.jpg');
+              if(!poster.error)copiedPaths.push(path+'__poster.jpg');
+            }catch{/* A missing optional poster must not block forwarding. */}
+          }
+          return path;
+        };
+        try{
+          const path=m.attachment_path?await copy(m.attachment_path,m.attachment_size,m.attachment_type,m.attachment_name||'forwarded.bin'):null;
+          // Storage authorizes by conversation path. The recipient of a
+          // forwarded album cannot read objects owned by the original chat.
+          const album=parseAlbumReference(original.text);
+          let text=original.text;
+          if(album){
+            const items=[];
+            for(const item of album)items.push({...item,path:await copy(item.path)});
+            text='[[connect-album:'+JSON.stringify(items)+']]';
+          }
+          const row=await db.from('messages').insert({conversation_id:destinationId,sender_id:ownerId,
+            body:`${FORWARD_PREFIX}${encodeURIComponent((original.from||author).slice(0,60))}]]\n${text}`,
+            attachment_path:path,attachment_name:path?m.attachment_name:null,attachment_type:path?m.attachment_type:null,
+            attachment_kind:path?m.attachment_kind:null,attachment_size:path?m.attachment_size:null});
+          if(row.error)throw row.error;
+          count++;
+          // Retry only the unsent remainder after a partial forwarding failure.
+          setForwardItems(items=>items.filter(item=>item.id!==m.id));
+        }catch(e){
+          if(copiedPaths.length)await bucket.remove(copiedPaths);
+          throw e;
         }
-        const row=await db.from('messages').insert({conversation_id:cr.data.id,sender_id:ownerId,
-          body:`${FORWARD_PREFIX}${encodeURIComponent(original.from||author)}]]\n${original.text}`,
-          attachment_path:path,attachment_name:path?m.attachment_name:null,attachment_type:path?m.attachment_type:null,
-          attachment_kind:path?m.attachment_kind:null,attachment_size:path?m.attachment_size:null});
-        if(row.error){if(path)await db.storage.from('connect-attachments').remove([path]);throw row.error;}
       }
-      setForwardItems([]);setSelected([]);setSelectionMode(false);setNotice('Переслано: '+forwardItems.length);
+      setForwardItems([]);setSelected([]);setSelectionMode(false);setNotice('Переслано: '+count);
     }catch(e){setNotice('Не удалось переслать: '+(e instanceof Error?e.message:String(e)));}
     finally{setForwardBusy(false);}
   }
   const menuStyle={backgroundColor:colors.surface,borderRadius:17,padding:12,marginHorizontal:20,maxHeight:'80%' as const};
   return <KeyboardAvoidingView style={{flex:1,backgroundColor:'transparent'}} behavior={Platform.OS==='ios'?'padding':undefined}>
     {!!wallpaperUri&&<Image pointerEvents="none" source={{uri:wallpaperUri}} resizeMode="cover" style={{position:'absolute',top:0,bottom:0,left:0,right:0,width:'100%',height:'100%',opacity:.66}}/>}
-    <View style={{flexDirection:'row',alignItems:'center',gap:5,padding:7,marginHorizontal:8,marginTop:5,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),borderRadius:23,backgroundColor:glassColor(colors.surface,.84)}}>
+    <ConnectNativeGlassPanel colors={colors} style={{flexDirection:'row',alignItems:'center',gap:5,padding:7,marginHorizontal:8,marginTop:5,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),borderRadius:23,backgroundColor:glassColor(colors.surface,.84)}}>
       <Btn name="chevron-back" label="Назад" colors={colors} onPress={onBack}/>
       <Pressable style={{flexDirection:'row',alignItems:'center',gap:8,flex:1,minWidth:0}} onPress={onOpenProfile}>
         <ChatAvatar name={peer.display_name} url={avatarUrl} colors={colors}/>
         <View style={{flex:1,minWidth:0}}><Text numberOfLines={1} style={{color:textColor,fontSize:17,fontWeight:'700'}}>{peer.display_name}</Text>
           <Text style={{fontSize:11,color:colors.muted}}>{peerRecording?'Записывает голосовое…':peerTyping?'Печатает…':peer.online_until&&Date.parse(peer.online_until)>Date.now()?'В сети':'Не в сети'}</Text></View>
       </Pressable>
-      <Btn name="call-outline" label="Аудиозвонок" colors={colors} onPress={onCall}/>
+      <Btn name="call-outline" label="Аудиозвонок" colors={colors} onPress={onCall} disabled={peer.is_blocked}/>
       <Btn name="ellipsis-vertical" label="Действия в чате" colors={colors} onPress={()=>setToolsOpen(true)}/>
-    </View>
+    </ConnectNativeGlassPanel>
     <Modal visible={toolsOpen} transparent animationType="fade" onRequestClose={()=>setToolsOpen(false)}>
       <View style={{flex:1,justifyContent:'center',backgroundColor:'#020914bb'}}>
         <Pressable style={{position:'absolute',top:0,bottom:0,left:0,right:0}} onPress={()=>setToolsOpen(false)}/>
@@ -585,16 +725,24 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Btn name="chevron-down" label="Следующее совпадение" colors={colors} disabled={!searchMatches.length} onPress={()=>findInChat(1)}/>
       <Btn name="close" label="Закрыть поиск" colors={colors} onPress={()=>{setSearchOpen(false);setQuery('');}}/>
     </View>}
-    {selectionMode&&<View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingHorizontal:12,backgroundColor:colors.surface}}>
+    {selectionMode&&<ConnectNativeGlassPanel colors={colors} style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingHorizontal:12,backgroundColor:colors.surface}}>
       <Text style={{color:textColor}}>Выбрано: {selected.length}</Text>
       <Btn name="arrow-redo-outline" label="Переслать" colors={colors} disabled={!selected.length} onPress={()=>setForwardItems(selectedMessages)}/>
       <Btn name="trash-outline" label="Удалить у себя" colors={colors} disabled={!selected.length} onPress={()=>void hideLocally(selectedMessages)}/>
       <Btn name="trash-bin-outline" label="Удалить у всех" colors={colors} disabled={!selected.length||selectedMessages.some(m=>m.sender_id!==ownerId)} onPress={()=>confirmDelete(selectedMessages)}/>
       <Btn name="close" label="Отмена" colors={colors} onPress={()=>{setSelectionMode(false);setSelected([]);}}/>
-    </View>}
+    </ConnectNativeGlassPanel>}
     <FlatList key={id} ref={listRef} data={shown} keyExtractor={m=>m.id}
       onViewableItemsChanged={onViewableMessages} viewabilityConfig={videoViewConfig}
-      onScrollToIndexFailed={info=>listRef.current?.scrollToOffset({offset:Math.max(0,info.averageItemLength*info.index),animated:true})}
+      onScrollToIndexFailed={info=>{
+        listRef.current?.scrollToOffset({offset:Math.max(0,info.averageItemLength*info.index),animated:false});
+        if(positionRetry.current)clearTimeout(positionRetry.current);
+        const target=shown[info.index]?.id;
+        positionRetry.current=setTimeout(()=>{
+          const index=shownRef.current.findIndex(item=>item.id===target);
+          if(index>=0)listRef.current?.scrollToIndex({index,animated:false,viewPosition:.15});
+        },160);
+      }}
       contentContainerStyle={{padding:14,gap:7,paddingBottom:18}}
       scrollEventThrottle={120}
       onScroll={e=>{
@@ -603,7 +751,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         nearBottom.current=bottom;
         setShowJump(!bottom && contentSize.height>layoutMeasurement.height+130);
       }}
-      onContentSizeChange={()=>{if(nearBottom.current)listRef.current?.scrollToEnd({animated:false});}}
+      onContentSizeChange={()=>{if(!positioned.current)positionAtEntry();else if(nearBottom.current)listRef.current?.scrollToEnd({animated:false});}}
       renderItem={({item,index})=>{
         const own=item.sender_id===ownerId;
         const f=forwardMeta(item.body||'');
@@ -618,6 +766,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
           original.attachment_name||forwardMeta(original.body||'').text||'Вложение';
         return <View>
           {dayBreak&&<View style={{alignItems:'center',marginVertical:10}}><Text style={{fontSize:11,color:colors.muted,backgroundColor:glassColor(colors.surface,.85),paddingHorizontal:14,paddingVertical:6,borderRadius:13}}>{dayLabel(item.created_at)}</Text></View>}
+          {item.id===firstUnreadId&&<View style={{alignItems:'center',marginVertical:8}}><Text style={{fontSize:12,color:colors.accent,backgroundColor:glassColor(colors.surface,.9),paddingHorizontal:14,paddingVertical:6,borderRadius:13}}>Непрочитанные сообщения</Text></View>}
           <Pressable onLongPress={()=>action(item)} onPress={()=>{if(selectionMode)action(item);}}
           onTouchStart={e=>{const t=e.nativeEvent.touches[0];if(t)swipeStart.current={id:item.id,x:t.pageX,y:t.pageY};}}
           onTouchEnd={e=>{const start=swipeStart.current;swipeStart.current=null;if(!start||start.id!==item.id||selectionMode)return;
@@ -630,12 +779,14 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
           borderWidth:isSelected||activeSearchId===item.id?2:standalone?0:1,borderColor:isSelected||activeSearchId===item.id?colors.accent:own?glassColor(colors.accent,.32):glassColor(colors.text,.15),backgroundColor:standalone?'transparent':own?glassColor(colors.elevated,.84):glassColor(colors.surface,.82)}}>
           {Boolean(f.from)&&!item.deleted_at&&<Text style={{fontSize:11,color:colors.accent,marginBottom:4}}>Переслано от {f.from}</Text>}
           {item.deleted_at?<Text style={{color:mutedColor,fontStyle:'italic'}}>Сообщение удалено</Text>:<>
-            {item.reply_to&&<View style={{borderLeftWidth:3,borderLeftColor:colors.accent,paddingLeft:8,marginBottom:6}}>
+            {item.reply_to&&<Pressable accessibilityRole="button" accessibilityLabel="Перейти к исходному сообщению"
+              onPress={()=>{const index=shown.findIndex(m=>m.id===item.reply_to);if(index>=0){nearBottom.current=false;listRef.current?.scrollToIndex({index,animated:true,viewPosition:.3});}else setNotice('Исходное сообщение за пределами загруженной истории');}}
+              style={{borderLeftWidth:3,borderLeftColor:colors.accent,paddingLeft:8,marginBottom:6}}>
               <Text style={{fontSize:11,color:colors.accent,fontWeight:'700'}}>{original?.sender_id===ownerId?'Вы':peer.display_name}</Text>
               <Text numberOfLines={2} style={{fontSize:12,color:colors.muted}}>{quoteText}</Text>
-            </View>}
-            {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={visibleMessageIds.includes(item.id)}/>}
-            {album?<ConnectNativeAlbum items={album} colors={colors}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
+            </Pressable>}
+            {item.attachment_path&&<ConnectNativeAttachment message={item} colors={colors} videoAutoPlay={!mediaViewer&&visibleMessageIds.includes(item.id)} onOpenMedia={setMediaViewer}/>}
+            {album?<ConnectNativeAlbum items={album} colors={colors} onOpenMedia={setMediaViewer}/>:sticker?<ConnectNativeStickerBubble body={f.text} colors={colors}/>:
               Boolean(f.text)&&<Text style={{fontSize:15,color:textColor}}>{f.text.startsWith('[[')?'Формат сообщения ещё не поддерживается':highlightedText(f.text)}</Text>}
           </>}
           <View style={{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:4,marginTop:5}}>
@@ -657,19 +808,20 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       <Text numberOfLines={1} style={{flex:1,color:colors.accent,fontSize:12}}>{edit?'Редактирование':`Ответ: ${reply?.body||reply?.attachment_name||'вложение'}`}</Text>
       <Btn name="close" colors={colors} label="Отмена" onPress={()=>{setReply(null);setEdit(null);setDraft('');}}/>
     </View>}
+    {peer.is_blocked&&<Text style={{color:colors.muted,textAlign:'center',padding:9}}>Этот аккаунт заблокирован. История переписки доступна для просмотра.</Text>}
     {stickerPickerOpen&&<ConnectNativeStickerPicker colors={colors} ownerId={ownerId} busy={busy||uploading} enabledPacks={enabledPacks}
       onClose={()=>setStickerPickerOpen(false)} onEmoji={emoji=>setDraft(text=>text+emoji)} onSend={sendSticker}/>}
-    <View style={{flexDirection:'row',alignItems:'center',padding:7,marginHorizontal:8,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),backgroundColor:glassColor(colors.surface,.86),borderRadius:24,gap:2}}>
-      <Btn name="happy-outline" colors={colors} label="Стикеры и эмодзи" disabled={uploading||recorderState.isRecording}
+    <ConnectNativeGlassPanel colors={colors} style={{flexDirection:'row',alignItems:'center',padding:7,marginHorizontal:8,marginBottom:8,borderWidth:1,borderColor:glassColor(colors.text,.17),backgroundColor:glassColor(colors.surface,.86),borderRadius:24,gap:2}}>
+      <Btn name="happy-outline" colors={colors} label="Стикеры и эмодзи" disabled={peer.is_blocked||uploading||recorderState.isRecording}
         onPress={()=>{Keyboard.dismiss();setStickerPickerOpen(open=>!open);}}/>
-      <Btn name="attach-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={uploading||busy}/>
-      <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={uploading||busy||recorderState.isRecording}/>
+      <Btn name="attach-outline" colors={colors} label="Прикрепить" onPress={showAttachmentMenu} disabled={peer.is_blocked||uploading||busy||recorderState.isRecording||!!edit}/>
+      <Btn name="radio-button-on-outline" colors={colors} label="Записать видеокружок" onPress={()=>setVideoNoteOpen(true)} disabled={peer.is_blocked||uploading||busy||recorderState.isRecording||!!edit}/>
       <TextInput multiline maxLength={10000} placeholder={uploading?'Отправка файла…':'Сообщение'} placeholderTextColor={mutedColor}
-        value={draft} onChangeText={setDraft} style={{backgroundColor:glassColor(colors.bg,.30),color:textColor,borderRadius:18,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
-      {!recorderState.isRecording&&Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={busy} onPress={()=>void submit()}/>
+        value={draft} onChangeText={setDraft} editable={!peer.is_blocked} style={{backgroundColor:glassColor(colors.bg,.30),color:textColor,borderRadius:18,paddingHorizontal:12,paddingVertical:10,fontSize:15,maxHeight:110,flex:1}}/>
+      {!recorderState.isRecording&&Boolean(draft.trim())?<Btn name="send" colors={colors} label="Отправить" disabled={peer.is_blocked||busy||uploading} onPress={()=>void submit()}/>
       :<Btn name={recorderState.isRecording?'stop-circle':'mic-outline'} colors={colors}
-        label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} onPress={()=>void toggleRecord()}/>}
-    </View>
+        label={recorderState.isRecording?'Остановить и отправить запись':'Записать голосовое'} disabled={peer.is_blocked||busy||uploading||!!edit} onPress={()=>void toggleRecord()}/>}
+    </ConnectNativeGlassPanel>
     {pendingFiles.length>0&&<View style={{marginHorizontal:10,marginBottom:7,padding:10,borderRadius:15,backgroundColor:glassColor(colors.surface,.93),borderWidth:1,borderColor:colors.line}}>
       <Text style={{color:colors.text,fontSize:13,fontWeight:'700',marginBottom:8}}>Выбрано файлов: {pendingFiles.length}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always">
@@ -687,7 +839,7 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
       </ScrollView>
       <View style={{flexDirection:'row',justifyContent:'space-between',marginTop:7}}>
         <Btn name="close-circle-outline" label="Отменить выбор" colors={colors} disabled={uploading} onPress={()=>setPendingFiles([])}/>
-        <Pressable accessibilityRole="button" accessibilityLabel="Отправить выбранные вложения" disabled={uploading||busy}
+        <Pressable accessibilityRole="button" accessibilityLabel="Отправить выбранные вложения" disabled={peer.is_blocked||uploading||busy}
           onPress={()=>void sendPending()} style={{padding:10,borderRadius:12,backgroundColor:colors.accent,opacity:uploading?0.5:1}}>
           <Text style={{color:colors.bg,fontSize:13,fontWeight:'800'}}>Отправить выбранное</Text>
         </Pressable>
@@ -706,6 +858,10 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
     {Boolean(notice)&&<Pressable onPress={()=>setNotice('')} style={{padding:10,backgroundColor:colors.elevated}}><Text style={{color:colors.danger}}>{notice} ×</Text></Pressable>}
     <ConnectNativeVideoNote visible={videoNoteOpen} colors={colors} onClose={()=>setVideoNoteOpen(false)}
       onSend={file=>sendAttachment(file,'video')}/>
+    {mediaViewer&&<ConnectNativeMediaViewer url={viewerSource?.path===mediaViewer.path?viewerSource.url:null}
+      kind={mediaViewer.kind==='video'?'videos':'photos'} title={mediaViewer.name} colors={colors}
+      onClose={()=>setMediaViewer(null)} count={gallery.length} index={Math.max(0,galleryIndex)}
+      onPrevious={()=>moveGallery(-1)} onNext={()=>moveGallery(1)}/>}
     <Modal visible={Boolean(actionMessage)} onRequestClose={()=>setActionMessage(null)} animationType="fade" transparent>
       <Pressable onPress={()=>setActionMessage(null)} style={{flex:1,justifyContent:'center',backgroundColor:'#020914bb'}}>
         <View style={menuStyle}>
@@ -726,14 +882,14 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         </View>
       </Pressable>
     </Modal>
-    <Modal visible={forwardItems.length>0} onRequestClose={()=>setForwardItems([])} transparent animationType="slide">
+    <Modal visible={forwardItems.length>0} onRequestClose={()=>{if(!forwardBusy)setForwardItems([]);}} transparent animationType="slide">
       <View style={{flex:1,justifyContent:'flex-end',backgroundColor:'#020914bb'}}>
         <View style={{...menuStyle,marginHorizontal:0,borderBottomLeftRadius:0,borderBottomRightRadius:0,paddingBottom:30}}>
           <Text style={{fontSize:19,fontWeight:'700',color:textColor,marginBottom:12}}>Переслать кому?</Text>
           <ScrollView style={{maxHeight:320}}>
             {profiles.filter(x=>x.id!==ownerId&&!x.is_blocked).map(p=><LabelButton key={p.id} colors={colors} title={p.display_name} onPress={()=>void forwardTo(p)}/>)}
           </ScrollView>
-          <LabelButton title={forwardBusy?'Отправляем…':'Отмена'} colors={colors} onPress={()=>setForwardItems([])}/>
+          <LabelButton title={forwardBusy?'Отправляем…':'Отмена'} colors={colors} onPress={()=>{if(!forwardBusy)setForwardItems([]);}}/>
         </View>
       </View>
     </Modal>

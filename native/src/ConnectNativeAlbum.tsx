@@ -1,9 +1,8 @@
 /** PWA-compatible mixed photo/video album: one message, up to 20 media files. */
 import React,{useEffect,useState} from 'react';
 import {ActivityIndicator,Image,Pressable,Text,View} from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import {signedObject} from './nativeMediaUtils';
-import {ConnectNativeMediaViewer} from './ConnectNativeMedia';
+import {ConnectNativeMediaViewer,ConnectNativeVideoThumbnail} from './ConnectNativeMedia';
 import type {Palette} from './theme';
 
 export type AlbumItem={path:string;name:string;kind:'image'|'video'};
@@ -23,7 +22,7 @@ export function parseAlbumReference(body:string):AlbumItem[]|null{
   }catch{return null;}
 }
 
-export default function ConnectNativeAlbum({items,colors}:{items:AlbumItem[];colors:Palette}){
+export default function ConnectNativeAlbum({items,colors,onOpenMedia}:{items:AlbumItem[];colors:Palette;onOpenMedia?:(item:AlbumItem)=>void}){
   const [urls,setUrls]=useState<Record<string,string>>({});
   const [selected,setSelected]=useState<number|null>(null);
   const key=items.map(x=>x.path).join('|');
@@ -54,13 +53,10 @@ export default function ConnectNativeAlbum({items,colors}:{items:AlbumItem[];col
         const url=urls[item.path];
         const resolved=Object.prototype.hasOwnProperty.call(urls,item.path);
         return <Pressable key={`${item.path}-${index}`} accessibilityRole="button" accessibilityLabel={`Открыть ${item.kind==='video'?'видео':'фото'} ${index+1} из ${items.length}`}
-          onPress={()=>setSelected(index)} disabled={!url}
+          onPress={()=>{if(onOpenMedia)onOpenMedia(item);else setSelected(index);}} disabled={!url}
           style={{width:121,height:116,overflow:'hidden',borderRadius:12,backgroundColor:colors.elevated,borderWidth:1,borderColor:colors.line,alignItems:'center',justifyContent:'center'}}>
           {!resolved?<ActivityIndicator color={colors.accent}/>:!url?<Text style={{color:colors.muted,fontSize:11}}>Недоступно</Text>:item.kind==='image'?<Image source={{uri:url}} resizeMode="cover" style={{width:'100%',height:'100%'}}/>:
-            <View style={{alignItems:'center',justifyContent:'center',flex:1,gap:5}}>
-              <Ionicons name="play-circle-outline" size={33} color={colors.accent}/>
-              <Text style={{color:colors.text,fontSize:11}}>Видео</Text>
-            </View>}
+            <ConnectNativeVideoThumbnail uri={url} path={item.path} colors={colors}/>}
           {items.length>1&&<View style={{position:'absolute',top:5,left:5,backgroundColor:'#041325bb',paddingHorizontal:5,borderRadius:5}}>
             <Text style={{color:'#fff',fontSize:10}}>{index+1}</Text>
           </View>}

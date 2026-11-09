@@ -6,9 +6,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import {File} from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
-import {useAudioPlayer, useAudioPlayerStatus, useAudioSampleListener, requestRecordingPermissionsAsync} from 'expo-audio';
+import {useAudioPlayer, useAudioPlayerStatus} from 'expo-audio';
 import {useVideoPlayer, VideoView} from 'expo-video';
 import {db} from './backend';
+import {getAudioWaveform} from './nativeWaveform';
 import {ConnectNativeMusicLibrary} from './ConnectNativeMusic';
 import ConnectNativeAvatarCropper,{type AvatarSource,type CroppedAvatar} from './ConnectNativeAvatarCropper';
 import {DIRECT_UPLOAD_LIMIT, fileExtension, listMedia, nameForStorage, signedObject, uploadFile, type ListedMedia, type LocalUpload, type MediaKind} from './nativeMediaUtils';
@@ -30,6 +31,7 @@ const audioClock=(value:number)=>{
   const n=Math.max(0,Math.floor(Number.isFinite(value)?value:0));
   return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;
 };
+const activeVoicePlayers=new Set<{pause:()=>void}>();
 function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
   const player=useAudioPlayer(uri,{updateInterval:250});
   const state=useAudioPlayerStatus(player);
@@ -39,28 +41,21 @@ function AudioClip({uri,colors}:{uri:string;colors:Palette}) {
   const duration=Math.max(0,state.duration||0);
   const position=Math.max(0,Math.min(duration,state.currentTime||0));
   const fraction=duration>0?position/duration:0;
-  const durationRef=useRef(duration);durationRef.current=duration;
-  // Android Expo exposes actual decoded PCM frames during playback; unlike
-  // PWA Web Audio this does not pre-decode the entire track before playing.
-  useAudioSampleListener(player,sample=>{
-    const frames=sample.channels?.[0]?.frames;
-    if(!frames?.length||durationRef.current<=0)return;
-    const length=Math.min(frames.length,2048);
-    const stride=Math.max(1,Math.floor(length/96));
-    let peak=0;
-    for(let i=0;i<length;i+=stride)peak=Math.max(peak,Math.abs(frames[i]||0));
-    const bucket=Math.max(0,Math.min(42,Math.floor(sample.timestamp/durationRef.current*43)));
-    const amplitude=Math.max(.14,Math.min(1,Math.pow(peak,.65)));
-    setBars(previous=>{
-      if(amplitude<=previous[bucket])return previous;
-      const next=[...previous];next[bucket]=amplitude;return next;
+  useEffect(()=>{
+    activeVoicePlayers.add(player);
+    return()=>{activeVoicePlayers.delete(player);};
+  },[player]);
+  useEffect(()=>{
+    let alive=true;
+    setBars(Array(43).fill(.14));
+    void getAudioWaveform(uri).then(values=>{if(alive)setBars(values);}).catch(()=>{
+      // Unsupported codec / old development build: listening remains available.
     });
-  });
+    return()=>{alive=false;};
+  },[uri]);
   async function togglePlayer(){
     if(state.playing){player.pause();return;}
-    // Audio visualization may need RECORD_AUDIO permission on Android. Never
-    // prevent listening when the user does not grant this optional permission.
-    try{await requestRecordingPermissionsAsync();}catch{/* playback continues */}
+    for(const other of activeVoicePlayers)if(other!==player)other.pause();
     player.play();
   }
   return <View style={{width:260,maxWidth:'100%',gap:4}}>
@@ -128,6 +123,90 @@ function VideoClip({uri}:{uri:string}) {
   return <VideoView player={player} style={{width:'100%',height:310,backgroundColor:'#000',borderRadius:14}} nativeControls contentFit="contain"/>;
 }
 
+/** PWA videos loop silently while visible; sound and full-screen are separate controls. */
+export function ConnectNativeInlineVideo({uri,path,colors,active,onOpen}:{uri:string;path:string;colors:Palette;active:boolean;onOpen:()=>void}){
+  const player=useVideoPlayer(uri,instance=>{instance.loop=true;instance.muted=true;});
+  const [foreground,setForeground]=useState(AppState.currentState==='active');
+  const [muted,setMuted]=useState(true);
+  const [failed,setFailed]=useState(false);
+  const [poster,setPoster]=useState<string|null>(null);
+  const [firstFrame,setFirstFrame]=useState(false);
+  const dimensions=/__vid_(\d{1,5})x(\d{1,5})$/.exec(path);
+  const [ratio,setRatio]=useState(dimensions?Number(dimensions[1])/Math.max(1,Number(dimensions[2])):4/3);
+  const height=Math.max(110,Math.min(330,230/Math.max(.1,ratio)));
+  useEffect(()=>{
+    let alive=true;setPoster(null);setFirstFrame(false);
+    if(/__vid_\d{1,5}x\d{1,5}$/.test(path))void signedObject('connect-attachments',path+'__poster.jpg')
+      .then(url=>{if(alive)setPoster(url);}).catch(()=>{});
+    return()=>{alive=false;};
+  },[path]);
+  useEffect(()=>{
+    const state=AppState.addEventListener('change',value=>setForeground(value==='active'));
+    const status=player.addListener('statusChange',event=>setFailed(event.status==='error'));
+    const source=player.addListener('sourceLoad',event=>{
+      const size=event.availableVideoTracks[0]?.size;
+      if(size&&size.width>0&&size.height>0)setRatio(size.width/size.height);
+    });
+    return()=>{state.remove();status.remove();source.remove();};
+  },[player]);
+  useEffect(()=>{
+    if(active&&foreground)player.play();
+    else{player.pause();player.muted=true;setMuted(true);}
+    return()=>{player.pause();};
+  },[active,foreground,player]);
+  return <View style={{width:230,height,borderRadius:13,overflow:'hidden',backgroundColor:'#081421'}}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Открыть видео на весь экран" onPress={onOpen} style={{flex:1}}>
+      <VideoView player={player} nativeControls={false} contentFit="contain" surfaceType="textureView" onFirstFrameRender={()=>setFirstFrame(true)} style={{width:'100%',height:'100%'}}/>
+      {poster&&!firstFrame&&<Image pointerEvents="none" source={{uri:poster}} resizeMode="contain" onError={()=>setPoster(null)} style={{position:'absolute',left:0,right:0,top:0,bottom:0,width:'100%',height:'100%'}}/>}
+      {failed&&<Text style={{position:'absolute',top:15,left:15,color:'#fff'}}>Видео недоступно</Text>}
+    </Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={muted?'Включить звук видео':'Выключить звук видео'}
+      onPress={()=>{const next=!muted;player.muted=next;setMuted(next);if(!next&&active&&foreground)player.play();}}
+      style={{position:'absolute',right:7,bottom:7,padding:8,borderRadius:20,backgroundColor:colors.surface}}>
+      <Ionicons name={muted?'volume-mute':'volume-high'} color={colors.accent} size={20}/>
+    </Pressable>
+  </View>;
+}
+
+/** A paused decoded frame for a photo/video album, with no autoplay or audio. */
+function DecodedVideoThumbnail({uri,colors}:{uri:string;colors:Palette}){
+  const player=useVideoPlayer(uri,instance=>{instance.muted=true;instance.loop=false;});
+  const [failed,setFailed]=useState(false);
+  useEffect(()=>{
+    const load=player.addListener('sourceLoad',event=>{
+      player.currentTime=Math.min(.2,Math.max(0,event.duration-.01));
+      player.pause();
+    });
+    const status=player.addListener('statusChange',event=>setFailed(event.status==='error'));
+    return()=>{load.remove();status.remove();};
+  },[player]);
+  return <View pointerEvents="none" style={{width:'100%',height:'100%'}}>
+    {!failed&&<VideoView player={player} nativeControls={false} contentFit="cover" surfaceType="textureView" style={{width:'100%',height:'100%'}}/>}
+    <View style={{position:'absolute',left:0,right:0,top:0,bottom:0,alignItems:'center',justifyContent:'center'}}>
+      <Ionicons name="play-circle" size={34} color={failed?colors.accent:'#fff'}/>
+    </View>
+  </View>;
+}
+
+export function ConnectNativeVideoThumbnail({uri,path,colors}:{uri:string;path?:string;colors:Palette}){
+  const [poster,setPoster]=useState<string|null>(null);
+  const [resolved,setResolved]=useState(!path||!/__vid_\d{1,5}x\d{1,5}$/.test(path));
+  useEffect(()=>{
+    let alive=true;setPoster(null);
+    if(!path||!/__vid_\d{1,5}x\d{1,5}$/.test(path)){setResolved(true);return;}
+    setResolved(false);
+    void signedObject('connect-attachments',path+'__poster.jpg').then(url=>{if(alive)setPoster(url);})
+      .catch(()=>{}).finally(()=>{if(alive)setResolved(true);});
+    return()=>{alive=false;};
+  },[path]);
+  if(!resolved)return <ActivityIndicator color={colors.accent}/>;
+  if(!poster)return <DecodedVideoThumbnail uri={uri} colors={colors}/>;
+  return <View pointerEvents="none" style={{width:'100%',height:'100%'}}>
+    <Image source={{uri:poster}} resizeMode="cover" onError={()=>setPoster(null)} style={{width:'100%',height:'100%'}}/>
+    <View style={{position:'absolute',left:0,right:0,top:0,bottom:0,alignItems:'center',justifyContent:'center'}}><Ionicons name="play-circle" size={34} color="#fff"/></View>
+  </View>;
+}
+
 /** Circular playable video note, matching the PWA's filename contract. */
 function VideoNoteBubble({uri,colors,active}:{uri:string;colors:Palette;active:boolean}) {
   const player=useVideoPlayer(uri,instance=>{instance.loop=true;});
@@ -136,17 +215,19 @@ function VideoNoteBubble({uri,colors,active}:{uri:string;colors:Palette;active:b
   const [duration,setDuration]=useState(0);
   const [foreground,setForeground]=useState(AppState.currentState==='active');
   const [manualPause,setManualPause]=useState(false);
+  const soundMuted=useRef(true);
   useEffect(()=>{
     const sub=AppState.addEventListener('change',value=>setForeground(value==='active'));
     return()=>sub.remove();
   },[]);
   useEffect(()=>{
-    if(active&&foreground&&!manualPause){
-      // PWA behavior: entering viewport restarts the muted loop.
-      player.muted=true;setMuted(true);
+    if(!active||!foreground){
+      player.pause();player.muted=true;soundMuted.current=true;setMuted(true);setPlaying(false);
+      if(!active)setManualPause(false);
+    }else if(!manualPause){
+      player.muted=soundMuted.current;setMuted(soundMuted.current);
       player.play();setPlaying(true);
     }else{player.pause();setPlaying(false);}
-    if(!active)setManualPause(false);
     return()=>{player.pause();};
   },[active,foreground,manualPause,player]);
   useEffect(()=>{
@@ -164,7 +245,7 @@ function VideoNoteBubble({uri,colors,active}:{uri:string;colors:Palette;active:b
     </Pressable>
     {duration>0&&<Text style={{position:'absolute',bottom:0,left:8,fontSize:11,color:colors.text,backgroundColor:colors.surface,paddingHorizontal:7,paddingVertical:4,borderRadius:8}}>{audioClock(duration)}</Text>}
     <Pressable accessibilityRole="button" accessibilityLabel={muted?'Включить звук видеокружка':'Выключить звук видеокружка'}
-      onPress={()=>{const next=!muted;player.muted=next;setMuted(next);}}
+      onPress={()=>{const next=!muted;soundMuted.current=next;player.muted=next;setMuted(next);if(!next&&active&&foreground){setManualPause(false);player.play();setPlaying(true);}}}
       style={{position:'absolute',right:2,bottom:0,borderRadius:17,padding:8,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.line}}>
       <Ionicons name={muted?'volume-mute':'volume-high'} size={19} color={colors.accent}/>
     </Pressable>
@@ -172,7 +253,7 @@ function VideoNoteBubble({uri,colors,active}:{uri:string;colors:Palette;active:b
 }
 
 export function ConnectNativeMediaViewer({url,kind,title,onClose,colors,onPrevious,onNext,count,index}:{
-  url:string;kind:'photos'|'videos';title:string;onClose:()=>void;colors:Palette;onPrevious?:()=>void;onNext?:()=>void;count?:number;index?:number;
+  url:string|null;kind:'photos'|'videos';title:string;onClose:()=>void;colors:Palette;onPrevious?:()=>void;onNext?:()=>void;count?:number;index?:number;
 }) {
   const finger=useRef<{x:number;y:number}|null>(null);
   return <Modal animationType="fade" presentationStyle="fullScreen" visible transparent={false} onRequestClose={onClose}>
@@ -189,17 +270,20 @@ export function ConnectNativeMediaViewer({url,kind,title,onClose,colors,onPrevio
           const dx=t.pageX-finger.current.x,dy=t.pageY-finger.current.y;finger.current=null;
           if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.4){if(dx<0)onNext?.();else onPrevious?.();}
         }}>
-        {kind==='photos'?<Image source={{uri:url}} resizeMode="contain" style={{width:'100%',height:'85%'}}/>:<VideoClip key={url} uri={url}/>}
+        {!url?<ActivityIndicator accessibilityLabel="Загрузка медиа" color="#fff"/>:kind==='photos'?<Image key={url} source={{uri:url}} resizeMode="contain" style={{width:'100%',height:'85%'}}/>:<VideoClip key={url} uri={url}/>}
       </View>
       {Boolean(count && count>1)&&<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:14}}>
         <IconButton name="chevron-back-circle" label="Предыдущий файл" onPress={()=>onPrevious?.()} colors={colors}/>
         <Text style={{color:'#fff'}}>{(index||0)+1} / {count}</Text>
         <IconButton name="chevron-forward-circle" label="Следующий файл" onPress={()=>onNext?.()} colors={colors}/>
       </View>}
+      {url&&<View style={{alignItems:'center',paddingTop:8}}><SaveAttachment url={url} name={title}
+        mime={({png:'image/png',webp:'image/webp',gif:'image/gif',jpg:'image/jpeg',jpeg:'image/jpeg',mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime'} as Record<string,string>)[fileExtension(title)]||'application/octet-stream'} colors={colors}/></View>}
     </View>
   </Modal>;
 }
-export function ConnectNativeAttachment({message,colors,videoAutoPlay=false}:{message:Message;colors:Palette;videoAutoPlay?:boolean}) {
+export type ConnectNativeGalleryItem={path:string;name:string;kind:'image'|'video'};
+export function ConnectNativeAttachment({message,colors,videoAutoPlay=false,onOpenMedia}:{message:Message;colors:Palette;videoAutoPlay?:boolean;onOpenMedia?:(item:ConnectNativeGalleryItem)=>void}) {
   const [url,setUrl]=useState<string|null>(null);
   const [view,setView]=useState(false);
   useEffect(()=>{
@@ -211,16 +295,19 @@ export function ConnectNativeAttachment({message,colors,videoAutoPlay=false}:{me
   if(!message.attachment_path)return null;
   const k=message.attachment_kind;
   const name=message.attachment_name||'Вложение';
+  const open=(kind:'image'|'video')=>{
+    if(onOpenMedia)onOpenMedia({path:message.attachment_path!,name,kind});
+    else setView(true);
+  };
   if(!url)return <Text style={{color:colors.muted}}>Загружаем вложение…</Text>;
   if(k==='image'&&/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(name))
     return <Image source={{uri:url}} resizeMode="contain" style={{width:150,height:150}} accessibilityLabel="Стикер из клавиатуры"/>;
-  if(k==='image')return <><Pressable accessibilityRole="button" accessibilityLabel={`Открыть фото ${name}`} onPress={()=>setView(true)}>
+  if(k==='image')return <><Pressable accessibilityRole="button" accessibilityLabel={`Открыть фото ${name}`} onPress={()=>open('image')}>
       <AttachmentImage url={url}/>
     </Pressable><SaveAttachment url={url} name={name} mime={message.attachment_type||'image/jpeg'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="photos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
   if(k==='video'&&/^connect-video-note-\d+\.(?:mp4|webm)$/i.test(name))return <View><VideoNoteBubble uri={url} colors={colors} active={videoAutoPlay}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/></View>;
-  if(k==='video')return <><IconButton name="play-circle" label={`Открыть видео ${name}`} colors={colors} onPress={()=>setView(true)}/>
-    <Text numberOfLines={2} style={{color:colors.text}}>{name}</Text>
+  if(k==='video')return <><ConnectNativeInlineVideo uri={url} path={message.attachment_path} colors={colors} active={videoAutoPlay&&!view} onOpen={()=>open('video')}/>
     <SaveAttachment url={url} name={name} mime={message.attachment_type||'video/mp4'} colors={colors}/>
     {view&&<ConnectNativeMediaViewer url={url} kind="videos" title={name} onClose={()=>setView(false)} colors={colors}/>}</>;
   if(k==='audio'||(message.attachment_type||'').startsWith('audio/'))return <View style={{maxWidth:255}}><Text numberOfLines={1} style={{color:colors.text}}>{name}</Text><AudioClip uri={url} colors={colors}/><SaveAttachment url={url} name={name} mime={message.attachment_type||'audio/mpeg'} colors={colors}/></View>;
@@ -345,7 +432,7 @@ export default function ConnectNativeMedia({ownerId,kind,owner,onBack,colors,onA
           </View>)}
         </View>:items.map((item,i)=><View key={item.path} style={[style.card,style.row]}>
           <Pressable onPress={()=>setSelected(i)} style={{flex:1,flexDirection:'row',alignItems:'center',gap:11}} accessibilityRole="button">
-            <Ionicons name="videocam-outline" size={25} color={colors.accent}/>
+            <View style={{width:88,height:66,borderRadius:9,overflow:'hidden',backgroundColor:colors.elevated}}><ConnectNativeVideoThumbnail uri={item.url} colors={colors}/></View>
             <View style={{flex:1}}><Text style={style.text} numberOfLines={2}>{item.name}</Text>
               <Text style={style.muted}>{item.size?`${(item.size/1024/1024).toFixed(1)} МБ`:label}</Text></View>
           </Pressable>

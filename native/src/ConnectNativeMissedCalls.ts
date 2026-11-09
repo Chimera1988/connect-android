@@ -44,7 +44,7 @@ export function useConnectNativeMissedCalls(userId:string,open:boolean){
     const generation=++mounted.current;
     setCount(0);setLastViewed(0);lastViewedRef.current=0;
     if(!userId)return;
-    void SecureStore.getItemAsync('connect-native-last-viewed-calls:'+userId).then(value=>{
+    void SecureStore.getItemAsync('connect-native-last-viewed-calls-'+userId).then(value=>{
       if(mounted.current!==generation)return;
       const parsed=Number(value||0);
       lastViewedRef.current=Number.isFinite(parsed)&&parsed>0?parsed:0;
@@ -63,7 +63,7 @@ export function useConnectNativeMissedCalls(userId:string,open:boolean){
   const markViewed=useCallback(async()=>{
     if(!userId)return;
     const at=Date.now();lastViewedRef.current=at;setLastViewed(at);setCount(0);
-    try{await SecureStore.setItemAsync('connect-native-last-viewed-calls:'+userId,String(at));}catch{/* badge still resets in memory */}
+    try{await SecureStore.setItemAsync('connect-native-last-viewed-calls-'+userId,String(at));}catch{/* badge still resets in memory */}
   },[userId]);
   useEffect(()=>{if(open&&userId)void markViewed();},[open,userId,markViewed]);
   return {count,lastViewed,markViewed};

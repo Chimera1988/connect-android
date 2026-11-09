@@ -1,3 +1,5 @@
+> Актуальная сверка с PWA и оставшиеся различия: [PWA_PARITY_REVIEW.md](PWA_PARITY_REVIEW.md). Исторические этапы ниже не являются результатами приёмки текущей версии.
+
 # Connect Native
 
 Native Android client built with Expo SDK 58 / React Native 0.88; no WebView. Uses existing Connect Messenger accounts, Supabase data and Connect HTTPS proxy.

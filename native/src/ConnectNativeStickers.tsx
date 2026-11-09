@@ -43,8 +43,11 @@ const validBuiltIn=(key:string)=>{
   const [pack,id]=key.split(':');
   return Boolean(packs.some(p=>p.id===pack)&&moods.some(m=>m.id===id));
 };
-const favoriteKey=(id:string)=>`connect-native-sticker-favorites-v1:${id}`;
-const recentKey=(id:string)=>`connect-native-sticker-recent-v1:${id}`;
+const favoriteKey=(id:string)=>`connect-native-sticker-favorites-v1.${id}`;
+const recentKey=(id:string)=>`connect-native-sticker-recent-v1.${id}`;
+export async function resetNativeStickerPreferences(ownerId:string):Promise<void>{
+  await Promise.all([SecureStore.deleteItemAsync(favoriteKey(ownerId)),SecureStore.deleteItemAsync(recentKey(ownerId))]);
+}
 
 
 export function parseStickerReference(value:string):StickerReference|null {

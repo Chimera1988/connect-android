@@ -4,6 +4,7 @@ import {ActivityIndicator,Alert,AppState,FlatList,Image,Modal,Pressable,ScrollVi
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {db,type Call,type Profile} from './backend';
 import type {Palette} from './theme';
+import ConnectNativeGlassPanel from './ConnectNativeGlassPanel';
 
 const CALL_COLUMNS='id,conversation_id,caller_id,callee_id,status,created_at,answered_at,ended_at';
 type JournalSetting={owner_id:string;cleared_before:string|null;hidden_ids:string[]};
@@ -174,7 +175,7 @@ export default function ConnectNativeCalls({ownerId,profiles,avatars,colors,onDi
         const missed=isMissed(item,ownerId);
         const checked=selected.includes(item.id);
         const active=item.status==='ringing'||item.status==='active';
-        return <View style={{backgroundColor:colors.surface,borderBottomWidth:1,borderColor:colors.line,padding:12,flexDirection:'row',alignItems:'center',gap:10}}>
+        return <ConnectNativeGlassPanel colors={colors} style={{borderBottomWidth:1,borderColor:colors.line,padding:12,flexDirection:'row',alignItems:'center',gap:10}}>
           {selectionMode&&<Pressable onPress={()=>setSelected(x=>checked?x.filter(id=>id!==item.id):[...x,item.id])} accessibilityRole="checkbox" accessibilityState={{checked}}>
             <Ionicons name={checked?'checkbox':'square-outline'} color={colors.accent} size={24}/></Pressable>}
           <Avatar name={name} url={avatars[peerId]} colors={colors} size={46}/>
@@ -186,7 +187,7 @@ export default function ConnectNativeCalls({ownerId,profiles,avatars,colors,onDi
           <View style={{alignItems:'flex-end',gap:4}}><Text style={{color:colors.muted,fontSize:10}}>{dateOf(item.created_at)}</Text><Text style={{color:colors.muted,fontSize:11}}>{timeOf(item.created_at)}</Text></View>
           {!selectionMode&&<IconButton icon="call-outline" label={`Позвонить: ${name}`} colors={colors} disabled={!peer||active||busy}
             onPress={()=>{if(peer)void startAudio(peer,item.conversation_id);}}/>}
-        </View>;
+        </ConnectNativeGlassPanel>;
       }}/>}
     <Modal transparent animationType="slide" visible={pickerOpen} onRequestClose={()=>setPickerOpen(false)}>
       <View style={{flex:1,justifyContent:'flex-end',backgroundColor:'#020814bb'}}>

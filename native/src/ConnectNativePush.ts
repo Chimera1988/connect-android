@@ -11,7 +11,7 @@ const DEVICE_ACTIVE_KEY='connect-native-fcm-authorized-v1';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MESSAGES='connect-native-messages-v1';
 const CALLS='connect-native-calls-v1';
-const READ_KEY='connect-native-read-marker-v1:';
+const READ_KEY='connect-native-read-marker-v1-';
 // connect-native-push-pref-phase9: preserve the same user-facing settings as PWA.
 const NOTIFICATION_KEY='connect-native-notifications-v1';
 const LAST_RECEIVED_KEY='connect-native-fcm-last-message-v1';
@@ -53,12 +53,19 @@ function deliverOpen(raw:Record<string,unknown>|undefined){
 async function ensureChannels(){
   await Promise.all([getConnectSoundChannel('messages'),getConnectSoundChannel('calls')]);
 }
+const pendingReadWrites=new Map<string,Promise<void>>();
 /** A local read marker stops delayed FCM messages from resurrecting read alerts. */
 export async function rememberReadAt(conversationId:string,iso:string){
   if(!UUID.test(conversationId)||!Number.isFinite(Date.parse(iso)))return;
   const key=READ_KEY+conversationId;
-  const old=await SecureStore.getItemAsync(key);
-  if(!old||Date.parse(iso)>Date.parse(old))await SecureStore.setItemAsync(key,iso);
+  // Foreground reads and FCM read receipts can overlap. Serialize per chat so
+  // a slower older write cannot replace a newer high-water mark.
+  const write=(pendingReadWrites.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{
+    const old=await SecureStore.getItemAsync(key);
+    if(!old||Date.parse(iso)>Date.parse(old))await SecureStore.setItemAsync(key,iso);
+  });
+  pendingReadWrites.set(key,write);
+  try{await write;}finally{if(pendingReadWrites.get(key)===write)pendingReadWrites.delete(key);}
 }
 /** Handles the data-only FCM payloads already sent by the Connect server. */
 export async function handleNativePush(data:Data|undefined){
@@ -68,12 +75,7 @@ export async function handleNativePush(data:Data|undefined){
   if(data.kind==='read'){
     if(data.conversationId&&UUID.test(data.conversationId)){
       if(data.readAt)await rememberReadAt(data.conversationId,data.readAt);
-      // Older read receipts must not hide a notification for a newer message.
-      const shown=await notifee.getDisplayedNotifications().catch(()=>[]);
-      const later=shown.some(item=>item.notification?.id==='chat:'+data.conversationId &&
-        data.readAt && item.notification?.data?.createdAt &&
-        Date.parse(String(item.notification.data.createdAt))>Date.parse(data.readAt));
-      if(!later)await dismissChatPush(data.conversationId);
+      if(data.readAt)await dismissChatPush(data.conversationId,data.readAt);
     }
     return;
   }
@@ -167,14 +169,23 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
   };
 }
 
-export async function dismissChatPush(conversationId:string){
+export async function dismissChatPush(conversationId:string,readAt?:string){
   if(!UUID.test(conversationId))return;
-  await notifee.cancelNotification('chat:'+conversationId);
-  // Clean any duplicates or grouped children left by older builds.
+  const boundary=readAt?Date.parse(readAt):null;
+  if(boundary!==null&&!Number.isFinite(boundary))return;
   const displayed=await notifee.getDisplayedNotifications().catch(()=>[]);
-  await Promise.all(displayed.filter(item=>item.notification?.data?.conversationId===conversationId &&
-    typeof item.notification?.id==='string').map(item=>notifee.cancelNotification(item.notification!.id!)));
+  await Promise.all(displayed.filter(item=>{
+    const notification=item.notification;
+    if(!notification||notification.data?.conversationId!==conversationId||typeof notification.id!=='string')return false;
+    // Incoming-call notifications carry conversationId too; reading messages
+    // must never cancel a call alert in the same conversation.
+    if(notification.id!=='chat:'+conversationId&&notification.data.kind!=='message'&&notification.data.kind!=='chat')return false;
+    if(boundary===null)return true;
+    const createdAt=Date.parse(String(notification.data.createdAt||''));
+    return Number.isFinite(createdAt)&&createdAt<=boundary;
+  }).map(item=>notifee.cancelNotification(item.notification!.id!)));
 }
+
 
 /** Explicit diagnostic: checks Android system permission, re-registers FCM,
  * then creates a safe local notification to validate OS display / sound channel.

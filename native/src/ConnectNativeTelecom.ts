@@ -98,6 +98,18 @@ async function ensureCallChannel(){
 
 export async function showIncomingSystemCall(callId:string,callerName:string,conversationId:string|null){
   if(!UUID.test(callId)||Platform.OS!=='android')return;
+  // FCM can arrive after the caller hung up or after an account switch.
+  // Check the same authoritative row as the foreground/PWA controller before
+  // waking the lock screen or letting Telecom present a stale incoming call.
+  try{
+    const {data:{session}}=await db.auth.getSession();
+    if(!session)return;
+    const {data,error}=await db.from('connect_calls').select('callee_id,status,created_at')
+      .eq('id',callId).eq('callee_id',session.user.id).maybeSingle();
+    const createdAt=data?Date.parse(data.created_at):NaN;
+    if(error||!data||data.status!=='ringing'||!Number.isFinite(createdAt)||
+      Date.now()-createdAt>=60000||createdAt>Date.now()+10000)return;
+  }catch{return;}
   const available=await setup();
   if(available&&!openCalls.has(callId)){
     try{
@@ -144,6 +156,10 @@ export async function endSystemCall(callId:string){
     setTimeout(()=>ignoredEnd.delete(callId),3500);
   }
   await notifee.cancelNotification('call:'+callId).catch(()=>{});
+  try{
+    const pending=await SecureStore.getItemAsync(PENDING);
+    if(pending&&JSON.parse(pending).callId===callId)await SecureStore.deleteItemAsync(PENDING);
+  }catch{/* No pending action to clear. */}
 }
 
 /** Handles Notifee ACTION_PRESS even if the app is running as a headless task. */

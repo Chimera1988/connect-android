@@ -1,6 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import * as SecureStore from 'expo-secure-store';
 import {palettes,themeNames,type Palette,type ThemeName} from './theme';
+import {sceneBackground} from './ConnectNativeScene';
 
 export const BUILTIN_PACKS=[
   {id:'speed',name:'Соник',emoji:'⚡'},
@@ -31,9 +32,9 @@ function normalize(value:unknown):NativeAppearance{
 }
 function paletteFor(p:NativeAppearance):Palette{
   const base=palettes[p.scene];
-  if(p.mode==='dark')return {...base,accent:p.accent};
+  if(p.mode==='dark')return {...base,bg:sceneBackground(p.scene,p.accent,false),accent:p.accent};
   return {
-    bg:'#edf3f8',surface:'#f7fafd',elevated:'#dfeaf5',accent:p.accent,
+    bg:sceneBackground(p.scene,p.accent,true),surface:'#f7fafd',elevated:'#dfeaf5',accent:p.accent,
     text:'#17283b',muted:'#61788f',line:'#b9cad8',danger:'#b9324c',
   };
 }
