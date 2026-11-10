@@ -1,0 +1,11 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript'),{performance}=require('node:perf_hooks');
+const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),resolve:value=>resolve(value)}};
+test('Android permission background/resume records instead of reporting a false cancellation',async()=>{
+ const permission=deferred(),requested=deferred(),listeners=new Set();let handle,started=0,stopped=0;const ref={current:null};
+ const react={forwardRef:fn=>fn,useRef:value=>({current:value}),useState:value=>[value,()=>{}],useCallback:fn=>fn,useImperativeHandle:(_ref,create)=>{handle=create()},useEffect:fn=>{fn()}};
+ const app={currentState:'active',addEventListener:(_event,fn)=>{listeners.add(fn);return {remove:()=>listeners.delete(fn)}}};
+ const recorder={uri:'file://voice.m4a',getStatus:()=>({durationMillis:1500,metering:-20}),prepareToRecordAsync:async()=>{},record:()=>started++,stop:async()=>stopped++};
+ const mocks={'react':{__esModule:true,default:react,...react},'react-native':{AppState:app,StyleSheet:{create:v=>v}},'react-native-safe-area-context':{},'expo-audio':{useAudioRecorder:()=>recorder,RecordingPresets:{HIGH_QUALITY:{}},AudioModule:{requestRecordingPermissionsAsync:()=>{requested.resolve();return permission.promise}},setAudioModeAsync:async()=>{}},'expo-camera':{},'expo-file-system':{File:class{size=4096;exists=true;delete(){}}},'expo-video':{}};
+ const api={};const source=fs.readFileSync(require.resolve('../src/ConnectHybridRecorder.tsx'),'utf8');vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,{exports:api,require:name=>mocks[name],console,performance,setInterval,clearInterval,setTimeout,clearTimeout,Promise});
+ api.default({},ref);const start=handle.startVoice();await requested.promise;app.currentState='background';for(const fn of listeners)fn('background');permission.resolve({granted:true});await new Promise(r=>setImmediate(r));app.currentState='active';for(const fn of [...listeners])fn('active');await start;assert.equal(started,1);const file=await handle.stopVoice(true);assert.equal(file.durationMs,1500);assert.equal(file.mimeType,'audio/mp4');assert.equal(stopped,1);
+});

@@ -1,16 +1,23 @@
 import 'react-native-url-polyfill/auto';
+import {NativeModules} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const PUBLIC_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://tpwkmoxxzjfdsqsomhhr.supabase.co';
+export const PUBLIC_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa';
 const CONNECT_URL = (process.env.EXPO_PUBLIC_CONNECT_URL || 'https://connect-chat.duckdns.org').replace(/\/$/, '');
 
 /** All browser session data stays on the device, inside Android encrypted storage. */
+const nativeAuth=NativeModules.ConnectCallCoordinator;
 const sessionStore = {
-  getItem: (key: string) => SecureStore.getItemAsync(key),
-  setItem: (key: string, value: string) => SecureStore.setItemAsync(key, value),
-  removeItem: (key: string) => SecureStore.deleteItemAsync(key),
+  async getItem(key:string){
+    if(nativeAuth){try{const value=await nativeAuth.getAuth(key);if(value!==null)return value;}catch{/* Migrate the existing encrypted Expo session if necessary. */}}
+    const old=await SecureStore.getItemAsync(key);
+    if(old!==null&&nativeAuth)await nativeAuth.setAuth(key,old);
+    return old;
+  },
+  async setItem(key:string,value:string){if(nativeAuth)await nativeAuth.setAuth(key,value);else await SecureStore.setItemAsync(key,value);},
+  async removeItem(key:string){if(nativeAuth)await nativeAuth.removeAuth(key);await SecureStore.deleteItemAsync(key);},
 };
 
 /** Keep the same REST proxy used by the working Connect PWA for restricted networks.
@@ -28,7 +35,7 @@ export const db = createClient(SUPABASE_URL || 'https://placeholder.supabase.co'
   auth: {
     storage: sessionStore,
     persistSession: true,
-    autoRefreshToken: true,
+    autoRefreshToken: false,
     detectSessionInUrl: false,
   },
   global: { fetch: connectFetch },

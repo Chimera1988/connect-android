@@ -1,12 +1,14 @@
 /** Connect Android native FCM transport. No WebView or Supabase service-role secrets. */
 import {getMessaging,getToken,onMessage,onTokenRefresh,setBackgroundMessageHandler} from '@react-native-firebase/messaging';
 import notifee, {AndroidCategory, AndroidImportance, AndroidVisibility, EventType} from '@notifee/react-native';
+import {AppState} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
 import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
 import {getConnectSoundChannel} from './ConnectNativeSoundSettings';
 
 const API=(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'');
+const OPEN_KEY='connect-native-push-open-v1';
 const DEVICE_ACTIVE_KEY='connect-native-fcm-authorized-v1';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MESSAGES='connect-native-messages-v1';
@@ -54,6 +56,7 @@ async function ensureChannels(){
   await Promise.all([getConnectSoundChannel('messages'),getConnectSoundChannel('calls')]);
 }
 const pendingReadWrites=new Map<string,Promise<void>>();
+const pendingAlerts=new Map<string,Promise<void>>();
 /** A local read marker stops delayed FCM messages from resurrecting read alerts. */
 export async function rememberReadAt(conversationId:string,iso:string){
   if(!UUID.test(conversationId)||!Number.isFinite(Date.parse(iso)))return;
@@ -84,26 +87,39 @@ export async function handleNativePush(data:Data|undefined){
     return;
   }
   if(await SecureStore.getItemAsync(DEVICE_ACTIVE_KEY)!=='yes')return;
-  const prefs=await notificationPrefs();
-  if(!prefs.enabled)return;
   if(data.kind==='incoming-call'&&data.callId&&UUID.test(data.callId)){
     await ensureChannels();
     await showIncomingSystemCall(data.callId,data.callerName||'Собеседник',data.conversationId||null);
     return;
   }
+  const prefs=await notificationPrefs();
+  if(!prefs.enabled)return;
   if((data.kind==='message'||data.kind==='chat'||(!data.kind && data.messageId))&&data.conversationId&&UUID.test(data.conversationId)){
-    if(data.conversationId===visibleConversation)return;
-    const lastRead=await SecureStore.getItemAsync(READ_KEY+data.conversationId);
-    if(data.createdAt&&lastRead&&Number.isFinite(Date.parse(data.createdAt))&&
-      Date.parse(data.createdAt)<=Date.parse(lastRead))return;
-    const channelId=await getConnectSoundChannel('messages',{silent:prefs.sound==='silent',vibrate:prefs.vibrate,tone:prefs.sound});
-    await notifee.displayNotification({
-      id:'chat:'+data.conversationId,
-      title:'Connect · Новое сообщение',body:'Откройте переписку, чтобы прочитать сообщение',
-      data:{kind:'message',conversationId:data.conversationId,createdAt:data.createdAt||''},
-      android:{channelId,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
-        visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true},
+    const conversationId=data.conversationId;
+    // FCM delivery may be reordered or concurrent. Keep the newest unread
+    // alert, otherwise a delayed old push can replace it and then be removed by
+    // an old read receipt, hiding a newer unread message.
+    const update=(pendingAlerts.get(conversationId)||Promise.resolve()).catch(()=>{}).then(async()=>{
+      if(conversationId===visibleConversation)return;
+      const lastRead=await SecureStore.getItemAsync(READ_KEY+conversationId);
+      const created=Date.parse(data.createdAt||'');
+      if(lastRead&&Number.isFinite(created)&&created<=Date.parse(lastRead))return;
+      const current=(await notifee.getDisplayedNotifications()).find(item=>item.notification.id==='chat:'+conversationId)?.notification;
+      const currentData=current?.data;
+      const currentTime=typeof currentData?.createdAt==='string'?Date.parse(currentData.createdAt):NaN;
+      if(Number.isFinite(created)&&Number.isFinite(currentTime)&&created<currentTime)return;
+      if(data.messageId&&currentData?.messageId===data.messageId)return;
+      const channelId=await getConnectSoundChannel('messages',{silent:prefs.sound==='silent',vibrate:prefs.vibrate,tone:prefs.sound});
+      await notifee.displayNotification({
+        id:'chat:'+conversationId,
+        title:'Connect · Новое сообщение',body:'Откройте переписку, чтобы прочитать сообщение',
+        data:{kind:'message',conversationId,createdAt:data.createdAt||'',messageId:data.messageId||''},
+        android:{channelId,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
+          visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true},
+      });
     });
+    pendingAlerts.set(conversationId,update);
+    try{await update;}finally{if(pendingAlerts.get(conversationId)===update)pendingAlerts.delete(conversationId);}
   }
 }
 
@@ -111,23 +127,37 @@ export async function handleNativePush(data:Data|undefined){
 export function installNativePushBackgroundHandlers(){
   setBackgroundMessageHandler(getMessaging(), async message=>{await handleNativePush(normalizeFcmData(message.data)||undefined);});
   notifee.onBackgroundEvent(async ({type,detail})=>{
-    if(type===EventType.ACTION_PRESS)
+    if(type===EventType.ACTION_PRESS&&detail.pressAction?.id?.startsWith('connect-'))
       await handleCallNotificationAction(detail.pressAction?.id,detail.notification?.data);
+    else if(type===EventType.PRESS||type===EventType.ACTION_PRESS){const destination=route(detail.notification?.data);if(destination){await SecureStore.setItemAsync(OPEN_KEY,JSON.stringify({raw:detail.notification?.data,time:Date.now()}));deliverOpen(detail.notification?.data);}}
   });
 }
 async function sendRegistration(endpoint:string, method:'POST'|'DELETE',expectedUser:string){
   const {data:{session}}=await db.auth.getSession();
-  if(!session||session.user.id!==expectedUser)return;
+  if(!session||session.user.id!==expectedUser){
+    if(method==='POST')throw Error('Аккаунт изменился. Подключите уведомления повторно.');
+    return;
+  }
   const res=await fetch(API+'/api/push/register',{
     method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
     body:JSON.stringify(method==='POST'?{platform:'android',endpoint}:{endpoint}),
   });
   if(!res.ok)throw Error('Сервер Connect отклонил регистрацию уведомлений (HTTP '+res.status+')');
 }
+export async function registerNativePushNow(ownerId:string){
+  const permission=await notifee.requestPermission();
+  if(permission.authorizationStatus===0)throw Error('Разрешите уведомления Connect в Android');
+  const token=await getToken(getMessaging());if(!token)throw Error('Firebase не выдал токен устройства.');
+  await sendRegistration(token,'POST',ownerId);
+  await SecureStore.setItemAsync(DEVICE_ACTIVE_KEY,'yes');
+}
 /** Register a signed-in user with the existing Connect push_devices server API. */
 export function subscribeNativePush(ownerId:string,open:(route:NativePushDestination)=>void,onError:(error:string)=>void):()=>void{
   let alive=true;
   onOpen=open;
+  const drainOpen=async()=>{try{const raw=await SecureStore.getItemAsync(OPEN_KEY);if(!raw||!alive)return;await SecureStore.deleteItemAsync(OPEN_KEY);const saved=JSON.parse(raw);if(Date.now()-saved.time<120000)deliverOpen(saved.raw);}catch{}};
+  const resumes=AppState.addEventListener('change',state=>{if(state==='active')void drainOpen();});
+  void drainOpen();
   if(bufferedOpen){open(bufferedOpen);bufferedOpen=null;}
   const foreground=onMessage(getMessaging(), async message=>{try{await handleNativePush(normalizeFcmData(message.data)||undefined);}catch(e){console.warn('Connect native notification:',e);}});
   const presses=notifee.onForegroundEvent(({type,detail})=>{
@@ -164,13 +194,14 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
     }catch(e){if(alive)onError('Ошибка регистрации уведомлений: '+String(e));}
   })();
   return ()=>{
-    alive=false;foreground();presses();tokenRefresh();
+    alive=false;foreground();presses();tokenRefresh();resumes.remove();
     if(onOpen===open)onOpen=null;
   };
 }
 
 export async function dismissChatPush(conversationId:string,readAt?:string){
   if(!UUID.test(conversationId))return;
+  await pendingAlerts.get(conversationId)?.catch(()=>{});
   const boundary=readAt?Date.parse(readAt):null;
   if(boundary!==null&&!Number.isFinite(boundary))return;
   const displayed=await notifee.getDisplayedNotifications().catch(()=>[]);

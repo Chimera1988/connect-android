@@ -1,0 +1,76 @@
+/* Connect PWA: reference SVG icon set, 2026-11. Do not change handlers. */
+.connect-app .bottom-nav .nav-tab {
+  min-height: 54px !important;
+  gap: 3px !important;
+  padding: 4px 3px !important;
+  border-radius: 19px;
+}
+.connect-app .bottom-nav .nav-tab .nav-symbol {
+  width: 34px !important;
+  height: 31px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.connect-app .bottom-nav .nav-tab .nav-symbol svg,
+.connect-app .bottom-nav > .connect-calls-tab .nav-symbol svg {
+  width: 28px !important;
+  height: 28px !important;
+  stroke-width: 1.85;
+  overflow: visible;
+}
+.connect-app .bottom-nav .nav-tab small {
+  font-size: 11px !important;
+  font-weight: 640;
+  line-height: 1.25;
+}
+.connect-app .bottom-nav .nav-tab.selected {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, rgba(186,218,250,.15)) !important;
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--accent) 16%, rgba(24,48,86,.42)),
+    color-mix(in srgb, var(--accent) 10%, rgba(27,49,78,.36))) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent) !important;
+}
+.connect-app .chat-composer .compose-line > button.composer-extra[aria-label="Стикеры"] {
+  font-size: initial !important;
+  line-height: normal;
+}
+/* Remove the older decorative mask; the real smile SVG replaces it. */
+.connect-app .chat-composer .compose-line > button.composer-extra[aria-label="Стикеры"]::before {
+  content: none !important;
+  display: none !important;
+}
+.connect-app .chat-composer .compose-line .composer-extra {
+  width: 32px !important;
+  min-width: 30px !important;
+  height: 40px !important;
+  opacity: 1;
+  color: var(--accent2);
+}
+.connect-app .chat-composer .compose-line .composer-extra svg {
+  width: 26px !important;
+  height: 26px !important;
+  stroke-width: 1.85;
+}
+.connect-app .chat-composer .compose-line > input {
+  min-width: 0;
+}
+@media (max-width: 390px) {
+  .connect-app .bottom-nav .nav-tab .nav-symbol svg,
+  .connect-app .bottom-nav > .connect-calls-tab .nav-symbol svg {
+    width: 25px !important;
+    height: 25px !important;
+  }
+  .connect-app .chat-composer .compose-line .composer-extra {
+    width: 28px !important;
+    min-width: 27px !important;
+  }
+  .connect-app .chat-composer .compose-line .composer-extra svg {
+    width: 23px !important;
+    height: 23px !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connect-app .bottom-nav .nav-tab { transition: none !important; }
+}

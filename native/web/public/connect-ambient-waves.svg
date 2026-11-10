@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 1100" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00d8bd" stop-opacity=".04"/>
+      <stop offset=".28" stop-color="#04d7c4" stop-opacity=".83"/>
+      <stop offset=".72" stop-color="#3fbddf" stop-opacity=".70"/>
+      <stop offset="1" stop-color="#54a4f6" stop-opacity=".04"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2a8bdd" stop-opacity=".03"/>
+      <stop offset=".42" stop-color="#5b9ee9" stop-opacity=".64"/>
+      <stop offset=".8" stop-color="#88b4f4" stop-opacity=".77"/>
+      <stop offset="1" stop-color="#799de7" stop-opacity=".04"/>
+    </linearGradient>
+    <filter id="blurLarge" x="-60%" y="-150%" width="220%" height="400%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="31"/></filter>
+    <filter id="blurMid" x="-60%" y="-150%" width="220%" height="400%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="blurSmall" x="-60%" y="-150%" width="220%" height="400%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="3.5"/></filter>
+  </defs>
+  <!-- Narrow light trails, not wide opaque ribbons -->
+  <path d="M -125 885 C 60 960, 120 919, 245 827 S 397 650, 630 620" fill="none" stroke="url(#teal)" stroke-width="74" stroke-linecap="round" filter="url(#blurLarge)" opacity=".65"/>
+  <path d="M -125 885 C 60 960, 120 919, 245 827 S 397 650, 630 620" fill="none" stroke="url(#teal)" stroke-width="22" stroke-linecap="round" filter="url(#blurMid)" opacity=".6"/>
+  <path d="M -125 885 C 60 960, 120 919, 245 827 S 397 650, 630 620" fill="none" stroke="url(#teal)" stroke-width="3" stroke-linecap="round" filter="url(#blurSmall)" opacity=".34"/>
+  <path d="M 155 1240 C 300 1090, 401 1050, 489 936 S 579 826, 735 790" fill="none" stroke="url(#blue)" stroke-width="124" stroke-linecap="round" filter="url(#blurLarge)" opacity=".48"/>
+  <path d="M 155 1240 C 300 1090, 401 1050, 489 936 S 579 826, 735 790" fill="none" stroke="url(#blue)" stroke-width="38" stroke-linecap="round" filter="url(#blurMid)" opacity=".42"/>
+</svg>

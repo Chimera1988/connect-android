@@ -6,3 +6,6 @@ ios/
 .env.local
 *.keystore
 *.jks
+web/dist/
+src/generated/
+verification/browser/*.html

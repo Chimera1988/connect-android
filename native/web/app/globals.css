@@ -1,0 +1,651 @@
+:root{color-scheme:dark}*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none}body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}button,input{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.55}button:focus-visible,input:focus-visible,.bubble:focus-visible{outline:2px solid #5aa6ff;outline-offset:2px}
+.connect-app{--bg:#080b11;--panel:#20242d;--panel2:#171b24;--text:#f8f9fd;--muted:#999fac;--border:#252b37;--accent:#087dff;--accent2:#348fff;--chat-in:#232833;--nav:#0b0e15;--menu:rgba(38,43,51,.96);color:var(--text);background:var(--bg);position:fixed;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;height:100dvh;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);isolation:isolate}
+.connect-app.light{--bg:#f5f6fa;--panel:#fff;--panel2:#e9ecf2;--text:#171d29;--muted:#697483;--border:#dde2e9;--accent:#087dff;--accent2:#147fff;--chat-in:#e8ebf1;--nav:#fff;--menu:rgba(249,250,253,.97);color-scheme:light}
+@supports (-webkit-touch-callout:none){@media(max-width:600px){.connect-app{padding-top:max(50px,env(safe-area-inset-top))}}}
+.connect-app:has(.chat-view){background:var(--bg)}.main-view,.chat-view{display:flex;flex-direction:column;flex:1;min-height:0}.main-view{padding:0 16px}.main-view>header{flex-shrink:0}.scroll-content{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;min-height:0;flex:1;padding-bottom:18px;scrollbar-width:none}.scroll-content::-webkit-scrollbar,.message-scroll::-webkit-scrollbar{display:none}.icon-btn{width:42px;height:42px;display:inline-flex;align-items:center;justify-content:center;color:var(--accent2);border:0;background:transparent;border-radius:12px;flex-shrink:0;padding:0}.icon-btn:active{background:var(--panel)}
+.home-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:64px;padding:4px 1px 6px}.home-brand{display:flex;gap:12px;align-items:center;min-width:0}.home-brand img{width:43px;height:43px;border-radius:11px;object-fit:cover}.home-brand h1{font-size:29px;font-weight:730;letter-spacing:-.8px;margin:0}.new-chat{margin-right:-5px}.section-heading{display:flex;align-items:center;gap:9px;margin:7px 2px 13px}.section-heading h2{font-size:23px;letter-spacing:-.45px;margin:0;font-weight:750}.heading-count{background:var(--panel);color:var(--accent2);font-size:12px;border-radius:12px;padding:2px 7px;font-weight:700}.search-field{min-height:42px;display:flex;align-items:center;gap:8px;color:var(--muted);background:var(--panel);border-radius:13px;padding:0 13px;margin-bottom:13px}.search-field input{height:42px;border:0;outline:0;background:transparent;color:var(--text);font-size:16px;min-width:0;width:100%}.search-field input::placeholder,.compose-line input::placeholder{color:var(--muted)}
+.chat-rows{background:var(--bg)}.dialog-row{width:100%;display:flex;align-items:center;text-align:left;gap:12px;border:0;background:transparent;color:var(--text);padding:12px 3px;border-bottom:1px solid var(--border);min-height:77px}.dialog-row:active,.contact-row:active{background:var(--panel2)}.person-avatar{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;font-weight:750;color:#fff;line-height:1;text-shadow:0 1px 8px #0003;border:1px solid #ffffff15}.avatar-sm{height:34px;width:34px;font-size:16px}.avatar-md{height:49px;width:49px;font-size:23px}.avatar-lg{height:63px;width:63px;font-size:29px}.dialog-summary{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}.dialog-summary strong{font-size:16px;letter-spacing:-.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:680}.dialog-summary>span{font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dialog-meta{display:flex;flex-direction:column;gap:7px;align-items:flex-end;align-self:stretch;justify-content:center;flex:0 0 auto;color:var(--muted)}.dialog-meta time{font-size:11px}.unread-pill{display:inline-flex;min-width:20px;height:20px;padding:0 5px;align-items:center;justify-content:center;background:var(--accent);color:white;border-radius:20px;font-size:11px;font-weight:750}
+.simple-header{display:flex;align-items:center;gap:11px;min-height:77px}.simple-header h1{font-size:30px;letter-spacing:-.6px;font-weight:780;margin:0}.subtle-counter{font-size:15px;color:var(--muted);margin-top:6px}.section-caption{font-size:11px;font-weight:750;letter-spacing:.85px;color:var(--muted);margin:12px 2px 8px}.contact-rows,.settings-content{min-height:0}.contact-row{min-height:72px;width:100%;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);display:flex;gap:12px;align-items:center;text-align:left;padding:9px 2px}.contact-row>.contact-text{min-width:0;flex:1;display:flex;flex-direction:column;gap:5px}.contact-text strong{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contact-text small{font-size:12px;color:var(--muted)}.contact-row>svg{color:var(--muted)}
+.bottom-nav{z-index:4;background:var(--nav);border-top:1px solid var(--border);display:flex;align-items:stretch;justify-content:space-around;padding:7px 12px max(9px,env(safe-area-inset-bottom));min-height:65px;flex:0 0 auto}.nav-tab{border:0;background:transparent;color:var(--muted);display:flex;align-items:center;flex-direction:column;justify-content:center;gap:3px;flex:1;max-width:135px;padding:1px}.nav-tab.selected{color:var(--accent2)}.nav-tab small{font-size:10.5px;line-height:1.25}.nav-symbol{height:27px;display:flex;align-items:center;justify-content:center;position:relative}.nav-dot{width:8px;height:8px;background:#f34a5b;border:2px solid var(--nav);position:absolute;top:-1px;right:-4px;border-radius:50%}
+.empty-state{display:flex;align-items:center;flex-direction:column;gap:10px;text-align:center;color:var(--muted);padding:78px 25px}.empty-state>svg{color:var(--accent2)}.empty-state strong{color:var(--text);font-size:16px;margin-top:6px}.empty-state span{font-size:13px;line-height:1.5;max-width:255px}
+.chat-header{display:flex;align-items:center;gap:9px;padding:7px 14px 11px 8px;min-height:65px;background:var(--nav);border-bottom:1px solid var(--border);flex:0 0 auto}.chat-header .back-btn{width:34px;margin-right:1px}.chat-header .person-avatar{width:42px;height:42px;font-size:19px}.chat-header-person{display:flex;flex-direction:column;min-width:0;gap:3px}.chat-header-person strong{font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:760}.chat-header-person small{font-size:12px;color:var(--muted)}.chat-header-person small.typing-label{color:#43c982}
+.message-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none}.message-stream{display:flex;flex-direction:column;justify-content:flex-end;min-height:100%;gap:8px;padding:14px 12px 15px}.message-row{display:flex;position:relative;width:100%;align-items:flex-end}.message-row.outgoing{justify-content:flex-end}.message-row.incoming{justify-content:flex-start}.bubble{display:flex;flex-direction:column;gap:5px;position:relative;min-width:69px;max-width:82%;padding:10px 12px 8px;border-radius:17px;overflow-wrap:anywhere;white-space:pre-wrap;touch-action:pan-y;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}.bubble.sent{background:var(--accent);color:white;border-bottom-right-radius:5px}.bubble.received{background:var(--chat-in);color:var(--text);border-bottom-left-radius:5px}.bubble.removed{opacity:.72;font-style:italic}.bubble-body{font-size:15.5px;line-height:1.35;word-break:break-word}.bubble-meta{font-size:10.5px;letter-spacing:.05px;text-align:right;opacity:.67;align-self:flex-end;line-height:1.2;margin-top:1px}.quote-box{display:flex;flex-direction:column;gap:3px;padding:5px 9px;border-left:3px solid #fff9;background:#ffffff1c;border-radius:5px;max-width:100%;font-size:12px}.received .quote-box{border-left-color:var(--accent2);background:#8599bd19}.quote-box strong{font-weight:740;white-space:nowrap}.quote-box span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;opacity:.83}.swipe-reply-icon{position:absolute;left:13px;color:var(--accent2);top:50%;transform:translateY(-50%)}.empty-chat{flex:1;min-height:150px;display:flex;flex-direction:column;gap:10px;justify-content:center;align-items:center;color:var(--muted);font-size:13px}.empty-chat svg{color:var(--accent)}
+.chat-composer{background:var(--nav);border-top:1px solid var(--border);padding:8px 11px max(10px,env(safe-area-inset-bottom));flex:0 0 auto;display:flex;flex-direction:column;gap:7px}.compose-line{display:flex;align-items:center;gap:8px;min-height:44px}.compose-line input{display:block;background:var(--panel);border:1px solid transparent;color:var(--text);border-radius:24px;flex:1;width:0;min-width:0;height:44px;padding:0 15px;font-size:16px;outline:0}.compose-line input:focus{border-color:#317bd064}.send-button{height:42px;width:42px;border-radius:50%;border:0;background:var(--accent);color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0}.send-button:disabled{opacity:.4}.compose-context{background:var(--panel);border-radius:10px;display:flex;gap:9px;align-items:center;padding:7px 9px 7px 7px}.context-stripe{height:35px;width:3px;background:var(--accent2);border-radius:4px;flex-shrink:0}.compose-context-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.compose-context-text strong{font-size:12px;color:var(--accent2)}.compose-context-text span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dismiss-context{width:28px;height:32px;color:var(--muted)}
+.context-overlay{position:absolute;inset:0;z-index:1000}.context-backdrop{position:absolute;inset:0;border:0;width:100%;height:100%;padding:0;background:#0007;-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}.floating-menu{position:absolute;left:50%;transform:translateX(-50%);width:min(302px,calc(100% - 32px));background:var(--menu);-webkit-backdrop-filter:blur(26px);backdrop-filter:blur(26px);border:1px solid #ffffff16;border-radius:20px;padding:8px 6px;box-shadow:0 20px 45px #0009;display:flex;flex-direction:column;overflow:hidden}.floating-menu>button{display:flex;align-items:center;gap:16px;min-height:49px;width:100%;text-align:left;background:transparent;color:var(--text);border:0;border-radius:11px;font-size:16px;padding:8px 15px}.floating-menu>button svg{flex-shrink:0}.floating-menu>button:active{background:#ffffff14}.floating-menu>button.destructive{color:#ff5b67}.menu-separator{border-top:1px solid var(--border);margin:3px 12px}
+.settings-content{padding-top:2px}.settings-profile{display:flex;align-items:center;gap:14px;padding:15px;margin-bottom:21px;background:var(--panel);border-radius:18px}.settings-profile>div{display:flex;flex-direction:column;gap:6px;min-width:0}.settings-profile strong{font-size:17px}.settings-profile span:not(.person-avatar){font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.settings-content h3{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.7px;font-weight:680;margin:16px 4px 9px}.settings-group{background:var(--panel);border-radius:17px;padding:2px 13px}.settings-theme,.settings-static{display:flex;align-items:center;gap:12px;min-height:61px}.setting-icon{width:33px;height:33px;border-radius:10px;background:#1076e126;color:var(--accent2);display:flex;align-items:center;justify-content:center;flex-shrink:0}.settings-theme>div:not(.setting-icon),.settings-static>div:not(.setting-icon){display:flex;flex-direction:column;gap:4px;min-width:0}.settings-theme strong,.settings-static strong{font-size:14px}.settings-theme small,.settings-static small{font-size:11px;color:var(--muted)}.theme-buttons{display:flex;gap:9px;padding:0 0 12px 45px}.theme-buttons button{border:1px solid var(--border);border-radius:10px;color:var(--text);padding:9px 14px;background:var(--panel2);font-size:13px}.theme-buttons button.current{background:var(--accent);border-color:var(--accent);color:#fff}.setting-divider{height:1px;background:var(--border);margin-left:45px}.logout-button{margin:26px 0 14px;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;border:0;border-radius:14px;color:#ff6773;background:var(--panel);font-size:15px}
+.connection-error,.loading-screen,.login-screen{padding:20px;display:flex;flex:1;flex-direction:column;justify-content:center;align-items:center;gap:15px}.connection-error{text-align:center;color:var(--muted)}.connection-error h2{color:var(--text);margin:6px}.connection-error p{font-size:13px;line-height:1.6}.loading-screen>img{width:75px;height:75px;border-radius:18px}.loading-screen>p{color:var(--muted)}.login-brand{display:flex;flex-direction:column;align-items:center;gap:7px;margin-bottom:20px}.login-brand img{height:85px;width:85px;border-radius:22px}.login-brand h1{font-size:32px;margin:6px 0 0}.login-brand p{font-size:13px;color:var(--muted);margin:0}.login-form{width:min(365px,100%);padding:23px 17px;background:var(--panel);border-radius:20px;display:flex;flex-direction:column;gap:12px}.login-form h2{font-size:21px;margin:0 0 5px}.field{height:47px;background:var(--panel2);border:1px solid var(--border);outline:0;border-radius:12px;color:var(--text);padding:0 13px;font-size:16px}.primary-action{border:0;background:var(--accent);color:white;border-radius:12px;height:46px;font-weight:650}.login-hint{font-size:11px;color:var(--muted);line-height:1.45;text-align:center;margin:0}.notice-toast{position:absolute;z-index:999;top:calc(max(env(safe-area-inset-top),10px) + 8px);right:13px;max-width:calc(100% - 26px);background:#303944;color:white;border:1px solid #ffffff20;box-shadow:0 10px 25px #0006;border-radius:11px;display:flex;align-items:center;gap:10px;text-align:left;padding:10px 12px;font-size:12px;line-height:1.4}
+@media(min-width:600px){.connect-app{border-left:1px solid var(--border);border-right:1px solid var(--border)}.message-stream{padding-left:20px;padding-right:20px}.bubble{max-width:72%}}
+@media(max-width:365px){.main-view{padding:0 12px}.home-brand h1{font-size:26px}.chat-header{padding-left:4px}.bubble{max-width:86%}}
+@media(prefers-reduced-motion:no-preference){.floating-menu{animation:menu-appear .13s ease-out}@keyframes menu-appear{from{opacity:.65;transform:translateX(-50%) scale(.97)}to{opacity:1;transform:translateX(-50%) scale(1)}}}
+/* Connect 1.1 — compact, lighter iPhone interface */
+.connect-app{--panel:#1b202a;--chat-in:#202630;--border:#252b35;--menu:rgba(34,39,48,.94)}
+.connect-app.light{--panel:#fff;--chat-in:#e9edf4;--menu:rgba(251,252,255,.96)}
+.simple-header{min-height:67px}.simple-header h1{font-size:28px}.home-header{min-height:58px}.home-brand h1{font-size:26px}.home-brand img{width:36px;height:36px}.section-heading{margin:4px 2px 11px}.section-heading h2{font-size:22px}.search-field{min-height:39px;margin-bottom:10px;border-radius:12px}.search-field input{height:39px;font-size:15px}
+.dialog-row{min-height:69px;padding:9px 2px}.contact-row{min-height:66px;padding:8px 2px}.dialog-summary{gap:4px}.person-avatar{overflow:hidden}.person-avatar img{width:100%;height:100%;object-fit:cover;display:block}.avatar-md{width:46px;height:46px;font-size:21px}.avatar-lg{width:76px;height:76px;font-size:32px}
+.settings-profile{border:0;width:100%;text-align:left;color:var(--text);padding:12px 13px;margin-bottom:14px;border-radius:14px}.settings-profile>div{flex:1}.settings-profile>svg{color:var(--muted)}.settings-content h3{margin:13px 4px 8px}.settings-group{border-radius:14px}.settings-theme,.settings-static{min-height:55px}.logout-button{margin-top:18px}
+.chat-header{min-height:59px;padding:5px 12px 7px 6px}.chat-header .person-avatar{width:39px;height:39px}.chat-person-link{display:flex;align-items:center;gap:10px;min-width:0;flex:1;border:0;padding:0;background:transparent;color:var(--text);text-align:left}.chat-header-person strong{font-size:15px;font-weight:700}.chat-header-person small{font-size:11px}.message-stream{gap:6px;padding:11px 12px 12px}.bubble{border-radius:15px;padding:8px 11px 7px;gap:4px}.bubble-body{font-size:15px;line-height:1.32}.bubble-meta{font-size:10px}.chat-composer{padding:6px 10px max(7px,env(safe-area-inset-bottom));gap:5px}.compose-line{min-height:41px}.compose-line input{height:41px}.send-button{width:39px;height:39px}
+.floating-menu{width:min(282px,calc(100% - 36px));left:16px;transform:none;border-radius:17px;box-shadow:0 16px 42px #0008}.floating-menu.menu-right{left:auto;right:16px}.floating-menu>button{min-height:45px;font-size:15px;gap:13px;padding:7px 13px}.floating-menu>button svg{width:20px;height:20px}
+.profile-view{flex:1;display:flex;flex-direction:column;min-height:0}.profile-top{display:flex;align-items:center;gap:12px;min-height:57px;padding:6px 13px;border-bottom:1px solid var(--border);font-size:16px}.profile-content{overflow-y:auto;padding:18px 18px 36px;flex:1}.profile-hero{display:flex;flex-direction:column;align-items:center;text-align:center;padding:16px 10px 23px;border-bottom:1px solid var(--border)}.profile-hero .avatar-lg{width:104px;height:104px;font-size:42px}.profile-hero h2{font-size:23px;margin:15px 0 5px}.profile-hero p{font-size:13px;color:var(--muted);margin:0;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.avatar-change{display:flex;align-items:center;gap:7px;margin-top:16px;background:var(--panel);color:var(--accent2);border:1px solid var(--border);padding:9px 14px;border-radius:11px;font-size:13px}.profile-edit{display:flex;flex-direction:column;gap:15px;padding-top:22px}.profile-edit label{display:flex;flex-direction:column;gap:7px;font-size:13px;color:var(--muted)}.profile-edit input,.profile-edit textarea{width:100%;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--text);padding:12px;font:inherit;font-size:16px;outline:0}.profile-edit textarea{resize:vertical;min-height:86px}.profile-edit small{font-size:11px;color:var(--muted)}.profile-edit .primary-action{margin-top:2px}.profile-about{padding:20px 3px}.profile-about span{font-size:12px;color:var(--accent2)}.profile-about p{font-size:15px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.connect-app.keyboard-open .chat-composer{padding-bottom:6px}
+@media(prefers-reduced-motion:no-preference){.floating-menu{animation:menu-soft-in .13s ease-out}@keyframes menu-soft-in{from{opacity:.55;scale:.97}to{opacity:1;scale:1}}}
+
+/* Connect 1.2 — clean avatars and image crop editor */
+.person-avatar{border:0!important;box-shadow:none!important;filter:none!important;text-shadow:none!important}
+.person-avatar img{border:0!important;box-shadow:none!important;filter:none!important}
+.avatar-crop-overlay{position:absolute;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:12px;color:var(--text)}
+.avatar-crop-panel{width:100%;max-width:430px;display:flex;flex-direction:column;align-items:center;gap:18px}
+.avatar-crop-panel header{display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px}
+.avatar-crop-panel header strong{font-size:17px}
+.avatar-crop-panel header button{border:0;background:transparent;color:var(--accent2);font-size:15px;padding:10px 3px}
+.avatar-crop-panel p{font-size:13px;color:var(--muted);margin:0;text-align:center}
+.avatar-crop-stage{width:280px;height:280px;position:relative;overflow:hidden;touch-action:none;user-select:none;background:#141820;border-radius:10px}
+.avatar-crop-stage img{position:absolute;top:50%;left:50%;max-width:none;max-height:none;pointer-events:none;user-select:none}
+.avatar-crop-mask{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle 140px at center,transparent 99.5%,#000a 100%)}
+.avatar-crop-ring{position:absolute;inset:0;border:2px solid #ffffffa0;border-radius:50%;pointer-events:none}
+.avatar-crop-zoom{display:flex;align-items:center;gap:16px;width:280px;color:var(--text)}
+.avatar-crop-zoom input{width:100%;accent-color:var(--accent)}
+.avatar-crop-panel>small{font-size:12px;color:var(--muted);text-align:center;max-width:290px}
+.avatar-crop-panel .avatar-crop-error{color:#ff6773}
+
+/* Connect 1.3: attachments and voice */
+.composer-extra{border:0;background:transparent;color:var(--accent2);display:flex;align-items:center;justify-content:center;width:31px;height:41px;flex-shrink:0;padding:0}
+.attachment-preview{max-width:100%;display:flex;flex-direction:column;gap:6px}
+.attachment-preview img{display:block;max-width:100%;max-height:270px;border-radius:10px;object-fit:contain}
+.attachment-preview video{max-width:100%;max-height:290px;border-radius:10px;background:#000}
+.attachment-preview audio{max-width:260px;width:100%;height:42px}
+.attachment-preview>span{font-size:12px}
+.attachment-file{display:flex;align-items:center;gap:9px;min-width:160px;max-width:100%;color:inherit;text-decoration:none}
+.attachment-file>span{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere;font-size:13px}
+.attachment-file small{font-size:11px;opacity:.75;margin-top:3px}
+.recording-status{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#ff6574;font-size:13px}
+.recording-status button{border:0;background:var(--panel);border-radius:8px;color:var(--text);padding:7px 9px;font-size:12px}
+.upload-status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:9px}
+.upload-status progress{flex:1;height:5px;accent-color:var(--accent)}
+
+/* Connect 1.4 — Telegram-style real voice waveform */
+.voice-player{display:flex;align-items:center;gap:9px;min-width:225px;max-width:100%;width:250px;user-select:none;-webkit-user-select:none;touch-action:pan-y}
+.voice-player audio{display:none}.voice-play{flex:0 0 39px;width:39px;height:39px;border:0;border-radius:50%;background:#ffffff35;color:#fff;display:flex;align-items:center;justify-content:center;padding:0}
+.received .voice-play{background:var(--accent);color:white}.voice-play svg{fill:currentColor;stroke-width:1.5}
+.voice-pause-icon{height:16px;width:13px;border-left:4px solid currentColor;border-right:4px solid currentColor}
+.voice-content{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}.voice-wave{display:flex;align-items:center;gap:2px;height:29px;width:100%;cursor:pointer;touch-action:pan-y;outline-offset:3px}
+.voice-bar{display:block;flex:1;min-width:2px;max-width:5px;border-radius:3px;background:currentColor;opacity:.35;pointer-events:none}
+.voice-bar.listened{opacity:.95}.voice-bottom{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:10.5px;opacity:.88;min-height:17px}
+.voice-speed{border:0;border-radius:9px;background:#ffffff2b;color:inherit;padding:2px 6px;font-size:10px;font-weight:700;line-height:1.4}
+.received .voice-speed{background:#ffffff14}
+
+/* Connect 1.5 — day separators and delivery/read receipts */
+.message-day-group{display:flex;flex-direction:column;gap:7px}
+.date-separator{display:flex;justify-content:center;padding:12px 0 6px;pointer-events:none}
+.date-separator span{background:color-mix(in srgb,var(--panel) 91%,transparent);border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:18px;font-size:11px;font-weight:650;letter-spacing:.1px}
+.delivery-checks{display:inline-flex;align-items:center;vertical-align:middle;margin-left:4px;color:#c5d8f7}
+.delivery-checks.is-read{color:#85e4ff}
+.bubble-meta{display:flex;align-items:center;justify-content:flex-end;gap:1px}
+.bubble.received .bubble-meta{color:var(--muted)}
+
+/* Shared notifications preferences */
+.connect-notifications{display:flex;flex-direction:column;gap:14px;padding:16px;width:100%;min-width:0}.connect-notifications label{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.connect-notifications select,.connect-notifications button{font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--border, #59606d);background:var(--surface,#252b35);color:inherit;max-width:100%}.connect-notifications>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.connect-notifications p{margin:0}.connect-notifications small{opacity:.75;line-height:1.4}
+/* Connect personalization and sticker packs */
+.settings-menu{overflow:hidden}.settings-menu-row{width:100%;border:0;background:transparent;color:var(--text);display:flex;align-items:center;gap:12px;min-height:68px;padding:8px 0;text-align:left}.settings-menu-row>span:nth-child(2){flex:1;display:flex;flex-direction:column;gap:5px}.settings-menu-row strong{font-size:15px}.settings-menu-row small{font-size:12px;color:var(--muted)}.settings-menu-row>svg{color:var(--muted)}.accent-options{display:flex;flex-wrap:wrap;gap:12px;padding:18px 4px 9px}.accent-options>button,.accent-custom{width:37px;height:37px;border-radius:50%;border:2px solid transparent;display:grid;place-items:center;color:white;font-size:21px}.accent-options>button.selected{outline:2px solid var(--text);outline-offset:3px}.accent-custom{position:relative;border:1px solid var(--border);background:var(--panel2);color:var(--text);overflow:hidden}.accent-custom input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}.settings-hint{font-size:12px;line-height:1.5;color:var(--muted);margin:12px 6px}.wallpaper-settings{padding:14px}.wallpaper-preview{width:100%;max-height:200px;object-fit:cover;border-radius:12px;margin-bottom:12px}.settings-action{border:0;background:var(--accent);color:white;padding:12px 16px;border-radius:12px;font-weight:650;min-height:44px;margin:6px 4px 4px}.settings-action.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border)}.sticker-pack-setting{display:flex;align-items:center;gap:12px;min-height:70px}.sticker-pack-emoji{font-size:27px;width:42px;text-align:center}.sticker-pack-setting>span:nth-child(2){display:flex;flex-direction:column;gap:5px;flex:1}.sticker-pack-setting strong{font-size:15px}.sticker-pack-setting small{font-size:12px;color:var(--muted)}.sticker-pack-setting input{accent-color:var(--accent);width:21px;height:21px}.data-settings{padding:17px 13px;margin-bottom:14px}.data-settings>strong{font-size:16px}.data-settings>p{line-height:1.5}.message-scroll.has-wallpaper{background-size:cover;background-position:center;background-repeat:no-repeat}.message-scroll.has-wallpaper .bubble.received{background:var(--panel);opacity:.97}.sticker-bubble,.sticker-bubble.sent,.sticker-bubble.received{background:transparent!important;box-shadow:none!important;padding:0 3px 4px;min-width:0}.sticker-bubble .bubble-body{background:transparent}.sent-sticker{display:block;width:152px;height:152px;object-fit:contain}.sticker-bubble .bubble-meta{color:var(--text);background:var(--panel);padding:4px 7px;border-radius:9px;opacity:.86}.sticker-picker{height:260px;max-height:40dvh;background:var(--panel);border-top:1px solid var(--border);display:flex;flex-direction:column;min-height:0}.sticker-picker-tabs{display:flex;gap:5px;overflow-x:auto;padding:9px;scrollbar-width:none}.sticker-picker-tabs button{border:0;background:var(--panel2);border-radius:10px;color:var(--text);padding:8px 10px;white-space:nowrap;font-size:12px}.sticker-picker-tabs button.active{background:var(--accent);color:white}.sticker-grid{overflow-y:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:8px;flex:1}.sticker-choice{position:relative;min-width:0}.sticker-choice>button:first-child{background:transparent;border:0;width:100%;padding:3px}.sticker-choice img{display:block;width:100%;height:93px;object-fit:contain}.sticker-fav{position:absolute;right:0;top:0;border:0;background:var(--panel2);color:#e3a740;border-radius:50%;font-size:21px;width:30px;height:30px}.compose-line>.composer-extra:first-child{font-size:25px;font-weight:600}
+
+/* Compact bottom bars: avoid oversized blank area on phones. */
+.bottom-nav{min-height:0!important;padding:5px 10px max(5px,env(safe-area-inset-bottom))!important;align-items:center!important}
+.nav-tab{gap:2px!important;padding:2px 0!important;min-height:45px}
+.nav-symbol{height:24px!important}.nav-tab small{font-size:10px!important}
+.chat-composer{padding:5px 9px max(5px,env(safe-area-inset-bottom))!important;gap:4px!important}
+.compose-line{min-height:40px!important}.compose-line input{height:40px!important}.composer-extra{height:40px!important}.send-button{height:38px!important;width:38px!important}
+.dialog-entry{display:flex;align-items:center;min-width:0;border-bottom:1px solid var(--border)}
+.dialog-entry>.dialog-row{flex:1;min-width:0;border-bottom:0}
+.dialog-delete{width:38px;height:46px;flex:0 0 auto;display:grid;place-items:center;background:transparent;border:0;color:var(--muted);border-radius:10px}
+.dialog-delete:active,.chat-clear-btn:active{color:#ff6675;background:var(--panel)}
+
+/* iOS bottom safe-area is outside the actual navigation controls. Keep controls compact. */
+.bottom-nav{padding-bottom:5px!important;min-height:0!important}
+.chat-composer{padding-bottom:5px!important}
+.connect-app{background-color:var(--bg)}
+
+/* Context menus, chat search, selection and forwarding */
+.dialog-entry{position:relative}.dialog-row{-webkit-touch-callout:none}.list-chat-popover{position:absolute;right:8px;top:55px;z-index:30;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:6px;box-shadow:0 8px 24px #0008;display:flex;flex-direction:column;min-width:180px}.list-chat-popover button,.chat-actions-menu button{background:transparent;border:0;text-align:left;padding:13px 14px;color:var(--text);font-size:14px}.list-chat-popover button:first-child,.chat-actions-menu .destructive{color:#ff7380}.chat-header{position:relative}.chat-actions-menu{position:absolute;right:12px;top:52px;z-index:40;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:12px;min-width:210px;box-shadow:0 8px 28px #0009;padding:5px}.chat-search-bar,.selection-toolbar{display:flex;align-items:center;gap:7px;padding:8px 10px;background:var(--nav);border-bottom:1px solid var(--border);flex:0 0 auto}.chat-search-bar input{flex:1;min-width:0;border:0;background:var(--panel);color:var(--text);border-radius:8px;padding:9px;font-size:14px}.chat-search-bar button,.selection-toolbar button{border:0;background:var(--panel);color:var(--text);border-radius:7px;padding:8px;white-space:nowrap}.chat-search-bar small{color:var(--muted);font-size:11px}.selection-toolbar{overflow-x:auto;gap:5px}.selection-toolbar strong{font-size:12px;white-space:nowrap;margin-right:auto}.selection-toolbar button{font-size:12px;padding:8px 7px}.selection-toolbar button:disabled{opacity:.35}.message-row.is-selected{background:color-mix(in srgb,var(--accent) 16%,transparent);border-radius:10px}.message-select-check{width:20px;height:20px;flex-shrink:0;margin:0 9px;accent-color:var(--accent)}.chat-search-mark{background:#ffd55e;color:#161616;border-radius:2px}.forward-overlay{position:absolute;inset:0;z-index:110;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px}.forward-dialog{background:var(--panel);border:1px solid var(--border);border-radius:16px;width:min(100%,420px);max-height:75%;display:flex;flex-direction:column;padding:14px}.forward-dialog header{display:flex;justify-content:space-between;align-items:center}.forward-dialog header button{background:transparent;border:0;color:var(--text)}.forward-dialog p{color:var(--muted);font-size:13px}.forward-contacts{overflow:auto;display:flex;flex-direction:column}.forward-contacts button{display:flex;align-items:center;gap:12px;padding:12px 5px;background:transparent;color:var(--text);border:0;border-bottom:1px solid var(--border);text-align:left}.forward-contacts button span:nth-child(2){flex:1}
+
+/* Keep message action sheet inside the actual iOS viewport; allow scrolling on small screens. */
+.context-overlay{overflow:hidden}
+.floating-menu{max-height:calc(100% - 24px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+
+/* Pasted iOS keyboard stickers: not photo bubbles. */
+.bubble.sticker-bubble .keyboard-sticker-preview,.bubble.sticker-bubble .keyboard-sticker-preview a{display:block;max-width:100%;background:transparent;border:0;text-decoration:none}
+.bubble.sticker-bubble .keyboard-sticker-preview img{display:block;width:auto;height:auto;max-width:150px;max-height:150px;object-fit:contain;border-radius:0}
+.bubble.sticker-bubble .bubble-body{padding:0;background:transparent}
+
+.connect-custom-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.connect-custom-grid button{border:0;background:transparent;cursor:pointer}.connect-custom-grid img{width:100%;aspect-ratio:1;object-fit:contain}.settings-content .field{width:100%;min-width:0}
+
+/* Connect attachment sizing and full-screen preview */
+.bubble:has(.connect-media-thumb){max-width:min(82vw,340px)}
+.attachment-preview:has(.connect-media-thumb){width:min(72vw,300px);max-width:100%}
+.connect-media-thumb{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:210px;max-height:38vh;min-height:110px;padding:0;border:0;border-radius:12px;overflow:hidden;background:#141923;cursor:pointer}
+.connect-media-thumb > img,.connect-media-thumb > video{display:block;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain;border-radius:0}
+.connect-media-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;place-items:center;width:52px;height:52px;border-radius:50%;background:#0009;color:#fff;font-size:24px}
+.connect-media-overlay{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.96);display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overscroll-behavior:contain}
+.connect-media-toolbar{flex:0 0 auto;min-height:58px;display:flex;align-items:center;gap:12px;padding:8px 16px;color:white}
+.connect-media-toolbar span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.connect-media-toolbar button{background:#252b37;border:0;border-radius:10px;padding:11px 14px;color:white;font-size:14px;cursor:pointer}
+.connect-media-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:10px;overflow:hidden}
+.connect-media-stage img,.connect-media-stage video{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;touch-action:pan-x pan-y}
+.connect-audio-download{display:flex;flex-direction:column;gap:4px}.connect-audio-download>button{align-self:flex-end;border:0;border-radius:8px;padding:5px 9px;background:#273446;color:#fff}
+
+/* Compact media bubbles and edge-to-edge stickers / emoji */
+.bubble.sent:has(.connect-media-thumb),.bubble.received:has(.connect-media-thumb){padding:3px 3px 5px;gap:3px;border:1px solid color-mix(in srgb,var(--text) 17%,transparent);border-radius:15px;max-width:min(82vw,340px)}
+.bubble:has(.connect-media-thumb) .attachment-preview{width:min(72vw,300px)}
+.bubble:has(.connect-media-thumb) .bubble-meta{padding:0 5px 1px}
+.bubble.sticker-bubble,.bubble.sticker-bubble.sent,.bubble.sticker-bubble.received{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important}
+.bubble.sticker-bubble .bubble-meta{background:transparent!important;padding:2px 0!important;color:var(--text)!important}
+.connect-media-gallery{position:relative;display:flex;flex:1;min-height:0;min-width:0;align-items:stretch;touch-action:pan-y}
+.connect-media-gallery .connect-media-stage{width:100%}
+.connect-gallery-arrow{position:absolute;z-index:2;top:50%;transform:translateY(-50%);width:36px;height:52px;border:0;border-radius:12px;background:#161b25a9;color:white;font-size:35px;display:grid;place-items:center;cursor:pointer}
+.connect-gallery-arrow.prev{left:4px}.connect-gallery-arrow.next{right:4px}
+@media (pointer:coarse){.connect-gallery-arrow{opacity:.45;width:25px;font-size:27px}}
+
+
+/* Connect media: consistent compact cards; full-size originals remain in the viewer. */
+.bubble.sent:has(.connect-media-thumb):not(.sticker-bubble),
+.bubble.received:has(.connect-media-thumb):not(.sticker-bubble){
+  width:min(290px,calc(100vw - 86px))!important;min-width:0!important;
+  max-width:min(290px,calc(100vw - 86px))!important;
+  padding:3px!important;gap:0!important;flex:0 0 auto!important;
+  background:transparent!important;color:var(--text)!important;
+  border:1px solid color-mix(in srgb,var(--text) 22%,transparent)!important;
+  border-radius:13px!important;overflow:hidden;
+}
+.bubble:has(.connect-media-thumb):not(.sticker-bubble) .bubble-body,
+.bubble:has(.connect-media-thumb):not(.sticker-bubble) .attachment-preview{
+  display:block!important;width:100%!important;min-width:0!important;max-width:100%!important;margin:0!important;padding:0!important;
+}
+.bubble:has(.connect-media-thumb):not(.sticker-bubble) .connect-media-thumb{
+  display:block!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;
+  padding:0!important;margin:0!important;border:0!important;border-radius:10px!important;
+  overflow:hidden!important;background:transparent!important;
+}
+.bubble:has(.connect-media-thumb):not(.sticker-bubble) .attachment-preview .connect-media-thumb > img{
+  display:block!important;width:100%!important;height:auto!important;max-height:300px!important;
+  object-fit:contain!important;background:transparent!important;
+}
+.bubble:has(.connect-media-thumb):not(.sticker-bubble) .attachment-preview .connect-media-thumb > video{
+  display:block!important;width:100%!important;height:auto!important;max-height:300px!important;
+  aspect-ratio:4/3;object-fit:cover!important;background:#141923!important;
+}
+.bubble:has(.connect-media-thumb):not(.sticker-bubble) .bubble-meta{
+  width:100%!important;margin:0!important;padding:4px 6px 2px!important;
+  background:transparent!important;color:var(--text)!important;opacity:.7!important;
+}
+.connect-album-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;width:100%;overflow:hidden;border-radius:10px}
+.bubble:has(.connect-album-grid) .connect-album-grid .connect-media-thumb{
+  display:flex!important;width:100%!important;height:140px!important;min-height:0!important;max-height:none!important;
+  align-items:center;justify-content:center;border-radius:5px!important;background:#141923!important;position:relative;
+}
+.bubble:has(.connect-album-grid) .connect-album-grid img,
+.bubble:has(.connect-album-grid) .connect-album-grid video{
+  display:block!important;width:100%!important;height:100%!important;max-height:none!important;
+  object-fit:cover!important;border-radius:0!important;
+}
+.connect-album-compose{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--panel);max-height:260px;overflow:auto}
+.connect-album-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+.connect-album-heading button{background:transparent;border:0;color:var(--text);padding:4px}
+.connect-album-previews{display:flex;gap:8px;overflow-x:auto;min-height:96px}
+.connect-album-preview{position:relative;flex:0 0 92px;width:92px;height:96px;border-radius:9px;overflow:hidden;background:color-mix(in srgb,var(--text) 8%,var(--panel));border:1px solid color-mix(in srgb,var(--text) 12%,transparent)}
+.connect-album-preview img,.connect-album-preview video{width:100%;height:70px;object-fit:cover;display:block}
+.connect-album-preview .connect-file-placeholder{display:grid;place-items:center;height:70px}
+.connect-album-filename{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;padding:2px 5px}
+.connect-album-preview>button{position:absolute;top:3px;right:3px;background:#121620d9;color:white;border:0;border-radius:50%;width:25px;height:25px;font-size:20px;line-height:20px}
+.connect-album-send{align-self:flex-end;border:0;border-radius:9px;padding:8px 14px;background:var(--accent);color:white;font-weight:600}
+/* Stickers retain their frameless layout. */
+.bubble.sticker-bubble,.bubble.sent.sticker-bubble,.bubble.received.sticker-bubble{width:auto!important;min-width:0!important;max-width:min(82vw,180px)!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:0!important}
+.bubble.sticker-bubble .bubble-body,.bubble.sticker-bubble .attachment-preview,.bubble.sticker-bubble .keyboard-sticker-preview{background:transparent!important;border:0!important;padding:0!important;box-shadow:none!important}
+.bubble.sticker-bubble .bubble-meta{width:auto!important;background:transparent!important;color:var(--text)!important;padding:2px 0!important;opacity:.7!important}
+
+/* Frameless photo/video messages: media unchanged, timestamp in its own chip. */
+.bubble.media-only.sent,.bubble.media-only.received{
+  background:transparent!important;border:0!important;box-shadow:none!important;
+  padding:0!important;gap:5px!important;overflow:visible!important;
+  border-radius:0!important;color:var(--text)!important;
+}
+.bubble.media-only .bubble-body,.bubble.media-only .attachment-preview{
+  background:transparent!important;border:0!important;box-shadow:none!important;
+  padding:0!important;margin:0!important;
+}
+.bubble.media-only .bubble-meta{
+  width:max-content!important;max-width:100%!important;align-self:flex-end!important;
+  margin:0!important;padding:4px 8px!important;
+  border:0!important;border-radius:10px!important;
+  background:var(--panel)!important;color:var(--text)!important;
+  opacity:.9!important;box-shadow:0 1px 4px #0002!important;
+}
+/* Emoji-only messages have no dark bubble, glow or shadow. */
+.bubble.emoji-only,.bubble.emoji-only.sent,.bubble.emoji-only.received{
+  background:transparent!important;background-image:none!important;
+  border:0!important;box-shadow:none!important;filter:none!important;
+  padding:0!important;min-width:0!important;gap:4px!important;
+}
+.bubble.emoji-only .bubble-body{
+  background:transparent!important;background-image:none!important;
+  box-shadow:none!important;text-shadow:none!important;filter:none!important;
+  font-size:36px!important;line-height:1.18!important;
+}
+.bubble.emoji-only .bubble-meta{
+  width:max-content!important;align-self:flex-end!important;
+  background:var(--panel)!important;color:var(--text)!important;
+  padding:4px 8px!important;border-radius:10px!important;opacity:.9!important;
+}
+
+/* 2026-11-06: Single media uses the same frameless visual surface as an album tile.
+   Do not change album grid or custom sticker styling. */
+.bubble.media-only:has(> .bubble-body .attachment-preview):not(:has(.connect-album-grid)) {
+  width: min(300px, calc(100vw - 80px)) !important;
+  max-width: min(300px, calc(100vw - 80px)) !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+}
+.bubble.media-only:not(:has(.connect-album-grid)) .attachment-preview,
+.bubble.media-only:not(:has(.connect-album-grid)) .connect-media-thumb {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  aspect-ratio: auto !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  border-radius: 10px !important;
+}
+.bubble.media-only:not(:has(.connect-album-grid)) .connect-media-thumb > img,
+.bubble.media-only:not(:has(.connect-album-grid)) .connect-media-thumb > video {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 340px !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 10px !important;
+}
+/* For stickers pasted as image attachments, remove the old photo placeholder. */
+.bubble.sticker-bubble .connect-media-thumb,
+.bubble.sticker-bubble .connect-media-thumb img,
+.bubble.sticker-bubble .attachment-preview {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+}
+
+
+/* Final single-media override: old .bubble.sent:has(...) rules used greater
+   specificity than .bubble.media-only and kept the outer frame visible. */
+.bubble.sent.media-only:has(.attachment-preview .connect-media-thumb):not(.sticker-bubble),
+.bubble.received.media-only:has(.attachment-preview .connect-media-thumb):not(.sticker-bubble){
+  display:flex!important;
+  flex-direction:column!important;
+  width:fit-content!important;
+  max-width:min(300px,calc(100vw - 80px))!important;
+  min-width:0!important;
+  flex:0 0 auto!important;
+  padding:0!important;
+  gap:5px!important;
+  margin:0!important;
+  background:transparent!important;
+  background-image:none!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+}
+.bubble.media-only:has(.attachment-preview .connect-media-thumb) .bubble-body,
+.bubble.media-only:has(.attachment-preview .connect-media-thumb) .attachment-preview{
+  display:block!important;
+  width:fit-content!important;
+  max-width:100%!important;
+  min-width:0!important;
+  padding:0!important;
+  margin:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+}
+.bubble.media-only:has(.attachment-preview .connect-media-thumb) .attachment-preview .connect-media-thumb{
+  display:block!important;
+  width:fit-content!important;
+  max-width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  aspect-ratio:auto!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:10px!important;
+  box-shadow:none!important;
+  background:transparent!important;
+  overflow:hidden!important;
+}
+.bubble.media-only:has(.attachment-preview .connect-media-thumb) .attachment-preview .connect-media-thumb > img,
+.bubble.media-only:has(.attachment-preview .connect-media-thumb) .attachment-preview .connect-media-thumb > video{
+  display:block!important;
+  width:auto!important;
+  max-width:100%!important;
+  height:auto!important;
+  max-height:340px!important;
+  min-height:0!important;
+  aspect-ratio:auto!important;
+  object-fit:contain!important;
+  padding:0!important;
+  margin:0!important;
+  background:transparent!important;
+  border:0!important;
+  border-radius:10px!important;
+  box-shadow:none!important;
+}
+.bubble.media-only:has(.attachment-preview .connect-media-thumb) .bubble-meta{
+  display:flex!important;
+  align-self:flex-end!important;
+  width:max-content!important;
+  max-width:100%!important;
+  margin:0!important;
+  padding:4px 8px!important;
+  border:0!important;
+  border-radius:10px!important;
+  background:var(--panel)!important;
+  color:var(--text)!important;
+  opacity:.9!important;
+  box-shadow:none!important;
+}
+
+/* Standalone video thumbnails: size from the real video dimensions (set on the
+   button by syncVideoThumbnailSize), not the old forced 16:9 layout.
+   This block replaces the previous conflicting video-only overrides. */
+.bubble.sent.media-only:has(.connect-video-preview) .attachment-preview .connect-media-thumb,
+.bubble.received.media-only:has(.connect-video-preview) .attachment-preview .connect-media-thumb {
+  position:relative!important;
+  display:block!important;
+  box-sizing:border-box!important;
+  width:min(var(--connect-video-width,300px),calc(100vw - 80px))!important;
+  max-width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:340px!important;
+  aspect-ratio:var(--connect-video-ratio,16 / 9)!important;
+  overflow:hidden!important;
+  border:0!important;
+  border-radius:10px!important;
+  background:#141923!important;
+}
+.connect-video-preview {
+  position:absolute!important;
+  inset:0!important;
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  min-height:0!important;
+  max-height:none!important;
+  overflow:hidden!important;
+  background:#141923!important;
+}
+.connect-video-preview>video,
+.connect-video-preview>img {
+  position:absolute!important;
+  inset:0!important;
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  max-width:none!important;
+  max-height:none!important;
+  object-fit:contain!important;
+  border:0!important;
+  border-radius:0!important;
+}
+.connect-video-preview>img{z-index:1!important}
+.connect-video-fallback{position:absolute;inset:0;display:grid;place-items:center;color:#aab1be;font-size:12px}
+/* iOS Safari may paint the poster over the old play span. A button pseudo-element
+   is kept above the poster and always shows a visible play affordance. */
+.bubble.media-only .attachment-preview .connect-media-thumb:has(.connect-video-preview)::after {
+  content:"▶"!important;
+  position:absolute!important;
+  left:50%!important;
+  top:50%!important;
+  transform:translate(-50%,-50%)!important;
+  display:grid!important;
+  place-items:center!important;
+  width:52px!important;
+  height:52px!important;
+  border-radius:50%!important;
+  background:rgba(0,0,0,.62)!important;
+  color:#fff!important;
+  font-size:25px!important;
+  line-height:1!important;
+  padding-left:3px!important;
+  z-index:20!important;
+  pointer-events:none!important;
+}
+.bubble.media-only .attachment-preview .connect-media-thumb:has(.connect-video-preview)>.connect-media-play {
+  display:none!important;
+}
+/* Album tiles retain their existing fixed-cell geometry and play overlay. */
+.connect-album-grid .connect-video-preview{position:absolute!important;inset:0!important}
+
+
+/* Video notes: separate media surface. Never affect conventional photos, video, albums or stickers. */
+.bubble.sent.media-only.video-note-bubble,.bubble.received.media-only.video-note-bubble{
+  width:min(216px,65vw)!important;max-width:min(216px,65vw)!important;
+  min-width:0!important;display:flex!important;flex-direction:column!important;
+  background:transparent!important;border:0!important;box-shadow:none!important;
+  padding:0!important;overflow:visible!important;gap:5px!important;
+}
+.bubble.media-only.video-note-bubble .bubble-body,.bubble.media-only.video-note-bubble .attachment-preview{
+  display:block!important;width:100%!important;max-width:100%!important;
+  height:auto!important;padding:0!important;margin:0!important;
+  background:transparent!important;border:0!important;box-shadow:none!important;
+  overflow:visible!important;
+}
+.connect-video-note{
+  position:relative;display:block;width:100%;aspect-ratio:1;
+  border-radius:50%;border:2px solid color-mix(in srgb,var(--text) 18%,transparent);
+  background:#151a25;overflow:hidden;padding:0;box-shadow:none;cursor:pointer;
+}
+.connect-video-note video{
+  display:block;width:100%;height:100%;position:absolute;inset:0;
+  object-fit:cover;object-position:center;
+}
+.connect-video-note-sound{
+  position:absolute;right:9px;bottom:8px;z-index:2;
+  border-radius:50%;width:30px;height:30px;display:grid;place-items:center;
+  font-size:15px;background:rgba(0,0,0,.55);color:white;
+}
+.bubble.media-only.video-note-bubble .bubble-meta{
+  align-self:flex-end!important;width:max-content!important;margin:0!important;
+  padding:4px 8px!important;border-radius:10px!important;
+  background:var(--panel)!important;color:var(--text)!important;
+  opacity:.9!important;border:0!important;box-shadow:none!important;
+}
+.connect-vnote-backdrop{
+  position:fixed;inset:0;z-index:16000;
+  display:flex;justify-content:center;align-items:center;
+  padding:20px;background:rgba(4,7,14,.84);
+}
+.connect-vnote-panel{
+  width:min(390px,100%);display:flex;flex-direction:column;align-items:center;
+  gap:12px;border:1px solid rgba(255,255,255,.1);border-radius:18px;
+  padding:14px 16px 20px;background:#171b26;color:#fff;box-shadow:0 20px 60px #0008;
+}
+.connect-vnote-header{display:flex;width:100%;align-items:center;justify-content:space-between}
+.connect-vnote-header button,.connect-vnote-actions button{cursor:pointer;color:white;border:0;border-radius:10px;background:#343a4c;padding:10px 14px}
+.connect-vnote-preview{
+  width:min(268px,68vw);height:auto;aspect-ratio:1;border-radius:50%;position:relative;
+  background:#080b10;overflow:hidden;border:2px solid #404858;
+}
+.connect-vnote-preview.is-recording{border-color:#f4444c}
+.connect-vnote-preview video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.connect-vnote-preview video:first-child{transform:scaleX(-1)}
+.connect-vnote-hint{position:absolute;inset:0;display:grid;place-items:center;color:#c8ccd6;font-size:14px}
+.connect-vnote-timer{margin:0;color:#ff666d;font-size:14px;font-variant-numeric:tabular-nums}
+.connect-vnote-error{color:#ff9da4;text-align:center;margin:4px 0;font-size:13px}
+.connect-vnote-actions{display:flex;justify-content:center;gap:12px;width:100%}
+.connect-vnote-actions .connect-vnote-primary{background:var(--accent,#087dff);font-weight:600}
+
+.connect-video-note-length{position:absolute;z-index:2;bottom:12px;left:10px;border-radius:8px;padding:3px 6px;color:#fff;background:rgba(0,0,0,.55);font-size:12px;font-variant-numeric:tabular-nums}
+
+/* Connect 1.3.3: inline audio file preview */
+.connect-inline-audio-file { width: min(100%, 330px); min-width: 240px; max-width: 100%; padding: 6px 2px; display:flex; flex-direction:column; gap:8px; }
+.connect-inline-audio-file .connect-inline-audio-name { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--text); min-width:0; }
+.connect-inline-audio-file .connect-inline-audio-name span { display:block; overflow-wrap:anywhere; min-width:0; }
+.connect-inline-audio-file audio { display:block; width:100%; height:40px; border-radius:24px; }
+.connect-inline-audio-file > button { align-self:flex-start; border:1px solid color-mix(in srgb,var(--accent) 26%, transparent); color:var(--text); background:color-mix(in srgb,var(--accent) 16%, transparent); padding:6px 13px; border-radius:12px; font-size:12px; }
+@media(max-width:350px){.connect-inline-audio-file{min-width:0;width:100%;}}
+
+/* Connect 1.3.3: stable chat read boundary and jump control */
+.connect-app .chat-view { position: relative; }
+.connect-app .connect-new-messages { display:flex; align-items:center; justify-content:center; gap:10px; margin: 9px 0 13px; color:var(--accent2); font:600 11px/1.3 system-ui,sans-serif; letter-spacing:.015em; }
+.connect-app .connect-new-messages::before,.connect-app .connect-new-messages::after { content:""; flex:1; min-width:12px; height:1px; background:color-mix(in srgb,var(--accent) 35%,transparent); }
+.connect-app .connect-new-messages span { border-radius:20px; padding:6px 11px; background:color-mix(in srgb,var(--accent) 13%,var(--panel)); border:1px solid color-mix(in srgb,var(--accent) 22%,transparent); }
+.connect-app .connect-chat-jump { position:absolute; right:19px; bottom:calc(75px + env(safe-area-inset-bottom)); width:39px; height:39px; border-radius:50%; z-index:6; display:grid; place-items:center; padding:0; color:var(--accent2); background:color-mix(in srgb,var(--panel) 83%,transparent); border:1px solid color-mix(in srgb,var(--accent) 23%,var(--border)); box-shadow:0 4px 17px rgba(0,0,0,.23); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+.connect-app .connect-chat-jump:active { transform:scale(.95); }
+.connect-app.light .connect-chat-jump { background:color-mix(in srgb,var(--panel) 90%,white); }
+@media(max-width:380px){.connect-app .connect-chat-jump{right:12px;bottom:calc(69px + env(safe-area-inset-bottom));}}
+
+/* Connect UI: compact uploaded audio attachments v2 */
+.connect-app .bubble:has(.connect-inline-audio-file) {
+  width: min(264px, 78vw) !important;
+  max-width: min(264px, 78vw) !important;
+  min-width: 0 !important;
+  padding: 7px 9px 4px !important;
+  gap: 0 !important;
+}
+.connect-app .bubble:has(.connect-inline-audio-file) .bubble-body,
+.connect-app .bubble:has(.connect-inline-audio-file) .attachment-preview {
+  width: 100%; max-width: 100%; min-width: 0;
+  margin: 0 !important; padding: 0 !important; gap: 0 !important;
+}
+.connect-app .connect-inline-audio-file {
+  display: flex; flex-direction: column;
+  width: 100%; max-width: 100%; min-width: 0 !important;
+  margin: 0 !important; padding: 0 !important; gap: 3px !important;
+}
+.connect-app .connect-inline-audio-file .connect-inline-audio-name {
+  gap: 5px; font-size: 11.5px; line-height: 1.22;
+}
+.connect-app .connect-inline-audio-file .connect-inline-audio-name svg {
+  flex: 0 0 14px; width: 14px; height: 14px;
+}
+.connect-app .connect-inline-audio-file .connect-inline-audio-name span {
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; overflow: hidden;
+}
+.connect-app .connect-inline-audio-file audio {
+  display: block !important;
+  width: 100% !important; max-width: 100% !important;
+  height: 38px !important; border-radius: 18px;
+  margin: 0 !important; padding: 0 !important;
+}
+.connect-app .bubble:has(.connect-inline-audio-file) .bubble-meta {
+  display: flex !important; align-items: center !important;
+  justify-content: flex-end !important;
+  align-self: stretch !important;
+  box-sizing: border-box !important;
+  width: 100% !important; max-width: 100% !important;
+  gap: 3px !important; min-height: 16px !important;
+  margin: -2px 0 0 !important; padding: 0 !important;
+  white-space: nowrap; font-size: 10px !important;
+}
+.connect-app .bubble:has(.connect-inline-audio-file) .connect-inline-audio-save {
+  order: -1; margin: 0 auto 0 0 !important;
+  padding: 0 !important; border: 0 !important;
+  background: transparent !important; box-shadow: none !important;
+  color: inherit !important;
+  font: 600 10.5px/1.15 system-ui, -apple-system, sans-serif;
+  text-align: left; white-space: nowrap; opacity: .93;
+}
+.connect-app .bubble:has(.connect-inline-audio-file) .connect-inline-audio-save:active {
+  opacity: .62;
+}
+
+/* Connect UI: anchored invitation registration action */
+/* The login screen, not the visual viewport, owns the invitation button. */
+.connect-app .login-screen {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  justify-content: safe center;
+}
+.connect-app .login-screen > .login-brand,
+.connect-app .login-screen > .login-form { flex-shrink: 0; }
+.connect-app .login-screen > .connect-invite-register {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  width: min(365px, 100%);
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font: 600 13px/1.35 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  text-align: center;
+  box-shadow: none;
+  white-space: normal;
+  transition: background-color .16s ease, border-color .16s ease;
+}
+.connect-app .login-screen > .connect-invite-register:active { background: var(--panel2); }
+.connect-app .login-screen > .connect-invite-register:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Connect iOS sticker favorites v1: inert sticker media, not an image viewer */
+.connect-app .bubble.sticker-bubble .keyboard-sticker-preview {
+  width: min(170px, 44vw) !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+}
+.connect-app .bubble.sticker-bubble .keyboard-sticker-preview .connect-keyboard-sticker,
+.connect-app .bubble.sticker-bubble .keyboard-sticker-preview .connect-keyboard-sticker-loading {
+  display: block !important;
+  width: min(170px, 44vw) !important;
+  height: min(170px, 44vw) !important;
+  max-width: 100% !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  object-fit: contain !important;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  pointer-events: none;
+}
+.connect-app .bubble.sticker-bubble:has(.connect-keyboard-sticker) {
+  width: fit-content !important;
+  max-width: min(180px, 48vw) !important;
+}
+
+/* Connect cached history pagination */
+.connect-history-more{display:block;margin:10px auto;padding:7px 12px;border:1px solid var(--line,rgba(160,175,195,.2));border-radius:12px;background:var(--panel,rgba(40,48,65,.5));color:var(--text,#fff);font-size:12px;cursor:pointer;}
+.connect-history-more:disabled{opacity:.6;cursor:default}
+.voice-player{-webkit-touch-callout:none}
+
+/* Message controls use the Connect menu; text inputs retain system editing. */
+.voice-player{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}

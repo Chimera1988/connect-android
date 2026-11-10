@@ -1,0 +1,13 @@
+{
+  "package": "@kinsh/vodozemac-wasm",
+  "version": "0.4.2",
+  "license": "Apache-2.0",
+  "repository": "git+https://github.com/Meneleus/vodozemac-bindings.git",
+  "npmIntegrityVerified": "sha512-m3LGnfPFBFc7GX6aCM65+dsvuFbTioBOH5EOR6fITlkYm0rU4G672tfNoeoLja0w/Ir7RLmtG4f9oGmV8+/YzA==",
+  "filesSha256": {
+    "olm.js": "b090772de9301f819fc3f701a2ee64ba87dfe938d889ba73cab18383fd3770c8",
+    "olm.wasm": "b05699476752705a95100a9c54874be89b636bd361497b524b798944b401ba12",
+    "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "independentWrapperAudit": "Not established. Not activated for production E2EE. See supabase/UNIFIED-MIGRATION.md."
+}

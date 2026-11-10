@@ -1,0 +1,93 @@
+/* Connect splash / Silver Night — isolated from application theme settings. */
+.connect-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+  color: #f4f5f7;
+  isolation: isolate;
+  background:
+    radial-gradient(95% 57% at -8% 22%, rgba(87, 105, 121, .17), transparent 72%),
+    radial-gradient(120% 67% at 104% 76%, rgba(75, 98, 120, .25), transparent 72%),
+    linear-gradient(165deg, #090e14 0%, #0b131c 50%, #0a1017 100%);
+  opacity: 1;
+  transition: opacity 420ms ease;
+  -webkit-font-smoothing: antialiased;
+  pointer-events: all;
+}
+.connect-splash--leaving { opacity: 0; pointer-events: none; }
+.connect-splash__waves {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.connect-splash__upper-wave,
+.connect-splash__lower-wave {
+  transform-origin: center;
+  animation: connect-splash-wave-drift 9s ease-in-out infinite alternate;
+}
+.connect-splash__lower-wave {
+  animation-duration: 12s;
+  animation-direction: alternate-reverse;
+}
+.connect-splash__center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  transform: translateY(-5.6%);
+  padding: max(24px, env(safe-area-inset-top)) 18px max(24px, env(safe-area-inset-bottom));
+}
+.connect-splash__icon {
+  display: block;
+  width: min(47vw, 220px);
+  max-width: 100%;
+  height: auto;
+  filter: drop-shadow(0 11px 16px rgba(1, 5, 10, .28));
+}
+/* Exact approved lettering. The image remains in place as letters fade in, so
+   the word never shifts horizontally on partial progress (C, Co, Con...). */
+.connect-splash__word {
+  position: relative;
+  flex: 0 0 auto;
+  display: block;
+  width: min(48vw, 347px);
+  max-width: 100%;
+  aspect-ratio: 347 / 66;
+  margin-top: -2px;
+  user-select: none;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.12));
+}
+.connect-splash__word-slice {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.connect-splash__word-slice.is-visible { opacity: 1; }
+.connect-splash__word-slice img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+@keyframes connect-splash-wave-drift {
+  from { transform: translate3d(-2%, 0, 0) scale(1.01); }
+  to { transform: translate3d(2%, -0.6%, 0) scale(1.035); }
+}
+@media (max-height: 570px) {
+  .connect-splash__icon { width: min(30vh, 185px); }
+  .connect-splash__word { width: min(46vw, 290px); margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connect-splash__upper-wave,
+  .connect-splash__lower-wave { animation: none; }
+  .connect-splash__word-slice { transition: none; }
+  .connect-splash { transition-duration: 100ms; }
+}

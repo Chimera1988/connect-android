@@ -1,0 +1,26 @@
+/* Connect: per-user call history editor. Three-dots AFTER dial action. */
+.connect-app .connect-call-editor-menu{position:relative;z-index:25;flex:0 0 auto;}
+.connect-app .connect-call-editor-more{width:42px;height:42px;display:grid;place-items:center;
+  border:1px solid color-mix(in srgb,var(--accent) 25%,var(--v4-border,var(--border)));
+  border-radius:14px;background:color-mix(in srgb,var(--panel) 85%,transparent);
+  color:var(--accent);font-size:19px;letter-spacing:1px;}
+.connect-app .connect-call-editor-popup{position:absolute;right:0;top:calc(100% + 9px);width:205px;
+  border:1px solid color-mix(in srgb,var(--accent) 29%,var(--v4-border,var(--border)));
+  border-radius:15px;padding:6px;display:flex;flex-direction:column;gap:2px;
+  background:var(--panel);color:var(--text);z-index:200;
+  box-shadow:0 12px 30px rgba(0,0,0,.33);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+.connect-app .connect-call-editor-popup button{background:transparent;border:0;color:var(--text);text-align:left;
+  padding:12px;border-radius:10px;font-size:14px;}
+.connect-app .connect-call-editor-popup button:active{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.connect-app .connect-call-editor-popup button.danger{color:#f58692;}
+.connect-app .connect-call-editor-popup button:disabled{opacity:.4;}
+.connect-app .connect-call-editor-toolbar{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:0 4px 11px;}
+.connect-app .connect-call-editor-toolbar button{padding:7px 10px;background:color-mix(in srgb,var(--accent) 11%,var(--panel));
+  color:var(--text);border:1px solid var(--v4-border,var(--border));border-radius:10px;font-size:12px;}
+.connect-app .connect-call-editor-toolbar span{font-size:12px;color:var(--muted);margin:0 auto 0 2px;}
+.connect-app .connect-call-editor-toolbar button.danger{color:#ff93a0;border-color:rgba(240,100,120,.27);}
+.connect-app .connect-call-editor-toolbar button:disabled{opacity:.38;}
+.connect-app .connect-call-editor-check{width:21px;height:21px;flex:0 0 21px;accent-color:var(--accent);}
+.connect-app .connect-call-history-screen.is-selecting .connect-call-redial{display:none;}
+.connect-app .connect-call-editor-error{font-size:12px;color:#ffa6b0;padding:0 9px 9px;}
+@media(max-width:375px){.connect-app .connect-call-history-head-actions{gap:6px;}.connect-app .connect-call-editor-more{width:36px;height:38px;}.connect-app .connect-call-editor-toolbar button{font-size:11px;padding:7px 8px;}}

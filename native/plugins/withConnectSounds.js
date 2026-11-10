@@ -15,13 +15,19 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.LifecycleEventListener
+import java.io.File
 import java.util.UUID
+import java.util.concurrent.Executors
 
 /** Copy a picked phone audio file to Android's persistent ringtone library.
  * The SYSTEM process needs a public MediaStore URI to play a notification.
  * Supported: Android 10+ with scoped storage (no storage permission needed).
  */
-class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextBaseJavaModule(ctx) {
+class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextBaseJavaModule(ctx),LifecycleEventListener {
+  private val audioWorker=Executors.newSingleThreadExecutor()
+  private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
+  init { ctx.addLifecycleEventListener(this) }
   override fun getName(): String = "ConnectSoundModule"
 
   @ReactMethod
@@ -44,7 +50,11 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
         val resolver=ctx.contentResolver
         val uri=Uri.parse(sourceUri)
         if(uri.scheme!="content"&&uri.scheme!="file")throw IllegalArgumentException("Invalid audio URI")
-        val input=resolver.openInputStream(uri)?:throw IllegalStateException("Cannot read selected file")
+        if(uri.scheme=="file"){
+          val source=File(uri.path?:throw IllegalArgumentException("Missing audio path")).canonicalFile
+          val roots=listOf(ctx.cacheDir,ctx.filesDir).map { it.canonicalFile.path+File.separator }
+          if(roots.none { source.path.startsWith(it) })throw IllegalArgumentException("Audio file must be selected with Android document picker")
+        }
         val label=originalName.substringBeforeLast('.').replace(Regex("[^\\p{L}\\p{N}._ -]"), "_").take(40)
         val filename="Connect_"+UUID.randomUUID().toString().take(8)+"_"+label+"."+ext
         val values=ContentValues().apply {
@@ -53,14 +63,32 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
           put(MediaStore.Audio.Media.RELATIVE_PATH,if(kind=="calls")"Ringtones/Connect/" else "Notifications/Connect/")
           put(MediaStore.Audio.Media.IS_RINGTONE,if(kind=="calls")1 else 0)
           put(MediaStore.Audio.Media.IS_NOTIFICATION,if(kind=="messages")1 else 0)
+          put(MediaStore.Audio.Media.IS_MUSIC,0)
           put(MediaStore.Audio.Media.IS_PENDING,1)
         }
         destination=resolver.insert(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),values)
           ?:throw IllegalStateException("Cannot create MediaStore audio")
-        input.use{stream->
+        (resolver.openInputStream(uri)?:throw IllegalStateException("Cannot read selected file")).use{stream->
           val output=resolver.openOutputStream(destination!!,"w")?:throw IllegalStateException("Cannot write MediaStore audio")
-          output.use{stream.copyTo(it)}
+          output.use{sink->
+            val buffer=ByteArray(32768)
+            var total=0L
+            while(true){
+              val count=stream.read(buffer)
+              if(count<0)break
+              total+=count
+              if(total>20L*1024*1024)throw IllegalArgumentException("Мелодия должна быть не больше 20 МБ")
+              sink.write(buffer,0,count)
+            }
+            if(total==0L)throw IllegalArgumentException("Выбран пустой аудиофайл")
+          }
         }
+        val metadata=android.media.MediaMetadataRetriever()
+        try{
+          metadata.setDataSource(ctx,destination!!)
+          val duration=metadata.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?:0L
+          if(duration<=0L)throw IllegalArgumentException("Android не может прочитать выбранный аудиофайл")
+        }finally{metadata.release()}
         values.clear()
         values.put(MediaStore.Audio.Media.IS_PENDING,0)
         resolver.update(destination!!,values,null,null)
@@ -73,13 +101,19 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
   }
 
   private var previewPlayer:android.media.MediaPlayer?=null
+  private fun releasePreview(){
+    synchronized(this){
+      previewPlayer?.setOnCompletionListener(null)
+      previewPlayer?.release()
+      previewPlayer=null
+    }
+  }
   @ReactMethod
   fun previewSound(source:String, promise:Promise){
+    audioWorker.execute {
     try {
       synchronized(this){
-        previewPlayer?.setOnCompletionListener(null)
-        previewPlayer?.release()
-        previewPlayer=null
+        releasePreview()
         val location=when(source){
           "default-notification"->android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
           "default-ringtone"->android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
@@ -88,6 +122,9 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
         if(location.scheme!="content"&&location.scheme!="android.resource")
           throw IllegalArgumentException("Only Android local audio can be previewed")
         val p=android.media.MediaPlayer()
+        // Keep ownership before prepare: invalid/unsupported files must release
+        // the newly allocated player too. Preparation never blocks Android UI.
+        previewPlayer=p
         p.setAudioAttributes(android.media.AudioAttributes.Builder()
           .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
           .setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
@@ -99,9 +136,8 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
             completed.release()
           }
         }
-        previewPlayer=p
         p.start()
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        mainHandler.postDelayed({
           synchronized(this){
             if(previewPlayer===p){
               previewPlayer=null
@@ -117,17 +153,25 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
       synchronized(this){previewPlayer?.release();previewPlayer=null}
       promise.reject("CONNECT_SOUND_PREVIEW_FAILED",e.message,e)
     }
+    }
   }
   @ReactMethod
   fun stopPreviewSound(promise:Promise){
+    audioWorker.execute {
     try{
-      synchronized(this){
-        previewPlayer?.setOnCompletionListener(null)
-        previewPlayer?.release()
-        previewPlayer=null
-      }
+      releasePreview()
       promise.resolve(true)
     }catch(e:Exception){promise.reject("CONNECT_SOUND_STOP_FAILED",e.message,e)}
+    }
+  }
+  override fun onHostResume() {}
+  override fun onHostPause() { if(!audioWorker.isShutdown)audioWorker.execute { releasePreview() } }
+  override fun onHostDestroy() { if(!audioWorker.isShutdown)audioWorker.execute { releasePreview() } }
+  override fun invalidate(){
+    ctx.removeLifecycleEventListener(this)
+    mainHandler.removeCallbacksAndMessages(null)
+    if(!audioWorker.isShutdown){audioWorker.execute { releasePreview() };audioWorker.shutdown()}
+    super.invalidate()
   }
 }
 `;
