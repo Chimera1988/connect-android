@@ -31,12 +31,12 @@ class ConnectCallService : Service() {
         @Volatile private var sequence = 0L
         fun owns(id: String) = instance?.machine?.let { it.id.equals(id,ignoreCase=true) && !it.terminal() } == true
         fun snapshot(): JSONObject = instance?.let { if (it.machine.terminal()) JSONObject(last.toString()) else it.view() } ?: JSONObject(last.toString())
-        fun action(context: Context, action: String, id: String = "", conversation: String = "", name: String = "", peer: String = "", route: Int = 0) {
-            if (action in listOf("sync", "end", "decline", "answer", "mute", "speaker", "route", "logout", "failed", "remote-end") && instance == null) return
+        fun action(context: Context, action: String, id: String = "", conversation: String = "", name: String = "", peer: String = "", route: Int = 0): Boolean {
+            if (action in listOf("sync", "end", "decline", "answer", "mute", "speaker", "route", "logout", "failed", "remote-end") && instance == null) return false
             val intent = Intent(context, ConnectCallService::class.java).putExtra("action", action).putExtra("id", id.lowercase())
                 .putExtra("conversation", conversation).putExtra("name", name.take(160)).putExtra("peer", peer).putExtra("route", route)
-            try { context.startForegroundService(intent) }
-            catch (_: Exception) { android.util.Log.w("ConnectCall", "FOREGROUND_START_DENIED") }
+            return try { context.startForegroundService(intent); true }
+            catch (_: Exception) { ConnectCallDiagnostics.event(context,id,"service","denied","FOREGROUND_START"); false }
         }
         fun audioState(id: String, state: CallAudioState) { instance?.handler?.post { instance?.applyAudioState(id, state) } }
         fun telecomFailed(id: String) { instance?.handler?.post { val s = instance; if (s != null && s.machine.id == id) s.end(ConnectCallState.Phase.FAILED, "Аудиоустройство занято") } }
@@ -67,6 +67,8 @@ class ConnectCallService : Service() {
     private var destroyed = false
     private var operationId = ""
     private var incomingPosted = false
+    private val mediaEvidence = ConnectCallMediaEvidence()
+    private var statsPending = false
     private var lastRemoteIceId = 0L
     private class RemoteCallDone(val status: String) : Exception()
     private val tick = object : Runnable {
@@ -79,13 +81,14 @@ class ConnectCallService : Service() {
             if (lostAt > 0 && now - lostAt >= 20000) { end(ConnectCallState.Phase.FAILED, "Соединение потеряно"); return }
             if (wake?.isHeld != true) wake?.acquire(10 * 60 * 1000L)
             sounds.route(route,machine.phase==ConnectCallState.Phase.ACTIVE)
-            sync()
+            sync(); sampleMedia()
             handler.postDelayed(this, 1400)
         }
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate(); instance = this
+        try{ConnectCallConnectionService.account(this);ConnectCallDiagnostics.event(this,"","telecom","registered")}catch(_:Exception){ConnectCallDiagnostics.event(this,"","telecom","failed","REGISTER")}
         ConnectCallSession.network.execute { retryPendingFinishes() }
         sounds = ConnectCallAudio(this) { available,permanent -> handler.post {
             if(machine.terminal()||machine.phase==ConnectCallState.Phase.IDLE)return@post
@@ -106,6 +109,7 @@ class ConnectCallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.getStringExtra("action") ?: return START_NOT_STICKY
         val id = intent.getStringExtra("id") ?: ""
+        ConnectCallDiagnostics.event(this,id,"service",action)
         if(action=="logout"){verifying.clear();end(ConnectCallState.Phase.ENDED);return START_NOT_STICKY}
         if(!ConnectCallState.allowStart(action,machine.phase!=ConnectCallState.Phase.IDLE&&!machine.terminal(),getSharedPreferences("connect_incoming",0).contains("ended:$id"))){stopIfIdle();return START_NOT_STICKY}
         // Meet the foreground deadline before network work. This is a silent
@@ -122,7 +126,7 @@ class ConnectCallService : Service() {
             "remote-end" -> if (machine.id == id) { sounds.stopSignals(); sync() }
             "answer" -> if (machine.id == id) accept()
             "decline" -> if (machine.id == id) end(ConnectCallState.Phase.DECLINED)
-            "end" -> if (machine.id == id || operationId == id) end(ConnectCallState.Phase.ENDED)
+            "end" -> if (machine.id == id || operationId == id) end(if(!incoming&&row?.optString("status")!="active")ConnectCallState.Phase.CANCELLED else ConnectCallState.Phase.ENDED)
             "failed" -> if (machine.id == id) end(ConnectCallState.Phase.FAILED, "Для аудиозвонка нужен доступ к микрофону")
             "mute" -> if (machine.id == id) { muted = !muted; local?.setEnabled(focusAvailable&&!muted); publish() }
             "speaker" -> if (machine.id == id) selectRoute(if (route == CallAudioState.ROUTE_SPEAKER) preferredRoute() else CallAudioState.ROUTE_SPEAKER)
@@ -144,11 +148,12 @@ class ConnectCallService : Service() {
     private fun valid(token:Int)=!destroyed&&machine.valid(token)&&callEpoch==ConnectCallSession.epoch
     private fun resetCallPresentation(){
         muted=false;telecomMuted=false;route=CallAudioState.ROUTE_EARPIECE;supportedRoutes=CallAudioState.ROUTE_EARPIECE or CallAudioState.ROUTE_SPEAKER
-        remoteAudio=false;recording=false;playout=false;incomingPosted=false;focusAvailable=true
+        remoteAudio=false;recording=false;playout=false;incomingPosted=false;focusAvailable=true;mediaEvidence.reset();statsPending=false
     }
     private fun receive(id: String) {
-        if (owns(id) || id in verifying) return
-        if(getSharedPreferences("connect_incoming",0).contains("ended:$id")){stopIfIdle();return}
+        if (owns(id)) {ConnectCallIngress.acknowledge(this,id);return}
+        if(id in verifying)return
+        if(getSharedPreferences("connect_incoming",0).contains("ended:$id")){ConnectCallIngress.acknowledge(this,id);stopIfIdle();return}
         verifying.add(id)
         worker.execute {
             try {
@@ -158,22 +163,22 @@ class ConnectCallService : Service() {
                 handler.post {
                     if (destroyed) return@post
                     verifying.remove(id)
-                    if (owns(id)) return@post
-                    if (next == null || !ConnectCallState.validIncoming(user, next.optString("callee_id"), next.optString("status"), created(next), System.currentTimeMillis(), epoch, ConnectCallSession.epoch) || getSharedPreferences("connect_incoming", 0).contains("ended:$id")) { stopIfIdle(); return@post }
-                    if (machine.phase != ConnectCallState.Phase.IDLE && !machine.terminal()) { finishServer(id, "busy", user); return@post }
+                    if (owns(id)) {ConnectCallIngress.acknowledge(this,id);return@post}
+                    if (next == null || !ConnectCallState.validIncoming(user, next.optString("callee_id"), next.optString("status"), created(next), System.currentTimeMillis(), epoch, ConnectCallSession.epoch) || getSharedPreferences("connect_incoming", 0).contains("ended:$id")) { ConnectCallIngress.acknowledge(this,id);stopIfIdle(); return@post }
+                    if (machine.phase != ConnectCallState.Phase.IDLE && !machine.terminal()) { ConnectCallIngress.acknowledge(this,id);finishServer(id, "busy", user); return@post }
                     resetCallPresentation()
                     owner = user; incoming = true; operationId="";row = next; peerId = next.getString("caller_id"); name = "Собеседник"; avatar = ""
                     incomingPosted = false;callEpoch=epoch;machine.begin(id, true); setupAt = SystemClock.elapsedRealtime(); activeAt = 0; lostAt = 0
                     ringDeadline = setupAt + (60000 - (System.currentTimeMillis() - created(next))).coerceIn(1, 60000)
-                    holdWake(); telecom(true); publish(); showNotification(); sounds.incoming(); resolveProfile(peerId)
+                    holdWake(); telecom(true); publish(); showNotification(); sounds.incoming(); ConnectCallDiagnostics.event(this,id,"incoming","presented");ConnectCallIngress.acknowledge(this,id);resolveProfile(peerId)
                     handler.removeCallbacks(tick); handler.post(tick)
                 }
-            } catch (_: Exception) { handler.post { if(!destroyed){verifying.remove(id);stopIfIdle()} }; android.util.Log.w("ConnectCall", "INCOMING_VALIDATION_FAILED") }
+            } catch (_: Exception) { handler.post { if(!destroyed){verifying.remove(id);ConnectCallIngress.retry(this,id);stopIfIdle()} }; android.util.Log.w("ConnectCall", "INCOMING_VALIDATION_FAILED") }
         }
     }
     private fun dial(conversation: String, remote: String, displayName: String, clientOperation: String) {
         if (!conversation.matches(Regex("[0-9a-fA-F-]{36}")) || !remote.matches(Regex("[0-9a-fA-F-]{36}"))) { stopIfIdle(); return }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { stopIfIdle(); return }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { ConnectCallOperations.complete(clientOperation,null,"Для аудиозвонка разрешите доступ к микрофону");stopIfIdle(); return }
         resetCallPresentation()
         incoming = false; row = null; owner = ""; peerId = remote; name = displayName.take(160); avatar = ""; activeAt = 0; lostAt = 0; muted = false
         operationId = clientOperation.takeIf { it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: UUID.randomUUID().toString()
@@ -184,6 +189,9 @@ class ConnectCallService : Service() {
         holdWake(); publish(); showNotification()
         handler.removeCallbacks(tick); handler.post(tick)
         network(token, {
+            ConnectCallDiagnostics.event(this,operationId,"microphone","checking")
+            ConnectMicrophoneProbe.check(this)
+            ConnectCallDiagnostics.event(this,operationId,"microphone","ready")
             val user = ConnectCallSession.owner(this)
             val ice = iceServers()
             Pair(user, ice)
@@ -192,14 +200,18 @@ class ConnectCallService : Service() {
             val connection = peer ?: return@network
             connection.createOffer(sdp(token) { offer ->
                 connection.setLocalDescription(sdp(token) {
+                  gathered(token,connection,offer) { submittedOffer ->
                     val callOwner = owner
-                    network(token, { JSONObject(ConnectCallSession.api(this, "/supabase/rest/v1/rpc/connect_start_audio_call", JSONObject().put("p_conversation_id", conversation).put("p_offer", JSONObject().put("type", "offer").put("sdp", offer.description)),expectedOwner=callOwner)) }, orphan = { finishServer(it.optString("id"), "hangup", callOwner) }) { started ->
+                    network(token, { JSONObject(ConnectCallSession.api(this, "/supabase/rest/v1/rpc/connect_start_audio_call", JSONObject().put("p_conversation_id", conversation).put("p_offer", JSONObject().put("type", "offer").put("sdp", submittedOffer.description)),expectedOwner=callOwner)) }, orphan = { finishServer(it.optString("id"), "hangup", callOwner) }) { started ->
                         check(started.optString("caller_id")==owner&&started.optString("conversation_id")==conversation)
                         row = started; peerId=started.getString("callee_id"); machine.identified(started.getString("id")); ringDeadline = SystemClock.elapsedRealtime() + (60000 - (System.currentTimeMillis() - created(started))).coerceIn(1, 60000)
+                        ConnectCallDiagnostics.event(this,machine.id,"created","ringing",operationId)
+                        ConnectCallOperations.complete(operationId,machine.id,null)
                         telecom(false); sounds.signal(false); publish(); showNotification(); resolveProfile(peerId)
                         notifyIncoming(started.getString("id"),owner)
                         sync()
                     }
+                  }
                 }, offer)
             }, MediaConstraints())
         }
@@ -221,6 +233,8 @@ class ConnectCallService : Service() {
         publish(); showNotification()
         val token = machine.revision; val id = machine.id
         network(token, {
+            ConnectMicrophoneProbe.check(this)
+            ConnectCallDiagnostics.event(this,id,"microphone","ready")
             val fresh = JSONArray(ConnectCallSession.api(this, "/supabase/rest/v1/connect_calls?id=eq.$id&select=*&limit=1")).optJSONObject(0) ?: error("Вызов завершён")
             check(fresh.optString("callee_id") == owner) { "Вызов принадлежит другому аккаунту" }
             if (fresh.optString("status") != "ringing") throw RemoteCallDone(fresh.optString("status"))
@@ -234,23 +248,36 @@ class ConnectCallService : Service() {
                 remoteSet = true; flushRemote()
                 connection.createAnswer(sdp(token) { answer ->
                     connection.setLocalDescription(sdp(token) {
-                        machine.submitAnswer(answer.description)
+                      gathered(token,connection,answer) { submittedAnswer ->
+                        machine.submitAnswer(submittedAnswer.description)
                         val acceptingOwner = owner
                         network(token, {
-                            try { JSONObject(ConnectCallSession.api(this, "/supabase/rest/v1/rpc/connect_answer_audio_call", JSONObject().put("p_call_id", id).put("p_answer", JSONObject().put("type", "answer").put("sdp", answer.description)))) }
+                            try { JSONObject(ConnectCallSession.api(this, "/supabase/rest/v1/rpc/connect_answer_audio_call", JSONObject().put("p_call_id", id).put("p_answer", JSONObject().put("type", "answer").put("sdp", submittedAnswer.description)))) }
                             catch (error: Exception) {
                                 val fresh = JSONArray(ConnectCallSession.api(this,"/supabase/rest/v1/connect_calls?id=eq.$id&select=*&limit=1")).optJSONObject(0) ?: throw RemoteCallDone("ended")
-                                if (fresh.optString("status") == "active" && fresh.optJSONObject("answer")?.optString("sdp") == answer.description) fresh
+                                if (fresh.optString("status") == "active" && fresh.optJSONObject("answer")?.optString("sdp") == submittedAnswer.description) fresh
                                 else if (fresh.optString("status") != "ringing") throw RemoteCallDone(fresh.optString("status"))
                                 else throw error
                             }
                         }, orphan = { accepted ->
-                            if(accepted.optJSONObject("answer")?.optString("sdp")==answer.description)finishServer(id,"hangup",acceptingOwner)
+                            if(accepted.optJSONObject("answer")?.optString("sdp")==submittedAnswer.description)finishServer(id,"hangup",acceptingOwner)
                         }) { accepted -> row = accepted; accepting = false; sync() }
+                      }
                     }, answer)
                 }, MediaConstraints())
             }, SessionDescription(SessionDescription.Type.OFFER, offer.getString("sdp")))
         }
+    }
+    private fun gathered(token:Int,connection:PeerConnection,fallback:SessionDescription,done:(SessionDescription)->Unit){
+        val deadline=SystemClock.elapsedRealtime()+1800
+        val poll=object:Runnable{override fun run(){
+            if(!valid(token))return
+            if(connection.iceGatheringState()!=PeerConnection.IceGatheringState.COMPLETE&&SystemClock.elapsedRealtime()<deadline){handler.postDelayed(this,60);return}
+            val submitted=connection.localDescription?.takeIf{it.type==fallback.type&&it.description.isNotBlank()}?:fallback
+            ConnectCallDiagnostics.event(this@ConnectCallService,machine.id,if(fallback.type==SessionDescription.Type.OFFER)"offer" else "answer","ready","INLINE_ICE_${submitted.description.lineSequence().count{it.startsWith("a=candidate:")}}")
+            try{done(submitted)}catch(_:Exception){end(ConnectCallState.Phase.FAILED,"Не удалось отправить описание аудиосоединения")}
+        }}
+        handler.post(poll)
     }
     private fun microphoneForeground(){
         // Only a visible outgoing action/answer reaches microphone foreground type.
@@ -275,11 +302,11 @@ class ConnectCallService : Service() {
                 override fun onWebRtcAudioTrackError(error:String){audioError("Аудиоустройство недоступно")}
             })
             .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
-                override fun onWebRtcAudioRecordStart() { handler.post { if (valid(token)) { recording = true; updateReadiness() } } }
+                override fun onWebRtcAudioRecordStart() { handler.post { if (valid(token)) { recording = true; ConnectCallDiagnostics.event(this@ConnectCallService,machine.id,"adm-record","started");updateReadiness() } } }
                 override fun onWebRtcAudioRecordStop() { handler.post { if (valid(token)) { recording = false; updateReadiness() } } }
             })
             .setAudioTrackStateCallback(object : JavaAudioDeviceModule.AudioTrackStateCallback {
-                override fun onWebRtcAudioTrackStart() { handler.post { if (valid(token)) { playout = true; updateReadiness() } } }
+                override fun onWebRtcAudioTrackStart() { handler.post { if (valid(token)) { playout = true; ConnectCallDiagnostics.event(this@ConnectCallService,machine.id,"adm-playout","started");updateReadiness() } } }
                 override fun onWebRtcAudioTrackStop() { handler.post { if (valid(token)) { playout = false; updateReadiness() } } }
             }).createAudioDeviceModule()
         factory = PeerConnectionFactory.builder().setAudioDeviceModule(device).createPeerConnectionFactory()
@@ -299,7 +326,7 @@ class ConnectCallService : Service() {
             } }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {}
-            override fun onIceCandidate(candidate: IceCandidate) { if (valid(token)) localIce.add(candidate) }
+            override fun onIceCandidate(candidate: IceCandidate) { if (valid(token)) { localIce.add(candidate); ConnectCallDiagnostics.event(this@ConnectCallService,machine.id,"ice-local","queued") } }
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
             override fun onAddStream(stream: MediaStream) { if (stream.audioTracks.isNotEmpty()) handler.post { if (valid(token)) { remoteAudio = true; updateReadiness() } } }
             override fun onRemoveStream(stream: MediaStream) { handler.post { if (valid(token)) { remoteAudio = false; updateReadiness() } } }
@@ -314,7 +341,7 @@ class ConnectCallService : Service() {
     }
     private fun transport(ready: Boolean, token: Int) { handler.post { if (valid(token)) { machine.transport(ready); if (!ready && activeAt > 0 && lostAt == 0L) lostAt = SystemClock.elapsedRealtime(); sounds.stopSignals(); publish(); showNotification() } } }
     private fun updateReadiness(before: ConnectCallState.Phase = machine.phase) {
-        machine.audio(remoteAudio && recording && playout && focusAvailable)
+        machine.audio(remoteAudio && recording && playout && focusAvailable && mediaEvidence.ready)
         if (machine.phase == ConnectCallState.Phase.ACTIVE) {
             lostAt = 0
             if (activeAt == 0L) { activeAt = SystemClock.elapsedRealtime(); sounds.signal(true) }
@@ -324,16 +351,42 @@ class ConnectCallService : Service() {
             if (before != machine.phase) { publish(); showNotification() }
         }
     }
+    private fun sampleMedia() {
+        val connection=peer ?: return
+        if(statsPending||!machine.connected||machine.terminal())return
+        statsPending=true;val token=machine.revision
+        connection.getStats { report -> handler.post {
+            if(!valid(token))return@post
+            statsPending=false
+            for(stat in report.statsMap.values){
+                val kind=stat.members["kind"]?:stat.members["mediaType"]
+                if(kind!="audio")continue
+                val packets=(stat.members[if(stat.type=="inbound-rtp")"packetsReceived" else "packetsSent"] as? Number)?.toLong()?:0
+                mediaEvidence.observe(stat.type,packets)
+            }
+            if(mediaEvidence.ready&&activeAt==0L)ConnectCallDiagnostics.event(this,machine.id,"audio","BIDIRECTIONAL_RTP")
+            updateReadiness()
+        } }
+    }
     private fun sync() {
         val current = row ?: return
         if (polling || machine.terminal()) return
         polling = true; val token = machine.revision; val id = current.getString("id")
         worker.execute {
             try {
+                if(valid(token)&&localIce.isNotEmpty()){
+                    val batch=localIce.toList().take(20);val rows=JSONArray()
+                    for(candidate in batch)rows.put(JSONObject().put("call_id",id).put("sender_id",owner).put("candidate",JSONObject().put("candidate",candidate.sdp).put("sdpMid",candidate.sdpMid).put("sdpMLineIndex",candidate.sdpMLineIndex)))
+                    ConnectCallSession.insertBatch(this,"/supabase/rest/v1/connect_call_ice",rows,owner)
+                    if(valid(token))repeat(batch.size){localIce.poll()}
+                    ConnectCallDiagnostics.event(this,id,"ice-write","ack","COUNT_${batch.size}")
+                }
+            }catch(_:Exception){ConnectCallDiagnostics.event(this,id,"ice-write","retry","NETWORK")}
+            try {
                 val fresh = JSONArray(ConnectCallSession.api(this, "/supabase/rest/v1/connect_calls?id=eq.$id&select=*&limit=1")).optJSONObject(0)
                 if (fresh == null) { handler.post { if (valid(token)) end(ConnectCallState.Phase.ENDED, notifyServer = false) }; return@execute }
                 handler.post { if (valid(token)) updated(fresh) }
-                val items = JSONArray(ConnectCallSession.api(this, "/supabase/rest/v1/connect_call_ice?call_id=eq.$id&sender_id=neq.$owner&id=gt.$lastRemoteIceId&order=id.asc&limit=250"))
+                val items = try { JSONArray(ConnectCallSession.api(this, "/supabase/rest/v1/connect_call_ice?call_id=eq.$id&sender_id=neq.$owner&id=gt.$lastRemoteIceId&order=id.asc&limit=250")) } catch (_: Exception) { ConnectCallDiagnostics.event(this,id,"ice-read","retry","NETWORK"); JSONArray() }
                 handler.post { if (valid(token)) for (i in 0 until items.length()) {
                     val item = items.optJSONObject(i) ?: continue; val candidateId = item.optLong("id"); lastRemoteIceId = maxOf(lastRemoteIceId,candidateId)
                     if (item.optString("sender_id") == owner || !knownIce.add(candidateId)) continue
@@ -342,12 +395,7 @@ class ConnectCallService : Service() {
                     val candidate = IceCandidate(ice.optString("sdpMid").takeUnless { it == "null" || it.isEmpty() }?.take(128), ice.optInt("sdpMLineIndex", 0), value)
                     try { if (remoteSet) peer?.addIceCandidate(candidate) else remoteIce.add(candidate) } catch (_: Exception) { android.util.Log.w("ConnectCall","ICE_INVALID") }
                 } }
-                if(valid(token)&&localIce.isNotEmpty()){
-                    val batch=localIce.toList().take(20);val rows=JSONArray()
-                    for(candidate in batch)rows.put(JSONObject().put("call_id",id).put("sender_id",owner).put("candidate",JSONObject().put("candidate",candidate.sdp).put("sdpMid",candidate.sdpMid).put("sdpMLineIndex",candidate.sdpMLineIndex)))
-                    ConnectCallSession.insertBatch(this,"/supabase/rest/v1/connect_call_ice",rows,owner)
-                    if(valid(token))repeat(batch.size){localIce.poll()}
-                }
+
             } catch (_: Exception) { ConnectCallDiagnostics.event(this,id,"sync","retry","NETWORK"); /* Keep queued ICE until server acknowledgement. */ }
             finally { handler.post { if (valid(token)) polling = false } }
         }
@@ -355,7 +403,7 @@ class ConnectCallService : Service() {
     private fun updated(fresh: JSONObject) {
         val status = fresh.optString("status")
         if (status !in listOf("ringing", "active")) {
-            val result = when (status) { "declined" -> ConnectCallState.Phase.DECLINED; "busy" -> ConnectCallState.Phase.BUSY; "missed" -> ConnectCallState.Phase.MISSED; "failed" -> ConnectCallState.Phase.FAILED; else -> ConnectCallState.Phase.ENDED }
+            val result = when (status) { "declined" -> ConnectCallState.Phase.DECLINED; "busy" -> ConnectCallState.Phase.BUSY; "missed" -> ConnectCallState.Phase.MISSED; "failed" -> ConnectCallState.Phase.FAILED; "ended" -> if(fresh.isNull("answered_at"))ConnectCallState.Phase.CANCELLED else ConnectCallState.Phase.ENDED; else -> ConnectCallState.Phase.ENDED }
             end(result, notifyServer = false); return
         }
         if (incoming && status == "active" && !machine.ownsAnswer(fresh.optJSONObject("answer")?.optString("sdp"))) { end(ConnectCallState.Phase.ENDED, "Звонок принят на другом устройстве", false); return }
@@ -478,10 +526,12 @@ class ConnectCallService : Service() {
     }
     private fun end(result: ConnectCallState.Phase, problem: String = "", notifyServer: Boolean = true) {
         val id = row?.optString("id") ?: ""
+        ConnectCallIngress.acknowledge(this,machine.id)
         val acceptedHere = row?.optString("status")=="active" && machine.ownsAnswer(row?.optJSONObject("answer")?.optString("sdp"))
         val preAnswerCallee = incoming && !acceptedHere
         if (!machine.end(result)) { stopIfIdle(); return }
         ConnectCallDiagnostics.event(this,id,"finish",result.name,if(notifyServer)"LOCAL" else "SERVER")
+        ConnectCallOperations.complete(operationId,null,problem.ifBlank{"Подготовка вызова прервана"})
         handler.removeCallbacks(tick); sounds.release()
         if(problem.isNotBlank())android.widget.Toast.makeText(this,problem,android.widget.Toast.LENGTH_LONG).show()
         // Invalidate callbacks before closing WebRTC; late ICE/SDP cannot revive this UUID.
@@ -498,9 +548,9 @@ class ConnectCallService : Service() {
         val prefs = getSharedPreferences("connect_incoming", 0)
         prefs.edit().putLong("ended:${machine.id}", System.currentTimeMillis()).remove("id").apply()
         prefs.all.filter { it.key.startsWith("ended:") && (it.value as? Long ?: 0) < System.currentTimeMillis() - 86400000 }.forEach { prefs.edit().remove(it.key).apply() }
-        sendBroadcast(Intent(ConnectIncomingCallActivity.DISMISS).setPackage(packageName).putExtra("callId", machine.id))
+        sendBroadcast(Intent(ConnectIncomingCallActivity.DISMISS).setPackage(packageName).putExtra("callId", machine.id).putExtra("presentationId",operationId.ifBlank{machine.id}))
         sequence++
-        last = view().put("notice", problem.ifBlank { when (result) { ConnectCallState.Phase.BUSY -> "Собеседник занят"; ConnectCallState.Phase.DECLINED -> "Звонок отклонён"; ConnectCallState.Phase.MISSED -> "Нет ответа"; ConnectCallState.Phase.FAILED -> "Не удалось установить аудиосоединение"; else -> "" } })
+        last = view().put("notice", problem.ifBlank { when (result) { ConnectCallState.Phase.BUSY -> "Собеседник занят"; ConnectCallState.Phase.DECLINED -> "Звонок отклонён"; ConnectCallState.Phase.MISSED -> "Нет ответа"; ConnectCallState.Phase.FAILED -> "Не удалось установить аудиосоединение"; ConnectCallState.Phase.CANCELLED -> "Вызов отменён"; else -> "" } })
         observer?.invoke(JSONObject(last.toString()))
         if (notifyServer) finishServer(id, if(preAnswerCallee)"decline" else when (result) { ConnectCallState.Phase.DECLINED -> "decline"; ConnectCallState.Phase.MISSED -> "missed"; ConnectCallState.Phase.FAILED -> "failed"; ConnectCallState.Phase.BUSY -> "busy"; else -> "hangup" })
         stopForeground(STOP_FOREGROUND_REMOVE); getSystemService(NotificationManager::class.java).cancel(NOTIFICATION); val revision = machine.revision; handler.postDelayed({ if (machine.terminal() && machine.revision == revision && verifying.isEmpty()) stopSelf() }, 250)
@@ -519,11 +569,11 @@ class ConnectCallService : Service() {
         sequence++
         val value = view(); last = value
         val phase = value.getString("phase"); val now = System.currentTimeMillis()
-        getSharedPreferences("connect_incoming", 0).edit().putString("id", machine.id).putString("name", name).putString("avatar", avatar).putString("phase", phase)
+        getSharedPreferences("connect_incoming", 0).edit().putString("id", machine.id).putString("presentationId",operationId.ifBlank{machine.id}).putString("name", name).putString("avatar", avatar).putString("phase", phase)
             .putBoolean("muted", muted).putBoolean("speaker", route == CallAudioState.ROUTE_SPEAKER).putString("route", value.getString("audioOutput"))
             .putLong("startedElapsed", activeAt).putLong("started", now - value.getInt("elapsed") * 1000L).putString("problem", "")
             .putLong("expires", if (phase == "incoming") now + (ringDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(1) else now + 86400000).apply()
-        sendBroadcast(Intent(ConnectIncomingCallActivity.STATE).setPackage(packageName).putExtra("callId", machine.id)); observer?.invoke(JSONObject(value.toString()))
+        sendBroadcast(Intent(ConnectIncomingCallActivity.STATE).setPackage(packageName).putExtra("callId", machine.id).putExtra("presentationId",operationId.ifBlank{machine.id})); observer?.invoke(JSONObject(value.toString()))
     }
     private fun notification(ringing: Boolean): Notification {
         val open = PendingIntent.getActivity(this, 51, Intent(this, ConnectIncomingCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -531,11 +581,12 @@ class ConnectCallService : Service() {
         val verified=machine.phase!=ConnectCallState.Phase.IDLE&&!machine.terminal()
         val builder = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_launcher_monochrome).setContentTitle(if (!verified||owner.isEmpty()) "Connect" else name)
             .setContentText(label).setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_HIGH).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setContentIntent(open).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(!ringing || incomingPosted).setSilent(true)
+            .setContentIntent(open).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(!ringing || incomingPosted)
         if (ringing) {
             builder.setStyle(NotificationCompat.CallStyle.forIncomingCall(Person.Builder().setName(name).setImportant(true).build(), pending(this, "decline", machine.id), pending(this, "answer", machine.id)))
             builder.setTimeoutAfter((ringDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(1))
             if (Build.VERSION.SDK_INT < 34 || getSystemService(NotificationManager::class.java).canUseFullScreenIntent()) builder.setFullScreenIntent(open, true)
+            else if(!incomingPosted)ConnectCallDiagnostics.event(this,machine.id,"notification","heads-up","FULL_SCREEN_DENIED")
         } else if (verified&&owner.isNotEmpty()) builder.setStyle(NotificationCompat.CallStyle.forOngoingCall(Person.Builder().setName(name).build(), pending(this, "end", machine.id)))
         return builder.build()
     }

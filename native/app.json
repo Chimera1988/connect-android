@@ -3,12 +3,12 @@
     "name": "Connect",
     "slug": "connect-native-v2",
     "scheme": "connect",
-    "version": "2.2.3",
+    "version": "2.2.4",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.connect.messenger",
-      "versionCode": 13,
+      "versionCode": 14,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -63,8 +63,8 @@
         "expo-camera",
         {
           "recordAudioAndroid": true,
-          "cameraPermission": "\u041a\u0430\u043c\u0435\u0440\u0430 \u043d\u0443\u0436\u043d\u0430 \u0434\u043b\u044f \u0437\u0430\u043f\u0438\u0441\u0438 \u0432\u0438\u0434\u0435\u043e\u043a\u0440\u0443\u0436\u043a\u043e\u0432 Connect.",
-          "microphonePermission": "\u041c\u0438\u043a\u0440\u043e\u0444\u043e\u043d \u043d\u0443\u0436\u0435\u043d \u0434\u043b\u044f \u0437\u0430\u043f\u0438\u0441\u0438 \u0432\u0438\u0434\u0435\u043e\u043a\u0440\u0443\u0436\u043a\u043e\u0432 Connect."
+          "cameraPermission": "Камера нужна для записи видеокружков Connect.",
+          "microphonePermission": "Микрофон нужен для записи видеокружков Connect."
         }
       ],
       "./plugins/withConnectSounds",

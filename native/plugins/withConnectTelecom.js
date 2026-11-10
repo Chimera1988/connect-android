@@ -23,6 +23,13 @@ function configureManifest(m){
  app.activity=app.activity||[];const main=app.activity.find(a=>/\.?MainActivity$/.test(a.$?.['android:name']||''));if(!main)throw Error('Connect call manifest: missing MainActivity');
  delete main.$['android:showWhenLocked'];delete main.$['android:turnScreenOn'];main.$['android:windowSoftInputMode']='adjustResize';
  if(!app.activity.some(a=>a.$?.['android:name']==='.ConnectIncomingCallActivity'))app.activity.push({$:{'android:name':'.ConnectIncomingCallActivity','android:exported':'false','android:theme':'@style/ConnectIncomingCallTheme','android:launchMode':'singleTask','android:excludeFromRecents':'true','android:showWhenLocked':'true','android:turnScreenOn':'true'}});
+ app.service=(app.service||[]).filter(s=>s.$?.['android:name']!=='.ConnectCallHintJob');
+ app.service.push({$:{'android:name':'.ConnectCallHintJob','android:exported':'true','android:permission':'android.permission.BIND_JOB_SERVICE'}});
+ app.receiver=(app.receiver||[]).filter(r=>r.$?.['android:name']!=='.ConnectCallRestoreReceiver');
+ app.receiver.push({$:{'android:name':'.ConnectCallRestoreReceiver','android:exported':'false'},'intent-filter':[{action:[{$:{'android:name':'android.intent.action.BOOT_COMPLETED'}},{$:{'android:name':'android.intent.action.MY_PACKAGE_REPLACED'}}]}]});
+ if(!app.activity.some(a=>a.$?.['android:name']==='.ConnectCallSetupActivity'))app.activity.push({$:{'android:name':'.ConnectCallSetupActivity','android:exported':'false','android:theme':'@style/ConnectIncomingCallTheme'}});
+ app.provider=(app.provider||[]).filter(p=>p.$?.['android:authorities']!=='${applicationId}.call-diagnostics');
+ app.provider.push({$:{'android:name':'androidx.core.content.FileProvider','android:authorities':'${applicationId}.call-diagnostics','android:exported':'false','android:grantUriPermissions':'true'},'meta-data':[{$:{'android:name':'android.support.FILE_PROVIDER_PATHS','android:resource':'@xml/connect_call_diagnostics_paths'}}]});
  return m;
 }
 function writeNative(platform){
@@ -30,7 +37,8 @@ function writeNative(platform){
  for(const file of fs.readdirSync(path.join(__dirname,'telecom')).filter(n=>n.endsWith('.kt')&&n!=='ConnectCallGuardService.kt'))fs.copyFileSync(path.join(__dirname,'telecom',file),path.join(pkg,file));
  fs.rmSync(path.join(pkg,'ConnectCallGuardService.kt'),{force:true});
  const tests=path.join(platform,'app/src/test/java/com/connect/messenger');fs.mkdirSync(tests,{recursive:true});
- fs.copyFileSync(path.join(__dirname,'telecom-tests/ConnectCallStateTest.kt'),path.join(tests,'ConnectCallStateTest.kt'));
+ for(const file of fs.readdirSync(path.join(__dirname,'telecom-tests')).filter(n=>n.endsWith('.kt')))fs.copyFileSync(path.join(__dirname,'telecom-tests',file),path.join(tests,file));
+ const xml=path.join(platform,'app/src/main/res/xml');fs.mkdirSync(xml,{recursive:true});fs.writeFileSync(path.join(xml,'connect_call_diagnostics_paths.xml'),'<paths><cache-path name="diagnostics" path="connect-call-export/" /></paths>');
  const values=path.join(platform,'app/src/main/res/values');fs.mkdirSync(values,{recursive:true});
  fs.writeFileSync(path.join(values,'connect_incoming.xml'),`<resources>
 <style name="ConnectIncomingCallTheme" parent="android:style/Theme.Material.NoActionBar">

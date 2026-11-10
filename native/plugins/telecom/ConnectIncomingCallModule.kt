@@ -27,7 +27,9 @@ class ConnectIncomingCallModule(private val context: ReactApplicationContext) : 
     context.runOnUiQueueThread{
       if(context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED){promise.resolve(true);return@runOnUiQueueThread}
       if(ConnectCallMicrophone.pending!=null){promise.reject("CALL_PERMISSION_BUSY","Запрос микрофона уже открыт.");return@runOnUiQueueThread}
+      if(context.lifecycleState!=com.facebook.react.common.LifecycleState.RESUMED){promise.reject("CALL_WINDOW","Откройте Connect, чтобы разрешить микрофон");return@runOnUiQueueThread}
       ConnectCallMicrophone.pending=promise
+      android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({if(ConnectCallMicrophone.pending===promise)ConnectCallMicrophone.complete(false)},60000)
       try{context.startActivity(Intent(context,ConnectIncomingCallActivity::class.java)
         .putExtra("requestMic",true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))}
       catch(_:Exception){ConnectCallMicrophone.complete(false)}
@@ -72,15 +74,20 @@ class ConnectIncomingCallModule(private val context: ReactApplicationContext) : 
     promise.resolve(true)
   }
 
+  @ReactMethod fun prepareCalls(once:Boolean,promise:Promise){
+    context.runOnUiQueueThread{
+      val prefs=context.getSharedPreferences("connect_call_settings",0)
+      if(once&&prefs.getInt("setupVersion",0)>=14){promise.resolve(false);return@runOnUiQueueThread}
+      val activity=context.currentActivity
+      if(activity==null||!activity.hasWindowFocus()){promise.resolve(false);return@runOnUiQueueThread}
+      activity.startActivity(Intent(activity,ConnectCallSetupActivity::class.java))
+      promise.resolve(true)
+    }
+  }
   @ReactMethod
   fun openCallSettings(promise: Promise) {
     try {
-      val intent = if (android.os.Build.VERSION.SDK_INT >= 34)
-        Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
-          android.net.Uri.parse("package:" + context.packageName))
-      else Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
-      context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+      context.startActivity(Intent(context,ConnectCallSetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
       promise.resolve(true)
     } catch (error: Exception) { promise.reject("CALL_SETTINGS", error.message, error) }
   }

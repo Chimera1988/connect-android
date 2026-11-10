@@ -59,7 +59,7 @@ function HybridConnect(){
   const sendSounds=useCallback(async()=>{
     const [message,call,messageSilent,callSilent]=await Promise.all([getConnectSoundPreference('messages'),getConnectSoundPreference('calls'),getConnectSoundSilence('messages'),getConnectSoundSilence('calls')]);
     const fullScreenAllowed=await NativeModules.ConnectIncomingCallModule?.canShowFullScreenCalls?.().catch(()=>true)??true;
-    send('sounds',{fullScreenAllowed,message:message?.name||'Мягкий',call:call?.name||'По умолчанию',messageCustom:!!message,callCustom:!!call,messageSilent,callSilent});
+    send('sounds',{fullScreenAllowed,message:message?.name||'Мягкий',call:call?.name||'Connect Call',messageCustom:!!message,callCustom:!!call,messageSilent,callSilent});
   },[send]);
   useEffect(()=>{
     let alive=true;
@@ -85,6 +85,14 @@ function HybridConnect(){
       if(alive)setAvatars(urls);
     });
     return()=>{alive=false;};
+  },[ownerId]);
+  useEffect(()=>{
+    if(!ownerId)return;
+    let done=false;
+    const prepare=()=>{if(!done&&AppState.currentState==='active'&&voiceRef.current.phase==='idle')void NativeModules.ConnectIncomingCallModule.prepareCalls(true).then((shown:boolean)=>{done=shown;}).catch(()=>{});};
+    const timer=setTimeout(prepare,1200);
+    const resume=AppState.addEventListener('change',s=>{if(s==='active')prepare();});
+    return()=>{clearTimeout(timer);resume.remove();};
   },[ownerId]);
   useEffect(()=>{
     if(!ownerId)return;

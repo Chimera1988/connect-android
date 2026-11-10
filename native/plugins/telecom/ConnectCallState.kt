@@ -2,7 +2,7 @@ package com.connect.messenger
 
 /** Protocol-independent runtime facts. Server 'active' means answered, not audio-ready. */
 internal class ConnectCallState {
-    enum class Phase { IDLE, PREPARING, REMOTE_RINGING, INCOMING, CONNECTING, ACTIVE, RECONNECTING, ENDED, DECLINED, MISSED, BUSY, FAILED }
+    enum class Phase { IDLE, PREPARING, REMOTE_RINGING, INCOMING, CONNECTING, ACTIVE, RECONNECTING, ENDED, DECLINED, MISSED, BUSY, FAILED, CANCELLED }
     @Volatile var phase = Phase.IDLE; private set
     @Volatile var revision = 0; private set
     @Volatile var id = ""; private set
@@ -20,7 +20,7 @@ internal class ConnectCallState {
         return revision
     }
     fun valid(token: Int) = token == revision && !terminal() && phase != Phase.IDLE
-    fun terminal() = phase in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED)
+    fun terminal() = phase in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED, Phase.CANCELLED)
     fun identified(callId: String) { check(!terminal()); id = callId; phase = Phase.REMOTE_RINGING }
     fun answered() { if (!terminal() && phase != Phase.ACTIVE && phase != Phase.RECONNECTING) phase = Phase.CONNECTING }
     fun transport(ready: Boolean) {
@@ -36,7 +36,7 @@ internal class ConnectCallState {
         }
     }
     fun end(result: Phase): Boolean {
-        require(result in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED))
+        require(result in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED, Phase.CANCELLED))
         if (terminal() || phase == Phase.IDLE) return false
         phase = result; revision++; connected = false; remoteAudio = false
         submittedAnswer = null

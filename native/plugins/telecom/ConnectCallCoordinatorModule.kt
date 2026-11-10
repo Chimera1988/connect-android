@@ -73,7 +73,15 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
     @ReactMethod fun getState(promise: Promise) { promise.resolve(map(ConnectCallService.snapshot())) }
     @ReactMethod fun dial(conversation: String, peer: String, name: String, operation: String, promise: Promise) {
         if (!conversation.matches(Regex("[0-9a-fA-F-]{36}")) || !peer.matches(Regex("[0-9a-fA-F-]{36}")) || !operation.matches(Regex("[0-9a-fA-F-]{36}"))) { promise.reject("CALL_INPUT", "Некорректный собеседник"); return }
-        ConnectCallService.action(context, "dial", operation, conversation = conversation, name = name, peer = peer); promise.resolve(true)
+        context.runOnUiQueueThread {
+            if(context.currentActivity==null||context.lifecycleState!=com.facebook.react.common.LifecycleState.RESUMED){promise.reject("CALL_WINDOW","Откройте Connect для исходящего звонка");return@runOnUiQueueThread}
+            if(ConnectCallService.snapshot().optString("phase")!="idle"){promise.reject("CALL_BUSY","Другой вызов уже выполняется");return@runOnUiQueueThread}
+            val registered=ConnectCallOperations.await(operation,{ConnectCallService.action(context,"end",operation)}) { id,error ->
+                if(error!=null)promise.reject("CALL_PREPARATION",error) else promise.resolve(id)
+            }
+            if(!registered){promise.reject("CALL_BUSY","Вызов уже подготавливается");return@runOnUiQueueThread}
+            if(!ConnectCallService.action(context,"dial",operation,conversation=conversation,name=name,peer=peer))ConnectCallOperations.complete(operation,null,"Android запретил запуск службы звонка")
+        }
     }
     @ReactMethod fun incoming(id: String, promise: Promise) { ConnectCallService.action(context, "incoming", id); promise.resolve(true) }
     @ReactMethod fun control(id: String, action: String, promise: Promise) {
@@ -93,9 +101,12 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
             showRoutes(activity); promise.resolve(true)
         }
     }
+    @ReactMethod fun getCallVibration(promise:Promise) {
+        promise.resolve(context.getSharedPreferences("connect_call_settings",0).getBoolean("callVibrationV2",true))
+    }
     @ReactMethod fun configureSounds(uri: String, silent: Boolean, vibrate: Boolean, previousChannel: String, promise: Promise) {
         if (uri.isNotEmpty() && !uri.startsWith("content://media/")) { promise.reject("CALL_SOUND", "Недопустимая мелодия"); return }
-        context.getSharedPreferences("connect_call_settings", 0).edit().putString("uri", uri.takeIf { it.isNotEmpty() }).putBoolean("silent", silent).putBoolean("vibrate", vibrate).putString("legacyChannel", previousChannel.take(200)).apply()
+        context.getSharedPreferences("connect_call_settings", 0).edit().putString("uri", uri.takeIf { it.isNotEmpty() }).putBoolean("silent", silent).putBoolean("vibrate", vibrate).putBoolean("callVibrationV2",vibrate).putString("legacyChannel", previousChannel.take(200)).apply()
         promise.resolve(ConnectCallService.CHANNEL)
     }
     @ReactMethod fun getAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { promise.resolve(ConnectCallSession.read(context, name)) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессия недоступна", error) } } }
@@ -103,7 +114,7 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
         if(name.endsWith("-auth-token")){val next=JSONObject(value).optJSONObject("user")?.optString("id");val previous=try{JSONObject(ConnectCallSession.read(context,name)?:"{}").optJSONObject("user")?.optString("id")}catch(_:Exception){ConnectCallService.snapshot().optString("userId")};if(!previous.isNullOrEmpty()&&next!=previous)ConnectCallService.action(context,"logout")}
         ConnectCallSession.write(context, name, value);if(name.endsWith("-auth-token"))ConnectPushTokenJob.enable(context);promise.resolve(null)
     } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессию не удалось сохранить", error) } } }
-    @ReactMethod fun removeAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { if(name.endsWith("-auth-token")){ConnectCallService.action(context,"logout");ConnectPushTokenJob.cancel(context)}; ConnectCallSession.write(context, name, null); promise.resolve(null) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессию не удалось удалить", error) } } }
+    @ReactMethod fun removeAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { if(name.endsWith("-auth-token")){ConnectCallService.action(context,"logout");ConnectPushTokenJob.cancel(context);ConnectCallIngress.clear(context)}; ConnectCallSession.write(context, name, null); promise.resolve(null) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессию не удалось удалить", error) } } }
     companion object {
         fun showRoutes(activity: android.app.Activity) {
             val state = ConnectCallService.snapshot(); val id = state.optString("callId"); val supported = state.optInt("supportedRoutes")

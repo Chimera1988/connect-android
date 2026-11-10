@@ -42,27 +42,26 @@ internal class ConnectCallAudio(private val context: Context, private val onFocu
         val notifications = context.getSystemService(NotificationManager::class.java)
         if (!notifications.areNotificationsEnabled() || notifications.getNotificationChannel(ConnectCallService.CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE || !dndAllowsRing()) return
         if (manager.ringerMode == AudioManager.RINGER_MODE_SILENT) return
-        if (prefs.getBoolean("vibrate", true) && (manager.ringerMode == AudioManager.RINGER_MODE_VIBRATE || Settings.System.getInt(context.contentResolver, "vibrate_when_ringing", 1) != 0)) {
+        if (prefs.getBoolean("callVibrationV2", true) && (manager.ringerMode == AudioManager.RINGER_MODE_VIBRATE || Settings.System.getInt(context.contentResolver, "vibrate_when_ringing", 1) != 0)) {
             val motor = context.getSystemService(Vibrator::class.java)
             if (motor?.hasVibrator() == true) {
                 vibrator = motor
                 motor.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 450, 850), 0), attributes(AudioAttributes.USAGE_NOTIFICATION_RINGTONE))
+                ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"vibration","started")
             }
         }
         if (prefs.getBoolean("silent", false) || manager.ringerMode != AudioManager.RINGER_MODE_NORMAL || manager.getStreamVolume(AudioManager.STREAM_RING) == 0) return
         val own = prefs.getString("uri", null)?.takeIf { it.startsWith("content://media/") }?.let(Uri::parse)
-        // Resolve the real current phone setting on every call, not a frozen channel URI.
-        val system = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
-        val settingsProxy=if(system!=null)RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE) else null
-        for (uri in listOfNotNull(own, settingsProxy, system).distinct()) {
+        val bundled=Uri.parse("android.resource://${context.packageName}/raw/connect_call")
+        for (uri in listOfNotNull(own, bundled).distinct()) {
             try {
                 context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { } ?: continue
                 val sound = RingtoneManager.getRingtone(context, uri) ?: continue
                 sound.audioAttributes = attributes(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                sound.isLooping = true; sound.play(); ring = sound; return
+                sound.isLooping = true; sound.play(); ring = sound; ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"ringtone","playing",if(uri==bundled)"CONNECT_CALL" else "CUSTOM"); return
             } catch (_: Exception) { android.util.Log.w("ConnectCall", "RING_URI_UNAVAILABLE") }
         }
-        // A silent/unavailable system ringtone must not fall back to a message tone.
+        // Never substitute a message notification tone.
         android.util.Log.w("ConnectCall", "RING_UNAVAILABLE")
     }
     fun communication() {

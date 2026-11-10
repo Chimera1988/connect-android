@@ -7,7 +7,7 @@ module.exports=function withConnectBuiltinSounds(config){
     const root=mod.modRequest.projectRoot;
     const dest=path.join(mod.modRequest.platformProjectRoot,'app','src','main','res','raw');
     fs.mkdirSync(dest,{recursive:true});
-    for(const name of ['soft','bright','gentle']){
+    for(const name of ['soft','bright','gentle','call']){
       const filename=`connect_${name}.wav`;
       const src=path.join(root,'assets','notification_sounds',filename);
       if(!fs.existsSync(src))throw Error('Missing notification sound: '+src);

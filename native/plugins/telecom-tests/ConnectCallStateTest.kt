@@ -42,7 +42,7 @@ class ConnectCallStateTest {
         state.audio(true); assertEquals(ConnectCallState.Phase.ACTIVE,state.phase)
     }
     @Test fun allTerminalPathsAreIdempotentAndInvalidateLatePeerCallbacks() {
-        for (result in listOf(ConnectCallState.Phase.ENDED, ConnectCallState.Phase.DECLINED, ConnectCallState.Phase.MISSED, ConnectCallState.Phase.BUSY, ConnectCallState.Phase.FAILED)) {
+        for (result in listOf(ConnectCallState.Phase.ENDED, ConnectCallState.Phase.DECLINED, ConnectCallState.Phase.MISSED, ConnectCallState.Phase.BUSY, ConnectCallState.Phase.FAILED, ConnectCallState.Phase.CANCELLED)) {
             val state = ConnectCallState(); val old = state.begin("first", true); state.answered()
             assertTrue(state.end(result)); assertFalse(state.end(result)); assertFalse(state.valid(old))
             state.transport(true); state.audio(true); assertEquals(result, state.phase)

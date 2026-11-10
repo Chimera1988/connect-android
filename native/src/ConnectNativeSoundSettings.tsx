@@ -58,15 +58,11 @@ export async function setConnectSoundSilence(kind:SoundKind,silent:boolean){
 export async function getConnectSoundChannel(kind:SoundKind,options?:{silent?:boolean;vibrate?:boolean;tone?:BuiltinNotificationTone}):Promise<string>{
   const pref=await getConnectSoundPreference(kind);
   const silent=options?.silent===true||await getConnectSoundSilence(kind);
-  let savedVibration=true;
-  if(kind==='calls')try{
-    const prefs=JSON.parse(await SecureStore.getItemAsync('connect-native-notifications-v1')||'null');
-    if(typeof prefs?.vibrate==='boolean')savedVibration=prefs.vibrate;
-  }catch{/* A corrupt preference keeps Android's normal call vibration. */}
-  const vibration=options?.vibrate??savedVibration;
+  // Message vibration never disables incoming calls. Dedicated call preference is native.
+  const vibration=kind==='calls'?await NativeModules.ConnectCallCoordinator.getCallVibration():options?.vibrate??true;
   const tone=options?.tone&&options.tone!=='silent'?options.tone:'soft';
-  const soundName=kind==='messages'?'connect_'+tone:'content://settings/system/ringtone';
-  const channelId=`connect-native-${kind}-${pref?'chosen-'+hashUri(pref.uri)+'-v5':(kind==='calls'?'ringtone':soundName)+'-v5'}-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
+  const soundName=kind==='messages'?'connect_'+tone:'android.resource://com.connect.messenger/raw/connect_call';
+  const channelId=`connect-native-${kind}-${pref?'chosen-'+hashUri(pref.uri)+'-v5':(kind==='calls'?'connect-call':soundName)+'-v5'}-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
   if(kind==='calls'){
     // The coordinator owns the ringtone/vibrator. Its stable notification
     // channel is silent and keeps the user's Android importance/DND choices.
@@ -111,16 +107,17 @@ export async function previewConnectSound(kind:SoundKind){
   if(!native?.previewSound)throw new Error('Прослушивание доступно только в обновлённом APK');
   // Match the notification channel's built-in soft tone, not Android's unrelated
   // default notification sound. A chosen URI always takes precedence.
-  await native.previewSound(pref?.uri||(kind==='calls'?'default-ringtone':'android.resource://com.connect.messenger/raw/connect_soft'));
+  await native.previewSound(pref?.uri||(kind==='calls'?'android.resource://com.connect.messenger/raw/connect_call':'android.resource://com.connect.messenger/raw/connect_soft'));
 }
 export async function resetConnectSound(kind:SoundKind){
   assertKind(kind);
   await stopSoundPreview();
   await SecureStore.deleteItemAsync(STORAGE[kind]);
+  if(kind==='calls')await SecureStore.setItemAsync(SILENT_STORAGE.calls,'no');
   await getConnectSoundChannel(kind);
 }
 export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
-  const [picked,setPicked]=useState<Record<SoundKind,string>>({messages:DEFAULT_NAME,calls:DEFAULT_NAME});
+  const [picked,setPicked]=useState<Record<SoundKind,string>>({messages:DEFAULT_NAME,calls:'Connect Call'});
   const [busy,setBusy]=useState<SoundKind|null>(null);
   const [previewing,setPreviewing]=useState<SoundKind|null>(null);
   const [problem,setProblem]=useState('');
@@ -136,7 +133,7 @@ export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
   useEffect(()=>{
     let active=true;
     void Promise.all([getConnectSoundPreference('messages'),getConnectSoundPreference('calls')]).then(([messages,calls])=>{
-      if(active)setPicked({messages:messages?.name||DEFAULT_NAME,calls:calls?.name||DEFAULT_NAME});
+      if(active)setPicked({messages:messages?.name||DEFAULT_NAME,calls:calls?.name||'Connect Call'});
     });
     return()=>{active=false;};
   },[]);
@@ -155,7 +152,7 @@ export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
     setProblem('');setBusy(kind);
     try{
       await resetConnectSound(kind);setPreviewing(null);
-      setPicked(prev=>({...prev,[kind]:DEFAULT_NAME}));
+      setPicked(prev=>({...prev,[kind]:kind==='calls'?'Connect Call':DEFAULT_NAME}));
     }catch(e){setProblem(e instanceof Error?e.message:String(e));}
     finally{setBusy(null);}
   }
@@ -170,8 +167,8 @@ export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
         <Pressable accessibilityRole="button" disabled={!!busy} accessibilityLabel={previewing===kind?'Остановить звук':'Прослушать звук'} onPress={()=>void preview(kind)} style={{padding:10}}>
           <Text style={{color:colors.accent}}>{previewing===kind?'■ Стоп':'▶ Прослушать'}</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" disabled={!!busy||picked[kind]===DEFAULT_NAME} onPress={()=>void restore(kind)} style={{padding:10,opacity:picked[kind]===DEFAULT_NAME?0.45:1}}>
-          <Text style={{color:colors.muted}}>Сбросить</Text>
+        <Pressable accessibilityRole="button" disabled={!!busy||picked[kind]===(kind==='calls'?'Connect Call':DEFAULT_NAME)} onPress={()=>void restore(kind)} style={{padding:10,opacity:picked[kind]===(kind==='calls'?'Connect Call':DEFAULT_NAME)?0.45:1}}>
+          <Text style={{color:colors.muted}}>{kind==='calls'?'Вернуть Connect Call':'Сбросить'}</Text>
         </Pressable>
         {busy===kind&&<ActivityIndicator color={colors.accent}/>}
       </View>
