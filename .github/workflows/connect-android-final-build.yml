@@ -99,10 +99,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          # App.tsx imports ./generated/pwa, produced by build:web.
+          npm run build:web
+          test -s src/generated/pwa.ts
           npm run typecheck
           npm run typecheck:web
           npm test
-          npm run build:web
       - name: Restore original signing key if supplied
         env:
           CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
