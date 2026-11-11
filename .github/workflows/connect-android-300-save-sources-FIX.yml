@@ -1,0 +1,129 @@
+name: Connect Android 3.0 - save verified native sources (no APK rebuild)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-android-300-save-sources-FIX.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-v3-source-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'Chimera1988/connect-android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Restore the exact Android 3.0 sources from the successful verified package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip, hashlib, json
+
+          root=Path.cwd().resolve()
+          installer=root/'.github/workflows/connect-android-300-update-FIX.yml'
+          assert installer.is_file(), 'Missing original verified Connect Android 3.0 installer'
+          source=installer.read_text(encoding='utf-8')
+          begin='# CONNECT_300_PACKAGE_BEGIN\n'
+          end='# CONNECT_300_PACKAGE_END'
+          assert source.count(begin)==1 and source.count(end)==1, 'Invalid embedded source boundary'
+          encoded=''.join(line[2:] for line in source.split(begin,1)[1].split(end,1)[0].splitlines() if line.startswith('# '))
+          packed=base64.b64decode(encoded,validate=True)
+          expected='23f945478270c544e8ee0cf6eeab145beabf474298e6d5739ccc0d7b67bad682'
+          assert hashlib.sha256(packed).hexdigest()==expected, 'Unexpected embedded source package SHA256'
+          payload=json.loads(gzip.decompress(packed))
+
+          def safe_path(name):
+              assert name.startswith('native/') and '..' not in Path(name).parts, 'Non-Android source path: '+name
+              path=root/name
+              assert path.resolve().is_relative_to(root), 'Unsafe path: '+name
+              assert not any(p.is_symlink() for p in [path,*path.parents] if p.is_relative_to(root)), 'Symlink: '+name
+              assert not path.exists() or path.is_file(), 'Not a source file: '+name
+              return path
+          def sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+          # Validate the original, 2.2.7-based source guards before modifying anything.
+          # This is the same data validated by successful workflow #43106977184.
+          for name,expected_sha in payload['unchanged'].items():
+              if name.startswith('native/'):
+                  assert sha(safe_path(name))==expected_sha, 'Prerequisite mismatch: '+name
+
+          staged={}
+          for name,encoded_file in payload['files'].items():
+              if not name.startswith('native/'):
+                  continue  # Do not write GitHub workflows; the bot cannot push those.
+              data=(encoded_file.encode('utf-8') if isinstance(encoded_file,str)
+                    else base64.b64decode(encoded_file['binary'],validate=True))
+              current=sha(safe_path(name))
+              desired=hashlib.sha256(data).hexdigest()
+              assert current==desired or current in payload['before'].get(name,[None]), 'Source drift: '+name
+              if current!=desired:
+                  staged[name]=data
+
+          for name,expected_sha in payload['delete'].items():
+              if name.startswith('native/'):
+                  assert sha(safe_path(name)) in (None,expected_sha), 'Delete guard: '+name
+
+          # All guards passed: apply only the exact verified native source content.
+          for name,data in staged.items():
+              dest=safe_path(name)
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              dest.write_bytes(data)
+          for name in payload['delete']:
+              if name.startswith('native/'):
+                  safe_path(name).unlink(missing_ok=True)
+
+          config=json.loads((root/'native/app.json').read_text(encoding='utf-8'))['expo']
+          assert config['version']=='3.0.0' and config['android']['versionCode']==18
+          assert config['android']['package']=='com.connect.messenger'
+          for name,encoded_file in payload['files'].items():
+              if name.startswith('native/'):
+                  data=(encoded_file.encode('utf-8') if isinstance(encoded_file,str)
+                        else base64.b64decode(encoded_file['binary'],validate=True))
+                  assert sha(safe_path(name))==hashlib.sha256(data).hexdigest(), 'Post-apply digest mismatch: '+name
+          print(f'Verified native Android 3.0 sources applied: {len(staged)} files. PWA and workflows untouched.')
+          PY
+
+      - name: Publish source-only changes; fail if GitHub rejects them
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A -- native/
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Already published. No changes required.'
+            exit 0
+          fi
+          if git diff --cached --name-only | grep -v '^native/'; then
+            echo '::error::Unexpected staged path outside native/'
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Store verified Connect Android 3.0 (18) source code [skip ci]'
+          git push origin HEAD:main
+          echo 'Android 3.0 source successfully committed to main.'
+
+      - name: Confirm published version on the remote branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          echo 'Verified: origin/main matches the Connect Android 3.0 source commit.'
