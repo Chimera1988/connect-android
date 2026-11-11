@@ -24,7 +24,7 @@ class ConnectCallStateTest {
         assertEquals(ConnectCallState.Phase.ACTIVE, state.phase)
     }
     @Test fun transportWithoutReadyAudioIsNotAConversation() {
-        val state = ConnectCallState(); state.begin("first", false); state.identified("server-id"); state.answered(); state.transport(true)
+        val state = ConnectCallState(); state.begin("first", false); state.offered();state.identified("server-id"); state.answered(); state.transport(true)
         assertEquals(ConnectCallState.Phase.CONNECTING, state.phase)
         state.audio(true); assertEquals(ConnectCallState.Phase.ACTIVE, state.phase)
     }
@@ -65,7 +65,7 @@ class ConnectCallStateTest {
     }
     @Test fun repeatedCallsDoNotAcceptPriorGenerationCallbacks() {
         val state = ConnectCallState()
-        for(i in 0 until 5000){val token=state.begin("call-$i",false);state.identified("server-$i");state.answered();state.end(ConnectCallState.Phase.ENDED);assertFalse(state.valid(token));state.transport(true);assertTrue(state.terminal())}
+        for(i in 0 until 5000){val token=state.begin("call-$i",false);state.offered();state.identified("server-$i");state.answered();state.end(ConnectCallState.Phase.ENDED);assertFalse(state.valid(token));state.transport(true);assertTrue(state.terminal())}
     }
     @Test fun accountSwitchDuringIncomingValidationCannotPresentTheOldCall(){
         assertFalse(ConnectCallState.validIncoming("a","a","ringing",9000,10000,3,4))

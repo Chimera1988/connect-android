@@ -88,11 +88,14 @@ internal object ConnectCallSession {
         check(path.startsWith("/supabase/") || path.startsWith("/api/"))
         val connection = URL(BASE + path).openConnection() as HttpURLConnection
         try {
+            connection.useCaches=false;connection.setRequestProperty("Cache-Control","no-cache")
             connection.connectTimeout = 4000; connection.readTimeout = 4000; connection.requestMethod = method
             connection.setRequestProperty("apikey", KEY)
             if (token != null) connection.setRequestProperty("Authorization", "Bearer $token")
             if (body != null) { connection.doOutput = true; connection.setRequestProperty("Content-Type", "application/json"); connection.outputStream.use { it.write(body.toByteArray()) } }
-            if (connection.responseCode !in 200..299) throw HttpFailure(connection.responseCode)
+            val status=connection.responseCode
+            ConnectCallServerClock.observe(connection.date,android.os.SystemClock.elapsedRealtime())
+            if (status !in 200..299) throw HttpFailure(status)
             return connection.inputStream.bufferedReader().use { it.readText() }
         } finally { connection.disconnect() }
     }

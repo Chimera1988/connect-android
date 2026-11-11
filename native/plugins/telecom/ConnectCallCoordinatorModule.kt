@@ -21,7 +21,7 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
             discovering=true
             ConnectCallSession.network.execute{try{
                 val identity=ConnectCallSession.identity(context)
-                val since=java.time.Instant.now().minusSeconds(60).toString()
+                val since=java.time.Instant.ofEpochMilli(ConnectCallServerClock.now(android.os.SystemClock.elapsedRealtime(),System.currentTimeMillis())-60000).toString()
                 val rows=org.json.JSONArray(ConnectCallSession.api(context,"/supabase/rest/v1/connect_calls?callee_id=eq.${identity.first}&status=eq.ringing&created_at=gte.$since&select=id&order=created_at.desc&limit=1",expectedOwner=identity.first))
                 val id=rows.optJSONObject(0)?.optString("id")
                 handler.post{if(alive&&context.lifecycleState==com.facebook.react.common.LifecycleState.RESUMED&&identity.second==ConnectCallSession.epoch&&!id.isNullOrBlank())ConnectCallService.action(context,"incoming",id)}
@@ -40,7 +40,10 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
         if(identity.isEmpty()||presented==identity)return
         if(ConnectIncomingCallActivity.visible){presented=identity;return}
         val activity=context.currentActivity
-        if(activity?.hasWindowFocus()==true){presented=identity;activity.startActivity(Intent(context,ConnectIncomingCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))}
+        if(activity?.hasWindowFocus()==true){
+            try{activity.startActivity(Intent(context,ConnectIncomingCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP));presented=identity;ConnectCallDiagnostics.event(context,state.optString("callId"),"presentation","activity-requested","FOREGROUND")}
+            catch(_:Exception){ConnectCallDiagnostics.event(context,state.optString("callId"),"presentation","failed","ACTIVITY_START_DENIED")}
+        }
         else if(attempt<10)handler.postDelayed({val current=ConnectCallService.snapshot();if(current.optString("presentationId",current.optString("callId"))==identity)showOnce(current,attempt+1)},100)
     }
     override fun getName() = "ConnectCallCoordinator"
@@ -70,24 +73,35 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
     override fun invalidate() { alive=false;context.removeLifecycleEventListener(this);if(ConnectCallService.observer===listener)ConnectCallService.observer=null;handler.removeCallbacksAndMessages(null);super.invalidate() }
     @ReactMethod fun addListener(name: String) {}
     @ReactMethod fun removeListeners(count: Double) {}
+    @ReactMethod fun traceBridge(command:String,requestId:String,stage:String,promise:Promise){
+        if(command.startsWith("calls:")&&requestId.matches(Regex("[A-Za-z0-9:_-]{1,80}"))&&stage in listOf("START","DONE","ERROR","TIMEOUT"))ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"bridge",stage,"",mapOf("command" to command,"requestId" to requestId))
+        promise.resolve(true)
+    }
     @ReactMethod fun getState(promise: Promise) { promise.resolve(map(ConnectCallService.snapshot())) }
     @ReactMethod fun dial(conversation: String, peer: String, name: String, operation: String, promise: Promise) {
         if (!conversation.matches(Regex("[0-9a-fA-F-]{36}")) || !peer.matches(Regex("[0-9a-fA-F-]{36}")) || !operation.matches(Regex("[0-9a-fA-F-]{36}"))) { promise.reject("CALL_INPUT", "Некорректный собеседник"); return }
         context.runOnUiQueueThread {
-            if(context.currentActivity==null||context.lifecycleState!=com.facebook.react.common.LifecycleState.RESUMED){promise.reject("CALL_WINDOW","Откройте Connect для исходящего звонка");return@runOnUiQueueThread}
-            if(ConnectCallService.snapshot().optString("phase")!="idle"){promise.reject("CALL_BUSY","Другой вызов уже выполняется");return@runOnUiQueueThread}
-            val registered=ConnectCallOperations.await(operation,{ConnectCallService.action(context,"end",operation)}) { id,error ->
-                if(error!=null)promise.reject("CALL_PREPARATION",error) else promise.resolve(id)
+          fun dispatch(attempt:Int){
+            if(context.lifecycleState!=com.facebook.react.common.LifecycleState.RESUMED||context.currentActivity?.hasWindowFocus()!=true){
+                if(attempt<20){handler.postDelayed({dispatch(attempt+1)},100);return}
+                promise.reject("CALL_WINDOW","Откройте Connect для исходящего звонка");return
             }
-            if(!registered){promise.reject("CALL_BUSY","Вызов уже подготавливается");return@runOnUiQueueThread}
+            if(context.getSharedPreferences("connect_incoming",0).contains("ended:$operation")){promise.reject("CALL_CANCELLED","Вызов отменён");return}
+            if(ConnectCallService.snapshot().optString("phase")!="idle"){promise.reject("CALL_BUSY","Другой вызов уже выполняется");return}
+            val registered=ConnectCallOperations.await(operation,{ConnectCallService.action(context,"preparation-timeout",operation)}){id,error->
+                if(error!=null)promise.reject("CALL_PREPARATION",error)else promise.resolve(id)
+            }
+            if(!registered){promise.reject("CALL_BUSY","Вызов уже подготавливается");return}
             if(!ConnectCallService.action(context,"dial",operation,conversation=conversation,name=name,peer=peer))ConnectCallOperations.complete(operation,null,"Android запретил запуск службы звонка")
+          }
+          dispatch(0)
         }
     }
     @ReactMethod fun incoming(id: String, promise: Promise) { ConnectCallService.action(context, "incoming", id); promise.resolve(true) }
     @ReactMethod fun control(id: String, action: String, promise: Promise) {
         if (!id.matches(Regex("[0-9a-fA-F-]{36}"))) { promise.reject("CALL_INPUT", "Некорректный вызов"); return }
-        if (action !in listOf("answer", "decline", "end", "mute", "speaker", "sync")) { promise.reject("CALL_INPUT", "Неизвестное действие"); return }
-        if (action == "end") context.getSharedPreferences("connect_incoming",0).edit().putLong("ended:$id",System.currentTimeMillis()).apply()
+        if (action !in listOf("answer", "decline", "end", "mute", "speaker", "sync", "bridge-timeout")) { promise.reject("CALL_INPUT", "Неизвестное действие"); return }
+        if (action in listOf("end","bridge-timeout")) context.getSharedPreferences("connect_incoming",0).edit().putLong("ended:$id",System.currentTimeMillis()).apply()
         if (action == "answer") context.runOnUiQueueThread {
             if (!ConnectCallService.owns(id)) { promise.resolve(false); return@runOnUiQueueThread }
             try { context.startActivity(Intent(context, ConnectIncomingCallActivity::class.java).putExtra("acceptCall", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)); promise.resolve(true) }

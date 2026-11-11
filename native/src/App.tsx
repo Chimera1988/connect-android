@@ -163,9 +163,11 @@ function HybridConnect(){
       return;
     }
     if(command!=='bridge:ready'&&!loaded.current)return;
-    const category=command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command.startsWith('calls:')?'call':null;
+    const category=command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command==='calls:dial'?'call-dial':command==='calls:accept'?'call-answer':null;
     if(category&&busy.current.has(category)){respond(false,undefined,'Предыдущее действие ещё выполняется');return;}
     if(category)busy.current.add(category);
+    const traceCall=(stage:string)=>{if(command.startsWith('calls:'))void NativeModules.ConnectCallCoordinator.traceBridge(command,id,stage).catch(()=>{});};
+    traceCall('START');
     try{
       let result:unknown=null;
       const v=voiceRef.current;
@@ -227,7 +229,13 @@ function HybridConnect(){
         case 'sounds:previewBuiltin':await previewBuiltinSound(p.tone as BuiltinNotificationTone);break;
         case 'sounds:stop':await stopSoundPreview();break;
         case 'calls:uiReady':break;
-        case 'calls:dial':if(!ownerId)throw Error('Войдите в Connect');await recorder.current?.cancelAll();await v.dial(p.conversationId as string,p.peerId as string,p.peerName as string);break;
+        case 'calls:timeout':await NativeModules.ConnectCallCoordinator.traceBridge(p.command,p.requestId,'TIMEOUT');await v.cancelPending(p.requestId as string);break;
+        case 'calls:dial':{
+          if(!ownerId)throw Error('Войдите в Connect');
+          let timer:ReturnType<typeof setTimeout>|undefined;
+          try{await Promise.race([recorder.current?.cancelAll(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Не удалось остановить запись перед звонком')),3000);})]);}finally{if(timer)clearTimeout(timer);}
+          await v.dial(p.conversationId as string,p.peerId as string,p.peerName as string,id);break;
+        }
         case 'calls:accept':{
           if(p.callId&&v.shown?.id&&v.shown.id!==p.callId)throw Error('Этот звонок уже завершён');
           await recorder.current?.cancelAll();
@@ -249,8 +257,8 @@ function HybridConnect(){
         case 'openExternal':await Linking.openURL(p.url as string);break;
         default:throw Error('Команда пока недоступна');
       }
-      respond(true,result);
-    }catch(e){if(command==='register')send('push-status',{ok:false});respond(false,undefined,e instanceof Error?e.message:'Ошибка Android');}
+      traceCall('DONE');respond(true,result);
+    }catch(e){traceCall('ERROR');if(command==='register')send('push-status',{ok:false});respond(false,undefined,e instanceof Error?e.message:'Ошибка Android');}
     finally{if(category)busy.current.delete(category);}
   }
   const source=useMemo(()=>initial===undefined?null:{html:pwa.replace('<head>','<head><script>window.__CONNECT_NONCE__='+JSON.stringify(nonce)+';window.__CONNECT_INITIAL_SESSION__='+JSON.stringify(initial)+';</script>'),baseUrl:CONNECT_ORIGIN+'/'},[initial,nonce]);

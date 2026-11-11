@@ -18,6 +18,7 @@ internal class ConnectCallAudio(private val context: Context, private val onFocu
     private var proximity: PowerManager.WakeLock? = null
     private fun attributes(usage: Int) = AudioAttributes.Builder().setUsage(usage).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
     fun stopSignals() {
+        if(ringing||tone!=null||vibrator!=null)ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"signals","stopped")
         ringing = false
         try { ring?.stop() } catch (_: Exception) {}; ring = null
         try { vibrator?.cancel() } catch (_: Exception) {}; vibrator = null
@@ -40,17 +41,22 @@ internal class ConnectCallAudio(private val context: Context, private val onFocu
         stopSignals(); ringing = true
         val prefs = context.getSharedPreferences("connect_call_settings", 0)
         val notifications = context.getSystemService(NotificationManager::class.java)
-        if (!notifications.areNotificationsEnabled() || notifications.getNotificationChannel(ConnectCallService.CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE || !dndAllowsRing()) return
-        if (manager.ringerMode == AudioManager.RINGER_MODE_SILENT) return
+        fun blocked(code:String){ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"signals","suppressed",code)}
+        if(!notifications.areNotificationsEnabled()){blocked("NOTIFICATIONS_DISABLED");return}
+        if(notifications.getNotificationChannel(ConnectCallService.CHANNEL)?.importance==NotificationManager.IMPORTANCE_NONE){blocked("CHANNEL_DISABLED");return}
+        if(!dndAllowsRing()){blocked("DND");return}
+        if(manager.ringerMode==AudioManager.RINGER_MODE_SILENT){blocked("RINGER_SILENT");return}
         if (prefs.getBoolean("callVibrationV2", true) && (manager.ringerMode == AudioManager.RINGER_MODE_VIBRATE || Settings.System.getInt(context.contentResolver, "vibrate_when_ringing", 1) != 0)) {
             val motor = context.getSystemService(Vibrator::class.java)
             if (motor?.hasVibrator() == true) {
                 vibrator = motor
                 motor.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 450, 850), 0), attributes(AudioAttributes.USAGE_NOTIFICATION_RINGTONE))
-                ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"vibration","started")
-            }
-        }
-        if (prefs.getBoolean("silent", false) || manager.ringerMode != AudioManager.RINGER_MODE_NORMAL || manager.getStreamVolume(AudioManager.STREAM_RING) == 0) return
+                ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"vibration","PATTERN_REQUESTED")
+            }else blocked("NO_VIBRATOR")
+        }else ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"vibration","suppressed","VIBRATION_DISABLED")
+        if(prefs.getBoolean("silent",false)){blocked("CONNECT_SOUND_MUTED");return}
+        if(manager.ringerMode!=AudioManager.RINGER_MODE_NORMAL){blocked("VIBRATE_MODE");return}
+        if(manager.getStreamVolume(AudioManager.STREAM_RING)==0){blocked("RING_VOLUME_ZERO");return}
         val own = prefs.getString("uri", null)?.takeIf { it.startsWith("content://media/") }?.let(Uri::parse)
         val bundled=Uri.parse("android.resource://${context.packageName}/raw/connect_call")
         for (uri in listOfNotNull(own, bundled).distinct()) {
@@ -58,11 +64,13 @@ internal class ConnectCallAudio(private val context: Context, private val onFocu
                 context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { } ?: continue
                 val sound = RingtoneManager.getRingtone(context, uri) ?: continue
                 sound.audioAttributes = attributes(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                sound.isLooping = true; sound.play(); ring = sound; ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"ringtone","playing",if(uri==bundled)"CONNECT_CALL" else "CUSTOM"); return
-            } catch (_: Exception) { android.util.Log.w("ConnectCall", "RING_URI_UNAVAILABLE") }
+                sound.isLooping=true;sound.play();ring=sound
+                Handler(Looper.getMainLooper()).postDelayed({if(ring===sound)ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"ringtone",if(sound.isPlaying)"PLAYING" else "NOT_PLAYING","PLAYER_STATE")},200)
+                 ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"ringtone","PLAY_REQUESTED",if(uri==bundled)"CONNECT_CALL" else "CUSTOM"); return
+            } catch (_: Exception) { blocked("RING_URI_UNAVAILABLE") }
         }
         // Never substitute a message notification tone.
-        android.util.Log.w("ConnectCall", "RING_UNAVAILABLE")
+        blocked("RING_UNAVAILABLE")
     }
     fun communication() {
         stopSignals()

@@ -57,8 +57,7 @@ function callDuration(call: Call) {
   return `${mins}:${String(seconds % 60).padStart(2, '0')}`;
 }
 function missed(call: Call, self: string) {
-  return call.callee_id === self && (call.status === 'missed' || call.status === 'declined' ||
-    (call.status === 'ended' && !call.answered_at) ||
+  return call.callee_id === self && (call.status === 'missed' ||
     (call.status === 'ringing' && Date.now() - Date.parse(call.created_at) > 60000));
 }
 function statusText(call: Call, self: string) {
@@ -70,7 +69,7 @@ function statusText(call: Call, self: string) {
   if (call.status === 'declined') return outgoing ? 'Исходящий · отклонён' : 'Отклонённый';
   if (call.status === 'busy') return prefix + ' · занято';
   if (call.status === 'failed') return prefix + ' · соединение не удалось';
-  if (!call.answered_at) return prefix + ' · без ответа';
+  if (!call.answered_at) return prefix + (call.status==='ended'?' · отменён':' · без ответа');
   const duration = callDuration(call);
   return `${prefix}${duration ? ' · ' + duration : ''}`;
 }

@@ -8,13 +8,15 @@ import java.util.UUID
 /** No SDP, candidates, network addresses, credentials, names or audio data. */
 internal object ConnectCallDiagnostics {
     private val disk=java.util.concurrent.Executors.newSingleThreadExecutor()
-    fun event(context: Context, callId: String, stage: String, state: String = "", code: String = "") {
+    fun event(context: Context, callId: String, stage: String, state: String = "", code: String = "", details:Map<String,Any> = emptyMap()) {
         val prefs=context.getSharedPreferences("connect_call_diagnostics",0)
         val device=prefs.getString("device",null)?:UUID.randomUUID().toString().also{prefs.edit().putString("device",it).apply()}
         fun safe(value:String)=value.replace(Regex("[^A-Za-z0-9_.:-]"),"").take(80)
-        val line=JSONObject().put("time",java.time.Instant.now().toString()).put("elapsedMs",android.os.SystemClock.elapsedRealtime())
+        val record=JSONObject().put("time",java.time.Instant.now().toString()).put("elapsedMs",android.os.SystemClock.elapsedRealtime())
             .put("sdk",android.os.Build.VERSION.SDK_INT).put("version",context.packageManager.getPackageInfo(context.packageName,0).versionName)
-            .put("device",device).put("callId",safe(callId)).put("stage",safe(stage)).put("state",safe(state)).put("code",safe(code)).toString()
+            .put("device",device).put("callId",safe(callId)).put("stage",safe(stage)).put("state",safe(state)).put("code",safe(code))
+        for((key,value)in details)if(key in setOf("from","to","source","generation","deadlineElapsedMs","remainingMs","serverAgeMs","createdEpochMs","serverNowMs","operationId","requestId","command","clock","failedResources","localCandidateType","remoteCandidateType","audioCodec"))record.put(key,when(value){is Number,is Boolean->value;else->safe(value.toString())})
+        val line=record.toString()
         Log.i("ConnectCall",line)
         val app=context.applicationContext
         disk.execute { try {

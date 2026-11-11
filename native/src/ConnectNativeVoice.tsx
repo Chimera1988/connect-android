@@ -16,6 +16,7 @@ const initial:NativeState={phase:'idle',state:'IDLE',remoteName:'Собесед�
 export function useConnectNativeVoice(userId:string,_profiles:Profile[],_avatars:Record<string,string>={}){
   const [state,setState]=useState<NativeState>(initial),[notice,setNotice]=useState('');
   const latest=useRef(state);latest.current=state;
+  const bridgeRequest=useRef('');
   const starting=useRef(false),operation=useRef(0),pendingId=useRef(''),lastSequence=useRef(-1),lastNotice=useRef(-1);
   useEffect(()=>{
     operation.current++;starting.current=false;pendingId.current='';latest.current=initial;setState(initial);
@@ -29,12 +30,20 @@ export function useConnectNativeVoice(userId:string,_profiles:Profile[],_avatars
     return()=>{live=false;operation.current++;starting.current=false;event.remove();resumes.remove();clearInterval(timer);};
   },[userId]);
   const control=useCallback(async(action:string,id?:string)=>{const current=id||latest.current.callId||pendingId.current;if(current)await native.control(current,action);},[]);
-  const dial=useCallback(async(conversationId:string,peerId:string,peerName:string)=>{
+  const dial=useCallback(async(conversationId:string,peerId:string,peerName:string,requestId?:string)=>{
     if(latest.current.phase!=='idle'||!userId||starting.current)return;
-    starting.current=true;const token=++operation.current;pendingId.current=Crypto.randomUUID();setNotice('');
+    starting.current=true;const token=++operation.current;pendingId.current=Crypto.randomUUID();bridgeRequest.current=requestId||pendingId.current;setNotice('');
     try{const allowed=await NativeModules.ConnectIncomingCallModule.requestMicrophone();if(token!==operation.current)return;if(!allowed)throw Error('Для аудиозвонка нужен доступ к микрофону');await native.dial(conversationId,peerId,peerName,pendingId.current);}
-    catch(e){if(token===operation.current)setNotice(e instanceof Error?e.message:'Не удалось начать вызов');}finally{if(token===operation.current)starting.current=false;}
+    catch(e){if(token===operation.current){setNotice(e instanceof Error?e.message:'Не удалось начать вызов');throw e;}}finally{if(token===operation.current)starting.current=false;}
   },[userId]);
+  const cancelPending=useCallback(async(requestId:string)=>{
+    if(bridgeRequest.current!==requestId||!starting.current)return;
+    const current=await native.getState();
+    if(bridgeRequest.current!==requestId||!starting.current||!['idle','preparing'].includes(current.phase))return;
+    operation.current++;starting.current=false;
+    await NativeModules.ConnectIncomingCallModule.cancelMicrophone?.();
+    if(pendingId.current)await native.control(pendingId.current,'bridge-timeout');
+  },[]);
   const accept=useCallback(async(id?:string)=>{await control('answer',id);},[control]);
   const finish=useCallback(async(reason='hangup')=>{operation.current++;starting.current=false;await control(reason==='decline'?'decline':'end');},[control]);
   const checkIncoming=useCallback(async(id?:string)=>{if(id)await native.incoming(id);},[]);
@@ -42,7 +51,7 @@ export function useConnectNativeVoice(userId:string,_profiles:Profile[],_avatars
   const setMicMuted=useCallback((next:boolean)=>{if(next!==latest.current.muted)void control('mute');},[control]);
   const setSpeakerphone=useCallback(async(next:boolean)=>{if(next!==latest.current.speaker)await control('speaker');},[control]);
   const chooseAudioOutput=useCallback(async()=>{await native.chooseRoute();},[]);
-  return {...state,shown:state.shown||null,notice,dismissNotice:()=>setNotice(''),dial,accept,finish,checkIncoming,toggleMute,setMicMuted,setSpeakerphone,chooseAudioOutput};
+  return {...state,shown:state.shown||null,notice,dismissNotice:()=>setNotice(''),dial,cancelPending,accept,finish,checkIncoming,toggleMute,setMicMuted,setSpeakerphone,chooseAudioOutput};
 }
 
 export type VoiceController=ReturnType<typeof useConnectNativeVoice>;

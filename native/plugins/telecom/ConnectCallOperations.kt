@@ -15,7 +15,7 @@ internal object ConnectCallOperations {
     }
     @Synchronized fun complete(id: String, serverId: String?, error: String?): Boolean {
         val done = pending.remove(id) ?: return false
-        done(serverId, error)
+        try{done(serverId,error)}catch(_:Exception){/* UI lifetime cannot end the native call. */}
         return true
     }
 }

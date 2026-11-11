@@ -2,7 +2,7 @@ package com.connect.messenger
 
 /** Protocol-independent runtime facts. Server 'active' means answered, not audio-ready. */
 internal class ConnectCallState {
-    enum class Phase { IDLE, PREPARING, REMOTE_RINGING, INCOMING, CONNECTING, ACTIVE, RECONNECTING, ENDED, DECLINED, MISSED, BUSY, FAILED, CANCELLED }
+    enum class Phase { IDLE, PREPARING, OFFER_CREATED, REMOTE_RINGING, PRESENTING, INCOMING, ANSWERING, CONNECTING, ACTIVE, RECONNECTING, ENDED, DECLINED, MISSED, BUSY, FAILED, CANCELLED, NO_ANSWER }
     @Volatile var phase = Phase.IDLE; private set
     @Volatile var revision = 0; private set
     @Volatile var id = ""; private set
@@ -20,9 +20,13 @@ internal class ConnectCallState {
         return revision
     }
     fun valid(token: Int) = token == revision && !terminal() && phase != Phase.IDLE
-    fun terminal() = phase in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED, Phase.CANCELLED)
-    fun identified(callId: String) { check(!terminal()); id = callId; phase = Phase.REMOTE_RINGING }
-    fun answered() { if (!terminal() && phase != Phase.ACTIVE && phase != Phase.RECONNECTING) phase = Phase.CONNECTING }
+    fun terminal() = phase in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED, Phase.CANCELLED, Phase.NO_ANSWER)
+    fun offered() { check(phase==Phase.PREPARING){"INVALID_TRANSITION_${phase}_TO_OFFER_CREATED"};phase=Phase.OFFER_CREATED }
+    fun identified(callId: String) { check(phase==Phase.OFFER_CREATED){"INVALID_TRANSITION_${phase}_TO_REMOTE_RINGING"}; id = callId; phase = Phase.REMOTE_RINGING }
+    fun presenting() {check(phase==Phase.INCOMING);phase=Phase.PRESENTING}
+    fun ringing() {check(phase==Phase.PRESENTING);phase=Phase.INCOMING}
+    fun answering() {check(phase==Phase.INCOMING);phase=Phase.ANSWERING}
+    fun answered() { check(phase in setOf(Phase.INCOMING,Phase.ANSWERING,Phase.REMOTE_RINGING,Phase.CONNECTING,Phase.ACTIVE,Phase.RECONNECTING));if(phase!=Phase.ACTIVE&&phase!=Phase.RECONNECTING)phase=Phase.CONNECTING }
     fun transport(ready: Boolean) {
         if (terminal()) return
         connected = ready
@@ -36,7 +40,7 @@ internal class ConnectCallState {
         }
     }
     fun end(result: Phase): Boolean {
-        require(result in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED, Phase.CANCELLED))
+        require(result in setOf(Phase.ENDED, Phase.DECLINED, Phase.MISSED, Phase.BUSY, Phase.FAILED, Phase.CANCELLED, Phase.NO_ANSWER))
         if (terminal() || phase == Phase.IDLE) return false
         phase = result; revision++; connected = false; remoteAudio = false
         submittedAnswer = null
@@ -47,7 +51,7 @@ internal class ConnectCallState {
             expectedEpoch==currentEpoch && owner.isNotEmpty() && owner == callee && status == "ringing" && created > 0 && now - created < 60000 && created <= now + 10000
         fun allowStart(action:String, live:Boolean, terminalId:Boolean):Boolean {
             if(action in listOf("incoming","dial")&&terminalId)return false
-            if(action in listOf("sync","remote-end","answer","decline","end","mute","speaker","route","failed")&&!live)return false
+            if(action in listOf("sync","remote-end","answer","decline","end","mute","speaker","route","failed","bridge-timeout","preparation-timeout")&&!live)return false
             return true
         }
     }

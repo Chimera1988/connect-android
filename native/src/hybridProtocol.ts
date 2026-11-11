@@ -20,7 +20,7 @@ export type HybridCommand =
   | 'sounds:get' | 'sounds:pick' | 'sounds:reset' | 'sounds:preview'
   | 'sounds:silent' | 'sounds:previewBuiltin' | 'sounds:stop'
   | 'calls:dial' | 'calls:accept' | 'calls:decline' | 'calls:end'
-  | 'calls:uiReady' | 'calls:mute' | 'calls:speaker' | 'calls:route'
+  | 'calls:timeout' | 'calls:uiReady' | 'calls:mute' | 'calls:speaker' | 'calls:route'
   | 'clipboard' | 'openExternal' | 'navigation:exit' | 'notification:settings'
   | 'recordVoice:start' | 'recordVoice:stop' | 'recordVoice:cancel' | 'recordVideo:open';
 
@@ -82,6 +82,7 @@ function payloadValid(command: string, value: unknown): boolean {
     case 'appearance':return fields(value,['scene'])&&['waves','aurora','moon','sunset','lagoon','nebula','minimal'].includes(value.scene as string);
     case 'vault:seal': case 'vault:open':
       return fields(value,['name','value'])&&text(value.name,180,1)&&/^[A-Za-z0-9:_-]+$/.test(value.name)&&text(value.value,command==='vault:seal'?49152:98304,1);
+    case 'calls:timeout':return fields(value,['requestId','command'])&&text(value.requestId,80,1)&&ID.test(value.requestId)&&['calls:dial','calls:accept','calls:decline','calls:end','calls:mute','calls:speaker','calls:route'].includes(value.command as string);
     case 'session':
       return fields(value, ['access_token', 'refresh_token']) && accessToken(value.access_token) &&
         text(value.refresh_token, 8192, 1) && /^[A-Za-z0-9_-]+$/.test(value.refresh_token);

@@ -12,6 +12,7 @@ import com.facebook.react.uimanager.ViewManager
 /** Permission ownership stays on the resumed call Activity, not a covered ReactActivity. */
 internal object ConnectCallMicrophone {
   @Volatile var pending: Promise? = null
+  @Synchronized fun fail(code:String,message:String){val callback=pending;pending=null;callback?.reject(code,message)}
   @Synchronized fun complete(granted: Boolean) {
     val callback=pending;pending=null
     if(granted)callback?.resolve(true) else callback?.reject("CALL_MICROPHONE","Для аудиозвонка разрешите доступ к микрофону.")
@@ -29,13 +30,14 @@ class ConnectIncomingCallModule(private val context: ReactApplicationContext) : 
       if(ConnectCallMicrophone.pending!=null){promise.reject("CALL_PERMISSION_BUSY","Запрос микрофона уже открыт.");return@runOnUiQueueThread}
       if(context.lifecycleState!=com.facebook.react.common.LifecycleState.RESUMED){promise.reject("CALL_WINDOW","Откройте Connect, чтобы разрешить микрофон");return@runOnUiQueueThread}
       ConnectCallMicrophone.pending=promise
-      android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({if(ConnectCallMicrophone.pending===promise)ConnectCallMicrophone.complete(false)},60000)
+      android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({if(ConnectCallMicrophone.pending===promise)ConnectCallMicrophone.fail("CALL_PERMISSION_TIMEOUT","Запрос доступа к микрофону не завершён за 25 секунд")},25000)
       try{context.startActivity(Intent(context,ConnectIncomingCallActivity::class.java)
         .putExtra("requestMic",true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))}
       catch(_:Exception){ConnectCallMicrophone.complete(false)}
     }
   }
 
+  @ReactMethod fun cancelMicrophone(promise:Promise){ConnectCallMicrophone.fail("CALL_CANCELLED","Подготовка звонка отменена");promise.resolve(true)}
   // AES-GCM key is generated inside Android Keystore and never exported.
   private val vaultWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
   private fun vaultKey(): java.security.Key {
