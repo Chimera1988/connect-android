@@ -1,7 +1,7 @@
 {
   "name": "connect-native-v2",
   "private": true,
-  "version": "2.2.7",
+  "version": "3.0.0",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client",
@@ -10,7 +10,8 @@
     "prebuild": "expo prebuild --platform android",
     "test": "node --test tests/*.test.cjs tests/*.test.mjs",
     "build:web": "vite build --config web/vite.config.ts && node scripts/embed-web.mjs",
-    "typecheck:web": "tsc --project web/tsconfig.json --noEmit"
+    "typecheck:web": "tsc --project web/tsconfig.json --noEmit",
+    "test:browser": "node scripts/test-cache-browser.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.0",

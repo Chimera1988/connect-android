@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {resolveCachedProfileFile,mediaCacheOwner,mediaPlaybackUrl} from '../lib/media-cache';
 
 export type ConnectMusicTrack = { path: string; name: string; url: string };
 type Persisted = { ownerId: string; path: string; position: number; shuffle: boolean; repeat: boolean; volume: number; muted: boolean };
@@ -24,9 +25,10 @@ function useMusic() {
   if (!api) throw new Error('Connect music player provider is not mounted');
   return api;
 }
-function readLast(): Persisted | null {
+function readLast(viewer=mediaCacheOwner()): Persisted | null {
   try {
-    const raw = localStorage.getItem('connect-profile-music-playback-v1');
+    let raw = localStorage.getItem('connect-profile-music-playback-v1:'+viewer);
+    if(!raw&&viewer){const legacy=localStorage.getItem('connect-profile-music-playback-v1');if(legacy&&JSON.parse(legacy).ownerId===viewer){raw=legacy;localStorage.setItem('connect-profile-music-playback-v1:'+viewer,legacy);}}
     if (!raw) return null;
     const obj = JSON.parse(raw) as Partial<Persisted>;
     if (typeof obj.ownerId !== 'string' || typeof obj.path !== 'string') return null;
@@ -67,6 +69,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
   const ownerRef=useRef<string|null>(null);
   const selectedRef=useRef<string|null>(null);
   const queueRef=useRef<ConnectMusicTrack[]>([]);
+  const playbackGeneration=useRef(0);
   const persistRef=useRef(0);
   const [ownerId,setOwnerId]=useState<string|null>(null);
   const [tracks,setTracks]=useState<ConnectMusicTrack[]>([]);
@@ -117,7 +120,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
     setOwnerId(id);setTracks(list);
     const old=selectedRef.current;
     if(!sameOwner || !old || !list.some(s=>s.path===old)){
-      const saved=lastRef.current;
+      const saved=lastRef.current||readLast(mediaCacheOwner());lastRef.current=saved;
       const chosen=(saved?.ownerId===id && list.some(s=>s.path===saved.path)) ? saved.path : (list[0]?.path||null);
       selectedRef.current=chosen;setSelected(chosen);
       setPlaying(false);setDuration(0);
@@ -125,7 +128,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
       setPosition(wanted);
       restoreRef.current=chosen?{path:chosen,position:wanted}:null;
       const audio=audioRef.current;
-      if(audio){ audio.pause();audio.src=list.find(s=>s.path===chosen)?.url||'';audio.load(); }
+      if(audio){ audio.pause();audio.removeAttribute('src');audio.load(); }
     }
   },[]);
   const registerClient=useCallback((client:SupabaseClient)=>{
@@ -147,22 +150,35 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
     if(!audio||!audio.src)return;
     void audio.play().catch(()=>setPlaying(false));
   },[]);
-  const selectTrack=useCallback((song:ConnectMusicTrack)=>{
-    if(!queueRef.current.some(t=>t.path===song.path))return;
-    const audio=audioRef.current;
-    if(selectedRef.current!==song.path){
-      selectedRef.current=song.path;setSelected(song.path);setPosition(0);setDuration(0);
-      restoreRef.current=null;
-      if(audio){audio.src=song.url;audio.load();}
-    } else if(audio?.ended){audio.currentTime=0;}
+  const playTrack=useCallback(async(song:ConnectMusicTrack,reset:boolean)=>{
+    const generation=++playbackGeneration.current,viewer=mediaCacheOwner();
+    const local=await resolveCachedProfileFile(viewer,song.path);
+    if(generation!==playbackGeneration.current||viewer!==mediaCacheOwner()||!queueRef.current.some(x=>x.path===song.path))return;
+    let url=local||(song.url.startsWith('blob:')?'':song.url);
+    if(!url&&clientRef.current){const signed=await clientRef.current.storage.from('connect-profile-media').createSignedUrl(song.path,3600);url=signed.data?.signedUrl?mediaPlaybackUrl(signed.data.signedUrl):'';}
+    if(generation!==playbackGeneration.current||viewer!==mediaCacheOwner()||!url)return;
+    const audio=audioRef.current;if(!audio)return;
+    const changed=selectedRef.current!==song.path;selectedRef.current=song.path;setSelected(song.path);
+    if(changed||reset){setPosition(0);setDuration(0);restoreRef.current=null;}
+    if(audio.getAttribute('src')!==url){audio.src=url;audio.load();}else if(audio.ended)audio.currentTime=0;
     safePlay();
   },[safePlay]);
+  const selectTrack=useCallback((song:ConnectMusicTrack)=>{void playTrack(song,selectedRef.current!==song.path);},[playTrack]);
   const toggle=useCallback(()=>{
-    const audio=audioRef.current;
-    if(!audio)return;
+    const audio=audioRef.current;if(!audio)return;
     if(!audio.paused){audio.pause();return;}
-    safePlay();
-  },[safePlay]);
+    const song=queueRef.current.find(x=>x.path===selectedRef.current);if(song)void playTrack(song,false);
+  },[playTrack]);
+  useEffect(()=>{
+    const retired=(event:Event)=>{const detail=(event as CustomEvent).detail;
+      if(detail?.user!==mediaCacheOwner())return;
+      queueRef.current=queueRef.current.filter(x=>x.path!==detail.path);setTracks(queueRef.current);
+      if(selectedRef.current===detail.path){playbackGeneration.current++;audioRef.current?.pause();audioRef.current?.removeAttribute('src');audioRef.current?.load();selectedRef.current=null;setSelected(null);setPlaying(false);}
+    };
+    const logout=()=>{playbackGeneration.current++;audioRef.current?.pause();audioRef.current?.removeAttribute('src');audioRef.current?.load();queueRef.current=[];ownerRef.current=null;selectedRef.current=null;setOwnerId(null);setTracks([]);setSelected(null);setListenerId(null);lastRef.current=null;setPlaying(false);};
+    window.addEventListener('connect:profile-media-retired',retired);window.addEventListener('connect:account-changed',logout);
+    return()=>{playbackGeneration.current++;window.removeEventListener('connect:profile-media-retired',retired);window.removeEventListener('connect:account-changed',logout);};
+  },[]);
   const adjacent=useCallback((dir:1|-1,automatic=false)=>{
     const list=queueRef.current;
     if(!list.length)return;
@@ -187,7 +203,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
     if(!ownerRef.current||!selectedRef.current)return;
     const saved:Persisted={ownerId:ownerRef.current,path:selectedRef.current,position:at,shuffle,repeat,volume,muted};
     lastRef.current=saved;
-    try{localStorage.setItem('connect-profile-music-playback-v1',JSON.stringify(saved));}catch{/* Storage can be unavailable. */}
+    try{localStorage.setItem('connect-profile-music-playback-v1:'+mediaCacheOwner(),JSON.stringify(saved));}catch{/* Storage can be unavailable. */}
   },[shuffle,repeat,volume,muted]);
   useEffect(()=>{if(ownerId && selected)savePlayback(position);},[ownerId,selected,shuffle,repeat,volume,muted,savePlayback]);
   useEffect(()=>{
@@ -214,7 +230,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
   const showMini=Boolean(current && !musicPageOpen && shell);
   return <MusicContext.Provider value={api}>
     {children}
-    <audio ref={audioRef} preload="metadata" onLoadedMetadata={e=>{
+    <audio ref={audioRef} preload="none" onLoadedMetadata={e=>{
       const audio=e.currentTarget;setDuration(Number.isFinite(audio.duration)?audio.duration:0);
       const restore=restoreRef.current;
       if(restore && restore.path===selectedRef.current){
@@ -250,7 +266,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
       <button type="button" aria-label="Следующий трек" onClick={()=>adjacent(1)}>{icon('next',19)}</button>
       <button type="button" aria-label="Закрыть мини-плеер" onClick={()=>{
         audioRef.current?.pause();ownerRef.current=null;selectedRef.current=null;setOwnerId(null);setSelected(null);setTracks([]);
-        try{localStorage.removeItem('connect-profile-music-playback-v1')}catch{/* ignore */}
+        try{localStorage.removeItem('connect-profile-music-playback-v1:'+mediaCacheOwner())}catch{/* ignore */}
       }}>{icon('close',15)}</button>
     </div>,shell!)}
   </MusicContext.Provider>;

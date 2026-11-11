@@ -5,10 +5,11 @@ function harness(permission){
  let si=0,ri=0,requests=0;const states=[],refs=[],effects=[],dials=[],controls=[],callbacks=new Map();
  const native={getState:async()=>({phase:'idle',state:'IDLE',sequence:0}),dial:async(...args)=>dials.push(args),control:async(...args)=>controls.push(args),chooseRoute:async()=>{}};
  const react={useState(v){const i=si++;if(!(i in states))states[i]=v;return[states[i],v=>states[i]=typeof v==='function'?v(states[i]):v]},useRef(v){const i=ri++;return refs[i]||=( {current:v})},useEffect:f=>effects.push(f),useCallback:f=>f,createElement(){}};
- const mocks={react,'react-native':{NativeModules:{ConnectCallCoordinator:native,ConnectIncomingCallModule:{requestMicrophone:async()=>{requests++;return permission?permission.promise:true}}},AppState:{addEventListener:()=>({remove(){}})},DeviceEventEmitter:{addListener:(n,fn)=>{callbacks.set(n,fn);return{remove:()=>callbacks.delete(n)}}}},'expo-crypto':{randomUUID:()=>id},'@expo/vector-icons/Ionicons':{},'react-native-svg':{},'./ConnectNativeGlass':{}};
+ const policy={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(require.resolve('../src/call-missed.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText,{exports:policy,require:()=>require('../shared/call-missed-policy.json'),Date,Number});
+ const mocks={'./call-missed':policy,react,'react-native':{NativeModules:{ConnectCallCoordinator:native,ConnectIncomingCallModule:{requestMicrophone:async()=>{requests++;return permission?permission.promise:true}}},AppState:{addEventListener:()=>({remove(){}})},DeviceEventEmitter:{addListener:(n,fn)=>{callbacks.set(n,fn);return{remove:()=>callbacks.delete(n)}}}},'expo-crypto':{randomUUID:()=>id},'@expo/vector-icons/Ionicons':{},'react-native-svg':{},'./ConnectNativeGlass':{}};
  const compiled=ts.transpileModule(fs.readFileSync(require.resolve('../src/ConnectNativeVoice.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,exports={};
  vm.runInNewContext(compiled,{exports,require:n=>{if(!(n in mocks))throw Error('Unexpected dependency '+n);return mocks[n]},setInterval:()=>1,clearInterval(){},console,Promise,Date});
- return{native,render(){si=ri=0;return exports.useConnectNativeVoice(id,[])},dials,controls,states,callbacks,get requests(){return requests},mount(){return effects.map(f=>f()).filter(Boolean)}};
+ return{native,policy,render(){si=ri=0;return exports.useConnectNativeVoice(id,[])},dials,controls,states,callbacks,get requests(){return requests},mount(){return effects.map(f=>f()).filter(Boolean)}};
 }
 test('two taps during microphone permission delegate one outgoing operation',async()=>{const p=deferred(),h=harness(p),v=h.render(),first=v.dial(chat,peer,'Peer'),second=v.dial(chat,peer,'Peer');assert.equal(h.requests,1);p.resolve(true);await Promise.all([first,second]);assert.equal(h.dials.length,1);assert.deepEqual(h.dials[0],[chat,peer,'Peer',id])});
 test('cancel before a late permission grant never delegates capture/dial',async()=>{const p=deferred(),h=harness(p),v=h.render(),dial=v.dial(chat,peer,'Peer');await v.finish();p.resolve(true);await dial;assert.equal(h.dials.length,0);assert.deepEqual(h.controls,[[id,'end']])});
@@ -24,4 +25,12 @@ test('native preparation rejection reaches the bridge and a new attempt is allow
 test('late bridge timeout cannot end an already active native call',async()=>{
  const p=deferred(),h=harness(p),v=h.render(),dial=v.dial(chat,peer,'Peer','request-1');
  h.native.getState=async()=>({phase:'active'});await v.cancelPending('request-1');assert.equal(h.controls.length,0);p.resolve(true);await dial;
+});
+
+test('accepted native snapshot prevents stale ringing from becoming a missed badge',()=>{
+ const h=harness();h.render();h.mount();const emit=h.callbacks.get('connect:call-state');
+ emit({phase:'connecting',state:'ANSWERING',sequence:1,userId:id,callId:peer});
+ const row={id:peer,callee_id:id,status:'ringing',created_at:'2020-01-01T00:00:00Z'};
+ assert.equal(h.policy.isMissedIncomingCall(row,id),false);
+ emit({phase:'idle',state:'ENDED',sequence:2,userId:id,callId:peer});assert.equal(h.policy.isMissedIncomingCall(row,id),true);
 });

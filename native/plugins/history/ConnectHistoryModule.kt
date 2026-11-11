@@ -97,6 +97,34 @@ class ConnectHistoryModule(private val context:ReactApplicationContext):ReactCon
         if(!more)snapshots.remove(token)
         return JSONObject().put("messages",rows).put("readAt",pending.snapshot.readAt).put("savedAt",pending.snapshot.savedAt).put("epoch",pending.snapshot.epoch).put("hasMore",pending.snapshot.hasOlder).put("hasNewer",pending.snapshot.hasNewer).put("continuation",if(more)token else JSONObject.NULL)
     }
+    private fun catalogKey(data:JSONObject):String{
+        val key=data.getString("key")
+        require(HistoryCatalogPolicy.key(key))
+        return key
+    }
+    // Metadata only. The bridge cannot persist credentials or expiring URLs.
+    private fun safeCatalog(value:Any?,depth:Int=0){
+        require(depth<=12)
+        when(value){
+            is JSONObject->{for(key in value.keys()){
+                require(HistoryCatalogPolicy.property(key))
+                safeCatalog(value.opt(key),depth+1)
+            }}
+            is JSONArray->{require(value.length()<=300);for(i in 0 until value.length())safeCatalog(value.opt(i),depth+1)}
+            is String->{require(HistoryCatalogPolicy.string(value))}
+        }
+    }
+    private fun catalogValue(owner:String,key:String,value:JSONObject):JSONObject{
+        if(key=="inbox")return value
+        val parts=key.split(':');val prefix=parts[1]+"/"+parts[2]+"/";val rows=value.getJSONArray("items");val kept=JSONArray()
+        require(rows.length()<=100)
+        for(i in 0 until rows.length()){
+            val row=rows.getJSONObject(i);val path=row.getString("path")
+            require(path.startsWith(prefix)&&!path.contains("://")&&!path.contains("..")&&!path.contains('?')&&!path.contains('\\'))
+            if(!store.retired(owner,"profile:$path"))kept.put(row)
+        }
+        return JSONObject().put("items",kept)
+    }
     @ReactMethod fun execute(owner:String,command:String,payload:String,promise:Promise){
         if(destroyed){promise.reject("HISTORY_CLOSED","Хранилище закрыто");return}
         worker.execute{try{
@@ -105,6 +133,10 @@ class ConnectHistoryModule(private val context:ReactApplicationContext):ReactCon
             val data=JSONObject(payload)
             snapshots.entries.removeAll{it.value.created<System.currentTimeMillis()-30000||it.value.owner!=owner}
             val result:Any=when(command){
+                "catalog-read"->{val value=store.catalogRead(owner,catalogKey(data));JSONObject().put("value",value?.let{catalogValue(owner,catalogKey(data),JSONObject(it))}?:JSONObject.NULL).put("epoch",store.epoch(owner))}
+                "catalog-write"->{val key=catalogKey(data);val value=data.getJSONObject("value");safeCatalog(value);val stored=store.catalogWrite(owner,key,catalogValue(owner,key,value).toString(),data.getLong("epoch"));store.trim(limitBytes()/5);JSONObject().put("stored",stored)}
+                "catalog-retire"->{val key=catalogKey(data);require(key.startsWith("profile:"));val parts=key.split(':');val path=data.getString("path");require(path.startsWith(parts[1]+"/"+parts[2]+"/")&&HistoryCatalogPolicy.string(path)&&!path.contains("..")&&!path.contains('?'));store.drop(owner,"profile:$path");JSONObject().put("ok",true)}
+                "catalog-drop"->{store.catalogDrop(owner,catalogKey(data));JSONObject().put("ok",true)}
                 "read","page"->{
                     val chat=uuid(data.getString("conversationId"))
                     val before=if(command=="page")data.getString("before")else null

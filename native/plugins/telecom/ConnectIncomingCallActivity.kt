@@ -79,6 +79,10 @@ class ConnectIncomingCallActivity:Activity(){
    if(phase=="incoming")ConnectCallService.action(this,"incoming",callId)
    else{if(phase in listOf("active","reconnecting"))ConnectCallService.action(this,"recover",callId);finish();return}
   }
+  val established=phase in listOf("active","reconnecting")
+  setTurnScreenOn(phase=="incoming")
+  if(established&&state.getInt("routeCode",1)==android.telecom.CallAudioState.ROUTE_EARPIECE)window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+  else window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   val incoming=phase=="incoming";val name=state.getString("name","Собеседник")?:"Собеседник"
   activeStarted=if(phase=="active")state.getLong("startedElapsed",SystemClock.elapsedRealtime()) else 0
   val scene=state.getString("scene","waves")?:"waves"

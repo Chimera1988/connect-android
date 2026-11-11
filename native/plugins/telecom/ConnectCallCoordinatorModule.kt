@@ -11,6 +11,8 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
     private val handler=android.os.Handler(android.os.Looper.getMainLooper())
     private var presented=""
     private var listener:((JSONObject)->Unit)?=null
+    private var missedListener:((String)->Unit)?=null
+    private val activityEvents=object:BaseActivityEventListener(){override fun onNewIntent(intent:Intent){if(intent.hasExtra("connectMissedOwner")){context.currentActivity?.intent=intent;missedListener?.invoke(intent.getStringExtra("connectMissedOwner")?:"")}}}
     private var alive=true
     @Volatile private var discovering=false
     private val discover=object:Runnable{override fun run(){
@@ -29,8 +31,8 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
         }
         handler.postDelayed(this,3000)
     }}
-    init{context.addLifecycleEventListener(this)}
-    override fun onHostResume(){ConnectCallScreen.restore(context,"HOST_RESUMED");handler.removeCallbacks(discover);handler.post(discover)}
+    init{context.addLifecycleEventListener(this);context.addActivityEventListener(activityEvents)}
+    override fun onHostResume(){ConnectMissedCalls.restore(context);ConnectCallScreen.restore(context,"HOST_RESUMED");handler.removeCallbacks(discover);handler.post(discover)}
     override fun onHostPause(){handler.removeCallbacks(discover)}
     override fun onHostDestroy(){handler.removeCallbacks(discover)}
     private fun showOnce(state:JSONObject){ConnectCallScreen.restore(context,"REACT_STATE")}
@@ -57,14 +59,24 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
             }
         }
         ConnectCallService.observer=listener
+        missedListener={owner->if(context.hasActiveReactInstance())context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit("connect:missed-changed",Arguments.createMap().apply{putString("userId",owner)})}
+        ConnectMissedCalls.observer=missedListener
+        ConnectMissedCalls.restore(context)
     }
-    override fun invalidate() { alive=false;context.removeLifecycleEventListener(this);if(ConnectCallService.observer===listener)ConnectCallService.observer=null;handler.removeCallbacksAndMessages(null);super.invalidate() }
+    override fun invalidate() { alive=false;context.removeActivityEventListener(activityEvents);if(ConnectMissedCalls.observer===missedListener)ConnectMissedCalls.observer=null;context.removeLifecycleEventListener(this);if(ConnectCallService.observer===listener)ConnectCallService.observer=null;handler.removeCallbacksAndMessages(null);super.invalidate() }
     @ReactMethod fun addListener(name: String) {}
     @ReactMethod fun removeListeners(count: Double) {}
     @ReactMethod fun traceBridge(command:String,requestId:String,stage:String,promise:Promise){
         if(command.startsWith("calls:")&&requestId.matches(Regex("[A-Za-z0-9:_-]{1,80}"))&&stage in listOf("START","DONE","ERROR","TIMEOUT"))ConnectCallDiagnostics.event(context,ConnectCallService.snapshot().optString("callId"),"bridge",stage,"",mapOf("command" to command,"requestId" to requestId))
         promise.resolve(true)
     }
+    @ReactMethod fun journal(owner:String,payload:String,promise:Promise){ConnectCallSession.worker.execute{try{require(payload.length<=64000);promise.resolve(ConnectMissedCalls.journal(context,owner,JSONObject(payload)).toString())}catch(_:Exception){promise.reject("CALL_JOURNAL","Журнал недоступен для этого аккаунта")}}}
+    @ReactMethod fun receiveMissed(payload:String,promise:Promise){try{require(payload.length<=16000);val data=JSONObject(payload);val map=data.keys().asSequence().associateWith{data.optString(it)};promise.resolve(ConnectMissedCalls.receive(context,map))}catch(_:Exception){promise.reject("MISSED_INPUT","Некорректное уведомление")}}
+    @ReactMethod fun consumeMissedOpen(owner:String,promise:Promise){context.runOnUiQueueThread{
+        val intent=context.currentActivity?.intent;val target=intent?.getStringExtra("connectMissedOwner")
+        if(target!=null)intent.removeExtra("connectMissedOwner")
+        promise.resolve(target==owner&&ConnectCallSession.peekOwner(context)==owner)
+    }}
     @ReactMethod fun getState(promise: Promise) { promise.resolve(map(ConnectCallService.snapshot())) }
     @ReactMethod fun dial(conversation: String, peer: String, name: String, operation: String, promise: Promise) {
         if (!conversation.matches(Regex("[0-9a-fA-F-]{36}")) || !peer.matches(Regex("[0-9a-fA-F-]{36}")) || !operation.matches(Regex("[0-9a-fA-F-]{36}"))) { promise.reject("CALL_INPUT", "Некорректный собеседник"); return }
@@ -114,9 +126,9 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
     @ReactMethod fun getAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { promise.resolve(ConnectCallSession.read(context, name)) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессия недоступна", error) } } }
     @ReactMethod fun setAuth(name: String, value: String, promise: Promise) { ConnectCallSession.worker.execute { try {
         if(name.endsWith("-auth-token")){val next=JSONObject(value).optJSONObject("user")?.optString("id");val previous=try{JSONObject(ConnectCallSession.read(context,name)?:"{}").optJSONObject("user")?.optString("id")}catch(_:Exception){ConnectCallService.snapshot().optString("userId")};if(!previous.isNullOrEmpty()&&next!=previous)ConnectCallService.action(context,"logout")}
-        ConnectCallSession.write(context, name, value);if(name.endsWith("-auth-token"))ConnectPushTokenJob.enable(context);promise.resolve(null)
+        ConnectCallSession.write(context, name, value);if(name.endsWith("-auth-token")){ConnectPushTokenJob.enable(context);ConnectMissedCalls.accountChanged(context,ConnectCallSession.peekOwner(context)?:"")};promise.resolve(null)
     } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессию не удалось сохранить", error) } } }
-    @ReactMethod fun removeAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { if(name.endsWith("-auth-token")){ConnectCallService.action(context,"logout");ConnectPushTokenJob.cancel(context);ConnectCallIngress.clear(context)}; ConnectCallSession.write(context, name, null); promise.resolve(null) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессию не удалось удалить", error) } } }
+    @ReactMethod fun removeAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { if(name.endsWith("-auth-token")){ConnectCallService.action(context,"logout");ConnectPushTokenJob.cancel(context);ConnectCallIngress.clear(context)}; ConnectCallSession.write(context, name, null);if(name.endsWith("-auth-token"))ConnectMissedCalls.accountChanged(context,""); promise.resolve(null) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессию не удалось удалить", error) } } }
     companion object {
         fun showRoutes(activity: android.app.Activity) {
             val state = ConnectCallService.snapshot(); val id = state.optString("callId"); val supported = state.optInt("supportedRoutes")

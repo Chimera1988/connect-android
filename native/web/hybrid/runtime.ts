@@ -1,3 +1,5 @@
+import {setMissedActiveCall} from '../lib/call-missed';
+import type {} from './bridge-types';
 import {createClient} from '@supabase/supabase-js';
 import type {Session} from '@supabase/supabase-js';
 import {saveWallpaper,loadWallpaper} from '../lib/wallpaper';
@@ -9,7 +11,6 @@ declare global {interface Window {
   __CONNECT_NONCE__?:string;
   __CONNECT_INITIAL_SESSION__?:{access_token:string;refresh_token:string}|null;
   __connectReceive?:(type:string,data:any)=>void;
-  ConnectNative?:{request:(command:string,payload?:unknown)=>Promise<any>};
   __connectNativeCall?:any;
   __connectPrepareSession?:(session:Session|null)=>Promise<void>;
 }}
@@ -69,7 +70,9 @@ window.__connectReceive=(type,data)=>{
   if(type==='record-state'){window.dispatchEvent(new CustomEvent('connect:native-recording',{detail:data}));return;}
   if(type==='push-status'){window.dispatchEvent(new CustomEvent('connect:android-push-status',{detail:data}));}
   if(type==='sounds'){fullScreenAllowed=data.fullScreenAllowed!==false;sounds=data;window.dispatchEvent(new Event('connect:android-sound-selected'));}
-  if(type==='call'){if(data.phase!=='idle')document.querySelectorAll<HTMLMediaElement>('audio,video').forEach(media=>media.pause());window.__connectNativeCall=data;window.dispatchEvent(new CustomEvent('connect:native-call',{detail:data}));}
+  if(type==='calls-open'){(window as any).__connectAndroidPendingCalls=true;window.dispatchEvent(new Event('connect:open-calls'));return;}
+  if(type==='missed-changed'){window.dispatchEvent(new CustomEvent('connect:missed-changed',{detail:data}));return;}
+  if(type==='call'){setMissedActiveCall(data.callId||'',data.phase);if(data.phase!=='idle')document.querySelectorAll<HTMLMediaElement>('audio,video').forEach(media=>media.pause());window.__connectNativeCall=data;window.dispatchEvent(new CustomEvent('connect:native-call',{detail:data}));}
   if(type==='native-session'){receiveNativeSession(data);}
   if(type==='error')window.dispatchEvent(new CustomEvent('connect:native-error',{detail:typeof data==='string'?data:'Ошибка Android'}));
   if(type==='chat'){window.__connectAndroidPendingChat=data;window.dispatchEvent(new Event('connect:android-open-chat'));}

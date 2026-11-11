@@ -22,13 +22,14 @@ internal data class HistorySnapshot(val messages:List<HistoryMessage>,val readAt
 internal class HistoryStore(private val db:HistoryDb,private val codec:HistoryCodec,private val now:()->Long={System.currentTimeMillis()}) {
     companion object {
         private val timeFormat=DateTimeFormatterBuilder().appendInstant(6).toFormatter()
-        fun time(value:String)=timeFormat.format(Instant.parse(value))
+        fun time(value:String)=timeFormat.format(java.time.OffsetDateTime.parse(value,java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant())
         val schema=listOf(
             "CREATE TABLE IF NOT EXISTS history_owner(owner TEXT PRIMARY KEY,epoch INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS history_meta(owner TEXT NOT NULL,chat TEXT NOT NULL,read_at TEXT NOT NULL DEFAULT '',read_raw TEXT NOT NULL DEFAULT '',saved_at INTEGER NOT NULL,PRIMARY KEY(owner,chat))",
             "CREATE TABLE IF NOT EXISTS history_messages(owner TEXT NOT NULL,chat TEXT NOT NULL,id TEXT NOT NULL,created_at TEXT NOT NULL,revision_at TEXT NOT NULL,sender_id TEXT NOT NULL,payload BLOB NOT NULL,size INTEGER NOT NULL,used_at INTEGER NOT NULL,PRIMARY KEY(owner,chat,id))",
             "CREATE INDEX IF NOT EXISTS history_page ON history_messages(owner,chat,created_at,id)",
             "CREATE INDEX IF NOT EXISTS history_lru ON history_messages(used_at)",
+            "CREATE TABLE IF NOT EXISTS history_catalog(owner TEXT NOT NULL,catalog TEXT NOT NULL,payload BLOB NOT NULL,size INTEGER NOT NULL,used_at INTEGER NOT NULL,PRIMARY KEY(owner,catalog))",
             "CREATE TABLE IF NOT EXISTS history_retired(owner TEXT NOT NULL,id TEXT NOT NULL,deleted_at INTEGER NOT NULL,PRIMARY KEY(owner,id))"
         )
     }
@@ -69,6 +70,7 @@ internal class HistoryStore(private val db:HistoryDb,private val codec:HistoryCo
         val filter=if(chat==null)"owner=?" else "owner=? AND chat=?"
         db.execute("DELETE FROM history_messages WHERE $filter",args)
         db.execute("DELETE FROM history_meta WHERE $filter",args)
+        catalogDrop(owner,"inbox")
         epoch(owner)
     }
     fun read(owner:String,chat:String,limit:Int=500,beforeTime:String?=null,beforeId:String?=null,after:Boolean=false):HistorySnapshot=db.transaction{
@@ -98,17 +100,36 @@ internal class HistoryStore(private val db:HistoryDb,private val codec:HistoryCo
         val hasNewer=last!=null&&db.query("SELECT 1 AS found FROM history_messages WHERE owner=? AND chat=? AND (created_at>? OR (created_at=? AND id>?)) LIMIT 1",listOf(owner,chat,last.created,last.created,last.id)).isNotEmpty()
         HistorySnapshot(messages,meta?.get("read_raw") as? String?:"",(meta?.get("saved_at") as? Number)?.toLong()?:0L,generation,hasOlder,hasNewer)
     }
+    fun catalogRead(owner:String,key:String):String?=db.transaction{
+        val row=db.query("SELECT payload FROM history_catalog WHERE owner=? AND catalog=?",listOf(owner,key)).firstOrNull()?:return@transaction null
+        try{val value=codec.open(owner,"catalog:$key",row["payload"] as ByteArray);db.execute("UPDATE history_catalog SET used_at=? WHERE owner=? AND catalog=?",listOf(now(),owner,key));value}catch(_:Exception){catalogDrop(owner,key);null}
+    }
+    fun catalogWrite(owner:String,key:String,value:String,expectedEpoch:Long):Boolean=db.transaction{
+        if(epoch(owner)!=expectedEpoch)return@transaction false
+        require(value.toByteArray().size<=90000)
+        val bytes=codec.seal(owner,"catalog:$key",value)
+        db.execute("UPDATE history_catalog SET payload=?,size=?,used_at=? WHERE owner=? AND catalog=?",listOf(bytes,bytes.size,now(),owner,key))
+        db.execute("INSERT OR IGNORE INTO history_catalog(owner,catalog,payload,size,used_at) VALUES(?,?,?,?,?)",listOf(owner,key,bytes,bytes.size,now()));true
+    }
+    fun catalogDrop(owner:String,key:String){db.execute("DELETE FROM history_catalog WHERE owner=? AND catalog=?",listOf(owner,key))}
     fun stats(owner:String):Map<String,Long>{
         val row=db.query("SELECT count(*) AS messages,count(DISTINCT chat) AS chats,coalesce(sum(size),0) AS bytes FROM history_messages WHERE owner=?",listOf(owner)).first()
-        return mapOf("messages" to (row["messages"] as Number).toLong(),"chats" to (row["chats"] as Number).toLong(),"bytes" to (row["bytes"] as Number).toLong(),"epoch" to epoch(owner))
+        return mapOf("messages" to (row["messages"] as Number).toLong(),"chats" to (row["chats"] as Number).toLong(),"bytes" to (row["bytes"] as Number).toLong()+(db.query("SELECT coalesce(sum(size),0) AS bytes FROM history_catalog WHERE owner=?",listOf(owner)).first()["bytes"] as Number).toLong(),"epoch" to epoch(owner))
     }
     fun trim(maxBytes:Long){
         require(maxBytes>=1024*1024)
         db.execute("DELETE FROM history_messages WHERE used_at<?",listOf(now()-30L*86400000))
+        db.execute("DELETE FROM history_catalog WHERE used_at<?",listOf(now()-30L*86400000))
+        var catalogBytes=(db.query("SELECT coalesce(sum(size),0) AS bytes FROM history_catalog").first()["bytes"] as Number).toLong()
+        for(row in db.query("SELECT owner,catalog,size FROM history_catalog ORDER BY used_at")){
+            if(catalogBytes<=maxBytes/10)break
+            catalogDrop(row["owner"] as String,row["catalog"] as String);catalogBytes-=(row["size"] as Number).toLong()
+        }
         var bytes=(db.query("SELECT coalesce(sum(size),0) AS bytes FROM history_messages").first()["bytes"] as Number).toLong()
-        if(bytes<=maxBytes)return
+        val messageLimit=maxOf(0,maxBytes-catalogBytes)
+        if(bytes<=messageLimit)return
         for(row in db.query("SELECT owner,chat,id,size FROM history_messages ORDER BY used_at,id")){
-            if(bytes<=maxBytes)break
+            if(bytes<=messageLimit)break
             db.execute("DELETE FROM history_messages WHERE owner=? AND chat=? AND id=?",listOf(row["owner"],row["chat"],row["id"]));bytes-=(row["size"] as Number).toLong()
         }
     }

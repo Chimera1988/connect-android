@@ -76,4 +76,25 @@ class HistoryStoreTest{
             store.trim(1024*1024);assertTrue(store.stats("one").getValue("bytes")<=1024*1024);assertTrue(store.retired("one",message(100).id))
         }finally{db.close()}
     }
+    @Test fun catalogPersistsEncryptedAndIsScopedToViewerAndOwner(){
+        val file=Files.createTempFile("connect-catalog-",".sqlite");val codec=TestHistoryCodec();val key="profile:peer:photos"
+        try{
+            JdbcHistoryDb(file.toString()).let{db->val store=HistoryStore(db,codec);assertTrue(store.catalogWrite("one",key,"private-metadata",store.epoch("one")));assertFalse(String(db.query("SELECT payload FROM history_catalog").single()["payload"] as ByteArray).contains("private-metadata"));db.close()}
+            JdbcHistoryDb(file.toString()).let{db->val store=HistoryStore(db,codec);assertEquals("private-metadata",store.catalogRead("one",key));assertNull(store.catalogRead("other",key));val old=store.epoch("one");store.clear("one");assertFalse(store.catalogWrite("one",key,"old-response",old));assertEquals("private-metadata",store.catalogRead("one",key));store.catalogDrop("one",key);assertNull(store.catalogRead("one",key));db.close()}
+        }finally{Files.deleteIfExists(file)}
+    }
+    @Test fun catalogBudgetAndCorruptionNeverEraseAuthOrDeletionBarriers(){
+        val db=JdbcHistoryDb(":memory:");try{val store=HistoryStore(db,TestHistoryCodec());val epoch=store.epoch("one");store.drop("one","retired")
+            for(n in 0 until 30)store.catalogWrite("one","profile:$n:photos","x".repeat(80000),epoch)
+            store.trim(1024*1024);assertTrue(store.stats("one").getValue("bytes")<=1024*1024);assertTrue(store.retired("one","retired"))
+            store.catalogWrite("one","inbox","safe",epoch);db.execute("UPDATE history_catalog SET payload=? WHERE catalog=?",listOf(byteArrayOf(1,2,3),"inbox"));assertNull(store.catalogRead("one","inbox"))
+        }finally{db.close()}
+    }
+    @Test fun catalogRejectsSecretsUrlsAndUnknownNamespaces(){
+        assertTrue(HistoryCatalogPolicy.key("profile:12345678-1234-1234-1234-123456789012:photos"));assertFalse(HistoryCatalogPolicy.key("auth"))
+        for(key in listOf("access_token","refresh_token","authorization","signedUrl","password"))assertFalse(HistoryCatalogPolicy.property(key))
+        for(value in listOf("https://host/a?token=secret","/a?token=secret","eyJabc.payload.signature"))assertFalse(HistoryCatalogPolicy.string(value))
+        assertTrue(HistoryCatalogPolicy.string("user/photos/file.webp"))
+    }
+
 }

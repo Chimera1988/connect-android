@@ -1,0 +1,1 @@
+{"version":1,"predicate":["all",["owner"],["unanswered"],["any",["status","missed"],["all",["status","ended"],["valid-date","ended_at"]],["all",["status","ringing"],["older-than","created_at",60000],["not-active"]]]]}

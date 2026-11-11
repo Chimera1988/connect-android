@@ -1,7 +1,7 @@
 /** Connect Android native FCM transport. No WebView or Supabase service-role secrets. */
 import {getMessaging,getToken,onMessage,onTokenRefresh,setBackgroundMessageHandler} from '@react-native-firebase/messaging';
 import notifee, {AndroidCategory, AndroidImportance, AndroidVisibility, EventType} from '@notifee/react-native';
-import {AppState} from 'react-native';
+import {AppState,NativeModules,DeviceEventEmitter} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
 import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
@@ -32,13 +32,14 @@ async function notificationPrefs():Promise<NotificationPrefs>{
 }
 
 type Data=Record<string,string|undefined>;
-export type NativePushDestination={kind:'chat';conversationId:string}|{kind:'call';callId:string;conversationId:string|null};
+export type NativePushDestination={kind:'chat';conversationId:string}|{kind:'call';callId:string;conversationId:string|null}|{kind:'calls'};
 let onOpen:((destination:NativePushDestination)=>void)|null=null;
 let bufferedOpen:NativePushDestination|null=null;
 let visibleConversation:string|null=null;
 export function setVisibleConversation(id:string|null){visibleConversation=id;}
 function route(raw:Record<string,unknown>|undefined):NativePushDestination|null {
   if(!raw)return null;
+  if(raw.kind==='missed-call')return {kind:'calls'};
   const conversationId=raw.conversationId;
   const callId=raw.callId;
   if(raw.kind==='incoming-call' && typeof callId==='string' && UUID.test(callId))
@@ -82,6 +83,7 @@ export async function handleNativePush(data:Data|undefined){
     }
     return;
   }
+  if(data.kind==='missed-call'){await NativeModules?.ConnectCallCoordinator?.receiveMissed?.(JSON.stringify(data));return;}
   if(data.kind==='call-ended'){
     if(data.callId&&UUID.test(data.callId))await endSystemCall(data.callId);
     return;
@@ -155,7 +157,8 @@ export async function registerNativePushNow(ownerId:string){
 export function subscribeNativePush(ownerId:string,open:(route:NativePushDestination)=>void,onError:(error:string)=>void):()=>void{
   let alive=true;
   onOpen=open;
-  const drainOpen=async()=>{try{const raw=await SecureStore.getItemAsync(OPEN_KEY);if(!raw||!alive)return;await SecureStore.deleteItemAsync(OPEN_KEY);const saved=JSON.parse(raw);if(Date.now()-saved.time<120000)deliverOpen(saved.raw);}catch{}};
+  const drainOpen=async()=>{try{if(await NativeModules?.ConnectCallCoordinator?.consumeMissedOpen?.(ownerId)){if(alive)open({kind:'calls'});}const raw=await SecureStore.getItemAsync(OPEN_KEY);if(!raw||!alive)return;await SecureStore.deleteItemAsync(OPEN_KEY);const saved=JSON.parse(raw);if(Date.now()-saved.time<120000)deliverOpen(saved.raw);}catch{}};
+  const missedPress=DeviceEventEmitter?.addListener?.('connect:missed-changed',(event:any)=>{if(event?.userId===ownerId)void drainOpen();});
   const resumes=AppState.addEventListener('change',state=>{if(state==='active')void drainOpen();});
   void drainOpen();
   if(bufferedOpen){open(bufferedOpen);bufferedOpen=null;}
@@ -194,7 +197,7 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
     }catch(e){if(alive)onError('Ошибка регистрации уведомлений: '+String(e));}
   })();
   return ()=>{
-    alive=false;foreground();presses();tokenRefresh();resumes.remove();
+    alive=false;foreground();presses();tokenRefresh();resumes.remove();missedPress?.remove();
     if(onOpen===open)onOpen=null;
   };
 }

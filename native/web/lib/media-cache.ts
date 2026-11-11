@@ -10,10 +10,17 @@ type Entry = {
     blob?: Blob;
     bytes?: ArrayBuffer;
     type?: string;
+    version?:string;
 };
 const NAME = 'connect-media-v1', STORE = 'objects';
 let opening: Promise<IDBDatabase> | undefined;
 let owner = '';
+let mediaEpoch=0;
+const controllers=new Set<AbortController>();
+const versions=new Map<string,string>();
+export function mediaCacheOwner(){return owner;}
+export function mediaCacheEpoch(){return mediaEpoch;}
+export function cacheLeaseValid(user:string,epoch:number){return owner===user&&mediaEpoch===epoch;}
 let historyBudgetOwner='',historyBytes=0,historyBudgetAt=0,historyBudgetPending:Promise<void>|undefined;
 async function nativeHistoryBytes(){
     if(!owner)return 0;
@@ -88,6 +95,7 @@ export async function cacheStats() { const result: Record<CacheCategory, number>
     if (row.user === owner)
         result[row.category] += row.size; return result; }
 export async function clearCachedMedia(category: CacheCategory | 'temporary', identity?: string) {
+    mediaEpoch++;for(const controller of controllers)controller.abort();controllers.clear();
     const rows = await entries();
     for (const row of rows) {
         if (row.user !== owner || !identity && row.category === 'system')
@@ -121,10 +129,9 @@ export async function trimCache() {
     }
 }
 export async function resolveCachedMedia(url: string, user = owner): Promise<string> { const id = mediaIdentity(url); if (!id || !user || id.startsWith('core'))
-    return url; const key = user + ':' + id; try {
+    return url; const key = user + ':' + id,epoch=mediaEpoch; if(owner!==user)return url;try {
     const row = await run<Entry | undefined>('readonly', s => s.get(key));
-    if (!row)
-        return url;
+    if (!row||!cacheLeaseValid(user,epoch)||versions.has(key)&&row.version!==versions.get(key))return url;
     const type = contentType(id, row.type || row.blob?.type);
     const blob = row.blob || (row.bytes instanceof ArrayBuffer ? new Blob([row.bytes], { type }) : undefined);
     if (!blob?.size || !usableType(type)) {
@@ -152,19 +159,40 @@ let cacheWorkers=0;
 const cacheJobs:{priority:number;run:()=>Promise<void>;resolve:()=>void}[]=[];
 function cacheJob(priority:number,run:()=>Promise<void>){return new Promise<void>(resolve=>{cacheJobs.push({priority,run,resolve});cacheJobs.sort((a,b)=>a.priority-b.priority);pumpCacheJobs();});}
 function pumpCacheJobs(){while(cacheWorkers<3&&cacheJobs.length){const job=cacheJobs.shift()!;cacheWorkers++;void job.run().catch(()=>{}).finally(()=>{cacheWorkers--;job.resolve();pumpCacheJobs();});}}
-async function remember(url: string, user: string) { const id = mediaIdentity(url); if (!id || !user || id.startsWith('core'))
-    return; const key = user + ':' + id; if (pending.has(key))
-    return pending.get(key); const operation = cacheJob(mediaCategory(id)==='system'?0:/__(thumb\.webp|poster\.jpg)$/.test(id)?1:2,async () => { if (owner!==user || await run('readonly', s => s.get(key)))
-    return; const response = await fetch(url, { cache: 'force-cache' }); if (!response.ok || response.status === 206)
-    return; const length = Number(response.headers.get('content-length') || 0); if (length > 256 * 1024 ** 2)
-    return; const blob = await response.blob(); if (!blob.size || blob.size > 256 * 1024 ** 2)
-    return; const type = contentType(id, blob.type); if (!usableType(type)) return;
-    // ArrayBuffer avoids WebKit's IndexedDB Blob-file staging failures. Old Blob
-    // records remain readable; cache errors always leave the network URL usable.
-    const bytes = await blob.arrayBuffer();
-    const database=await db();await new Promise<void>((resolve,reject)=>{const tx=database.transaction([STORE,'retired'],'readwrite');const check=tx.objectStore('retired').get(key);check.onsuccess=()=>{if(!check.result)tx.objectStore(STORE).put({key,user,category:mediaCategory(id,type),size:blob.size,used:Date.now(),bytes,type} satisfies Entry);};tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error || Error('Cache write aborted'));}); await trimCache(); }).catch(() => { }).finally(() => pending.delete(key)); pending.set(key, operation); return operation; }
+export async function boundedMediaBody(response:Response,maxBytes:number):Promise<Blob|null>{
+ const length=Number(response.headers.get('content-length')||0);
+ if(length>maxBytes){await response.body?.cancel();return null;}
+ // Streaming cap also covers absent or misleading Content-Length.
+ if(!response.body)return null;
+ const reader=response.body.getReader(),parts:Uint8Array<ArrayBuffer>[]=[];let size=0;
+ try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBytes){await reader.cancel();return null;}parts.push(new Uint8Array(value));}}
+ finally{reader.releaseLock();}
+ return size?new Blob(parts,{type:response.headers.get('content-type')||''}):null;
+}
+async function remember(url:string,user:string,maxBytes=256*1024**2,signal?:AbortSignal){
+ const id=mediaIdentity(url);if(!id||!user||id.startsWith('core')||owner!==user||signal?.aborted)return;
+ const key=user+':'+id,epoch=mediaEpoch,version=versions.get(key);if(pending.has(key))return pending.get(key);
+ const operation=cacheJob(mediaCategory(id)==='system'?0:/__(thumb\.webp|poster\.jpg)$/.test(id)?1:2,async()=>{
+   if(!cacheLeaseValid(user,epoch)||signal?.aborted)return;
+   const old=await run<Entry|undefined>('readonly',s=>s.get(key));
+   if(old&&(!versions.has(key)||old.version===version))return;
+   if(old){const stale=objectUrls.get(key);if(stale){restoreUrl(stale);objectUrls.delete(key);}}
+   const controller=new AbortController(),abort=()=>controller.abort();controllers.add(controller);signal?.addEventListener('abort',abort,{once:true});
+   try{
+    const response=await fetch(url,{cache:'force-cache',signal:controller.signal});if(!response.ok||response.status===206)return;
+    const blob=await boundedMediaBody(response,maxBytes);if(!blob||!cacheLeaseValid(user,epoch)||versions.get(key)!==version)return;
+    const type=contentType(id,blob.type);if(!usableType(type))return;const bytes=await blob.arrayBuffer();
+    const database=await db();await new Promise<void>((resolve,reject)=>{
+      const tx=database.transaction([STORE,'retired'],'readwrite');const check=tx.objectStore('retired').get(key);
+      check.onsuccess=()=>{if(!check.result&&cacheLeaseValid(user,epoch)&&versions.get(key)===version)tx.objectStore(STORE).put({key,user,category:mediaCategory(id,type),size:blob.size,used:Date.now(),bytes,type,version} satisfies Entry);};
+      tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Cache write aborted'));
+    });await trimCache();
+   }finally{signal?.removeEventListener('abort',abort);controllers.delete(controller);}
+ }).catch(()=>{}).finally(()=>{if(pending.get(key)===operation)pending.delete(key);});
+ pending.set(key,operation);return operation;
+}
 export function installMediaCache(user: string, refreshUrl?: (source: string) => Promise<string | undefined>) {
-    owner = user;
+    mediaEpoch++;owner = user;window.dispatchEvent(new Event('connect:account-changed'));
     let alive = true;
     const visible = new IntersectionObserver(items => { for (const item of items)
         if (item.isIntersecting) {
@@ -229,8 +257,7 @@ export function installMediaCache(user: string, refreshUrl?: (source: string) =>
     scan();
     void trimCache().catch(() => { });
     void navigator.storage?.persist?.().catch(() => { });
-    return () => { alive = false; observer.disconnect(); visible.disconnect(); document.removeEventListener('load', loaded, true); document.removeEventListener('play', loaded, true); document.removeEventListener('error', failed, true); if (owner === user)
-        owner = ''; for (const url of objectUrls.values())
+    return () => { alive = false; observer.disconnect(); visible.disconnect(); document.removeEventListener('load', loaded, true); document.removeEventListener('play', loaded, true); document.removeEventListener('error', failed, true); if (owner === user){owner = '';mediaEpoch++;window.dispatchEvent(new Event('connect:account-changed'));for(const c of controllers)c.abort();controllers.clear();versions.clear();} for (const url of objectUrls.values())
         restoreUrl(url); objectUrls.clear(); bindings.clear(); };
 }
 
@@ -250,4 +277,42 @@ export async function purgeDeletedMedia(user:string,message:string){
 export async function prefetchCachedMedia(url:string,user:string):Promise<void>{
   const id=mediaIdentity(url);if(!url||!user||!id||mediaCategory(id)!=='system'&&!/__(thumb\.webp|poster\.jpg)$/.test(id))return;
   try{await remember(url,user);}catch{/* Network fallback remains usable. */}
+}
+
+/** Profile bytes reuse this same objects store, keyed by path, never signed URL. */
+function profileIdentity(path:string){return 'connect-profile-media/'+path;}
+export async function resolveCachedProfileFile(user:string,path:string,version?:string):Promise<string|null>{
+ if(owner!==user||!path||path.includes('?')||path.includes('://'))return null;
+ const identity=profileIdentity(path),key=user+':'+identity;
+ if(version)versions.set(key,version);
+ const source=location.origin+'/storage/v1/object/authenticated/'+identity.split('/').map(encodeURIComponent).join('/');
+ const resolved=await resolveCachedMedia(source,user);return resolved===source?null:resolved;
+}
+export async function prefetchProfileFile(url:string,user:string,_kind:string,maxBytes:number,epoch=mediaEpoch,signal?:AbortSignal):Promise<void>{
+ const id=mediaIdentity(url);if(!id?.startsWith('connect-profile-media/')||!cacheLeaseValid(user,epoch))return;
+ await remember(url,user,maxBytes,signal);
+}
+export async function purgeCachedProfileFile(user:string,path:string,permanent=false):Promise<void>{
+ if(owner!==user)return;const key=user+':'+profileIdentity(path),database=await db();versions.set(key,'revoked:'+Date.now());
+ await new Promise<void>((resolve,reject)=>{const tx=database.transaction([STORE,'retired'],'readwrite');if(permanent)tx.objectStore('retired').put(true,key);tx.objectStore(STORE).delete(key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
+ const local=objectUrls.get(key);if(local){URL.revokeObjectURL(local);originals.delete(local);objectUrls.delete(key);}
+ window.dispatchEvent(new CustomEvent('connect:profile-media-retired',{detail:{user,path}}));
+}
+
+export async function resolveCachedStorageFile(user:string,bucket:string,path:string):Promise<string|null>{
+ const source=location.origin+'/storage/v1/object/authenticated/'+[bucket,...path.split('/')].map(encodeURIComponent).join('/');
+ const result=await resolveCachedMedia(source,user);return result===source?null:result;
+}
+
+export const retireCachedProfileFile=(user:string,path:string)=>purgeCachedProfileFile(user,path,true);
+
+/** Preserve the existing Android/DuckDNS media proxy for renewed player URLs. */
+export function mediaPlaybackUrl(url:string):string{
+ if(location.hostname!=='connect-chat.duckdns.org')return url;
+ const root=process.env.NEXT_PUBLIC_SUPABASE_URL||'';
+ try{const source=new URL(url),base=new URL(root);
+  if(source.hostname===base.hostname)return location.origin+'/supabase'+source.pathname+source.search+source.hash;
+  if(source.hostname===base.hostname.replace(/\.supabase\.co$/,'.storage.supabase.co'))return location.origin+'/supabase-storage'+source.pathname+source.search+source.hash;
+ }catch{}
+ return url;
 }

@@ -1,4 +1,6 @@
 'use client';
+import {isMissedIncomingCall as missed} from '../lib/call-missed';
+import {nativeCallJournal} from '../lib/call-journal';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -56,10 +58,6 @@ function callDuration(call: Call) {
   const mins = Math.floor(seconds / 60);
   return `${mins}:${String(seconds % 60).padStart(2, '0')}`;
 }
-function missed(call: Call, self: string) {
-  return call.callee_id === self && (call.status === 'missed' ||
-    (call.status === 'ringing' && Date.now() - Date.parse(call.created_at) > 60000));
-}
 function statusText(call: Call, self: string) {
   const outgoing = call.caller_id === self;
   const prefix = outgoing ? 'Исходящий' : 'Входящий';
@@ -84,12 +82,14 @@ export default function ConnectCallsHub() {
     });
   }, []);
   const [userId, setUserId] = useState<string | null>(null);
+  const journalUser=useRef(userId);journalUser.current=userId;
   const [nav, setNav] = useState<Element | null>(null);
   const [main, setMain] = useState<Element | null>(null);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [calls, setCalls] = useState<Call[]>([]);
   const [lastViewed, setLastViewed] = useState(0);
+  const [nativeCount,setNativeCount]=useState(0);
   const [names, setNames] = useState<Record<string, string>>({});
   const [avatarUrls, setAvatarUrls] = useState<Record<string,string>>({});
   const [loading, setLoading] = useState(false);
@@ -111,14 +111,16 @@ export default function ConnectCallsHub() {
   const refreshGeneration = useRef(0);
 
   useEffect(() => {
-    if (!userId) { setLastViewed(0); return; }
-    const key = 'connect-last-viewed-calls:' + userId;
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored !== null && Number.isFinite(Number(stored))) setLastViewed(Number(stored));
-      else { const now = Date.now(); localStorage.setItem(key, String(now)); setLastViewed(now); }
-    } catch { setLastViewed(Date.now()); }
-  }, [userId]);
+    let alive=true;setLastViewed(0);setNativeCount(0);setCalls([]);refreshGeneration.current++;
+    if(userId){
+      let previous=0;try{previous=Number(localStorage.getItem('connect-last-viewed-calls:'+userId)||0)||0;}catch{}
+      void nativeCallJournal(userId,'state').then(async state=>{
+        if(previous>state.lastViewed)state=await nativeCallJournal(userId,'seed',{at:previous});
+        if(alive){setLastViewed(state.lastViewed);setNativeCount(state.count);}
+      }).catch(()=>{if(alive)setLastViewed(previous);});
+    }
+    return()=>{alive=false;};
+  },[userId]);
 
   useEffect(() => {
     if (!client) return;
@@ -359,14 +361,39 @@ export default function ConnectCallsHub() {
   const visibleCalls=useMemo(()=>calls.filter(call=>
     !hiddenCallIds.includes(call.id) && (!callsClearedBefore || Date.parse(call.created_at)>Date.parse(callsClearedBefore))
   ),[calls,hiddenCallIds,callsClearedBefore]);
-  const unseenMissed = userId ? visibleCalls.filter(call =>
-    missed(call, userId) && Date.parse(call.ended_at || call.created_at) > lastViewed).length : 0;
+  const unseenMissed = userId&&!open ? Math.max(nativeCount,visibleCalls.filter(call =>
+    missed(call, userId) && Date.parse(call.ended_at || call.created_at) > lastViewed).length) : 0;
   function openCalls() {
     const now = Date.now();
-    setLastViewed(now);
+    setLastViewed(now);setNativeCount(0);
+    if(userId){const owner=userId;void nativeCallJournal(owner,'view').then(state=>{if(journalUser.current===owner){setLastViewed(state.lastViewed);setNativeCount(0);}}).catch(()=>{});}
     if (userId) try { localStorage.setItem('connect-last-viewed-calls:' + userId, String(now)); } catch {}
     setOpen(true); setFilter('all'); setCallMenuOpen(false); setCallSelecting(false); setMarkedCalls([]);
   }
+  useEffect(()=>{
+    if(!userId)return;let alive=true;
+    const rows=calls.map(row=>({...row,hidden:hiddenCallIds.includes(row.id)||!!(callsClearedBefore&&Date.parse(row.created_at)<=Date.parse(callsClearedBefore))}));
+    void nativeCallJournal(userId,'reconcile',{rows}).then(state=>{if(alive){setNativeCount(state.count);setLastViewed(state.lastViewed);}}).catch(()=>{});
+    return()=>{alive=false;};
+  },[userId,calls,hiddenCallIds,callsClearedBefore]);
+  useEffect(()=>{
+    if(!userId)return;let alive=true;
+    const update=()=>{void nativeCallJournal(userId,'state').then(state=>{if(alive){setNativeCount(state.count);setLastViewed(state.lastViewed);}}).catch(()=>{});void refresh();};
+    window.addEventListener('connect:missed-changed',update);
+    return()=>{alive=false;window.removeEventListener('connect:missed-changed',update);};
+  },[userId,refresh]);
+  useEffect(()=>{
+    if(!userId||!open)return;
+    void nativeCallJournal(userId,'view').catch(()=>{});
+    return()=>{void nativeCallJournal(userId,'close').catch(()=>{});};
+  },[userId,open]);
+  useEffect(()=>{
+    if(!userId)return;
+    const show=()=>{(window as any).__connectAndroidPendingCalls=false;openCalls();};
+    window.addEventListener('connect:open-calls',show);
+    if((window as any).__connectAndroidPendingCalls)show();
+    return()=>window.removeEventListener('connect:open-calls',show);
+  },[userId]);
   const list = filter === 'missed' && userId ? visibleCalls.filter(call => missed(call, userId)) : visibleCalls;
   const visibleContacts = contacts.filter(c => c.peerName.toLocaleLowerCase('ru-RU').includes(contactSearch.trim().toLocaleLowerCase('ru-RU')));
   function startCallSelection(){setCallMenuOpen(false);setMarkedCalls([]);setCallSelecting(true);setCallEditingError('');}

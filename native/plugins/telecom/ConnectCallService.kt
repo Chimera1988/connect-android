@@ -129,7 +129,7 @@ class ConnectCallService : Service() {
             if(activeAt==0L&&machine.phase in listOf(ConnectCallState.Phase.PREPARING,ConnectCallState.Phase.OFFER_CREATED,ConnectCallState.Phase.ANSWERING,ConnectCallState.Phase.CONNECTING)&&now-setupAt>=25000){end(ConnectCallState.Phase.FAILED,"Не удалось установить аудиосоединение",source="TIMER_SETUP");return}
             if(lostAt>0&&now-lostAt>=20000){end(ConnectCallState.Phase.FAILED,"Соединение потеряно",source="TIMER_RECONNECT");return}
             if(wake?.isHeld!=true)wake?.acquire(10*60*1000L)
-            sounds.route(route,machine.phase==ConnectCallState.Phase.ACTIVE);sync();sampleMedia()
+            sounds.route(route,ConnectProximityOwner.eligible(route,machine.phase.name,machine.connectedOnce));sync();sampleMedia()
             handler.postDelayed(this,1400)
           }
         }
@@ -416,7 +416,7 @@ class ConnectCallService : Service() {
         }
         ConnectCallDiagnostics.event(this,machine.id,"webrtc-peer","READY")
     }
-    private fun transport(ready: Boolean, token: Int) { handler.post { if (valid(token)) { machine.transport(ready); if (!ready && activeAt > 0 && lostAt == 0L) lostAt = SystemClock.elapsedRealtime(); sounds.stopTone("TRANSPORT_DISCONNECTED"); publish(); showNotification() } } }
+    private fun transport(ready: Boolean, token: Int) { handler.post { if (valid(token)) { machine.transport(ready); if (!ready && activeAt > 0 && lostAt == 0L) lostAt = SystemClock.elapsedRealtime(); sounds.stopTone("TRANSPORT_DISCONNECTED");sounds.route(route,ConnectProximityOwner.eligible(route,machine.phase.name,machine.connectedOnce)); publish(); showNotification() } } }
     private fun updateReadiness(before: ConnectCallState.Phase = machine.phase) {
         audioGate.remote=remoteAudio;audioGate.recording=recording;audioGate.playout=playout;audioGate.rtp=mediaEvidence.ready
         machine.audio(audioGate.ready)
@@ -496,7 +496,7 @@ class ConnectCallService : Service() {
     private fun updated(fresh: JSONObject) {
         val status = fresh.optString("status")
         if (status !in listOf("ringing", "active")) {
-            val result = when (status) { "declined" -> ConnectCallState.Phase.DECLINED; "busy" -> ConnectCallState.Phase.BUSY; "missed" -> if(incoming)ConnectCallState.Phase.MISSED else ConnectCallState.Phase.NO_ANSWER; "failed" -> ConnectCallState.Phase.FAILED; "ended" -> if(fresh.isNull("answered_at"))ConnectCallState.Phase.CANCELLED else ConnectCallState.Phase.ENDED; else -> ConnectCallState.Phase.ENDED }
+            val result = when (status) { "declined" -> ConnectCallState.Phase.DECLINED; "busy" -> ConnectCallState.Phase.BUSY; "missed" -> if(incoming)ConnectCallState.Phase.MISSED else ConnectCallState.Phase.NO_ANSWER; "failed" -> ConnectCallState.Phase.FAILED; "ended" -> if(fresh.isNull("answered_at")){if(incoming&&ConnectMissedPolicy.isMissedIncomingCall(fresh.optString("id"),fresh.optString("callee_id"),status,fresh.optString("created_at"),null,fresh.optString("ended_at"),owner,System.currentTimeMillis()))ConnectCallState.Phase.MISSED else ConnectCallState.Phase.CANCELLED}else ConnectCallState.Phase.ENDED; else -> ConnectCallState.Phase.ENDED }
             end(result, notifyServer = false,source="SERVER"); return
         }
         if (incoming && status == "active" && !machine.ownsAnswer(fresh.optJSONObject("answer")?.optString("sdp"))) { end(ConnectCallState.Phase.ENDED, "Звонок принят на другом устройстве", false,"OTHER_DEVICE"); return }
@@ -589,7 +589,7 @@ class ConnectCallService : Service() {
     private fun applyAudioState(id: String, state: CallAudioState) {
         if (id != machine.id || machine.terminal()) return
         route = state.route; supportedRoutes = state.supportedRouteMask
-        if(telecomMuted!=state.isMuted){telecomMuted=state.isMuted;muted=state.isMuted};local?.setEnabled(focusAvailable&&!muted); sounds.route(route, machine.phase == ConnectCallState.Phase.ACTIVE); publish()
+        if(telecomMuted!=state.isMuted){telecomMuted=state.isMuted;muted=state.isMuted};local?.setEnabled(focusAvailable&&!muted); sounds.route(route,ConnectProximityOwner.eligible(route,machine.phase.name,machine.connectedOnce)); publish()
     }
     private fun preferredRoute() = when {
         supportedRoutes and CallAudioState.ROUTE_BLUETOOTH != 0 -> CallAudioState.ROUTE_BLUETOOTH
@@ -601,7 +601,7 @@ class ConnectCallService : Service() {
         val connection = ConnectCallConnectionService.get(machine.id)
         if (connection != null) connection.setAudioRoute(selected)
         else getSystemService(AudioManager::class.java).isSpeakerphoneOn = selected == CallAudioState.ROUTE_SPEAKER
-        route = selected; sounds.route(route, machine.phase == ConnectCallState.Phase.ACTIVE); publish()
+        route = selected; sounds.route(route,ConnectProximityOwner.eligible(route,machine.phase.name,machine.connectedOnce)); publish()
     }
     private fun holdWake() { wake = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Connect:audio-call").apply { acquire(10 * 60 * 1000L) } }
     private fun resolveProfile(id: String) {
@@ -697,7 +697,7 @@ class ConnectCallService : Service() {
         val value = view(); last = value
         val phase = value.getString("phase"); val now = System.currentTimeMillis()
         getSharedPreferences("connect_incoming", 0).edit().putString("id", machine.id).putString("presentationId",operationId.ifBlank{machine.id}).putString("name", name).putString("avatar", avatar).putString("phase", phase)
-            .putBoolean("muted", muted).putBoolean("speaker", route == CallAudioState.ROUTE_SPEAKER).putString("route", value.getString("audioOutput"))
+            .putBoolean("muted", muted).putBoolean("speaker", route == CallAudioState.ROUTE_SPEAKER).putInt("routeCode",route).putString("route", value.getString("audioOutput"))
             .putLong("startedElapsed", activeAt).putLong("started", now - value.getInt("elapsed") * 1000L).putString("problem", if(incoming&&getSharedPreferences("connect_call_settings",0).getString("ringWarning",null)=="CUSTOM_UNAVAILABLE")"Своя мелодия недоступна · используется Connect Call" else "")
             .putLong("expires", if (phase == "incoming") now + (ringDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(1) else now + 86400000).apply()
         sendBroadcast(Intent(ConnectIncomingCallActivity.STATE).setPackage(packageName).putExtra("callId", machine.id).putExtra("presentationId",operationId.ifBlank{machine.id})); notifyObserver(value)

@@ -7,6 +7,7 @@ import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingReceiver
 /** Calls never wait for React/Headless JS. Messages keep the existing RN Firebase path. */
 class ConnectCallPushReceiver : ReactNativeFirebaseMessagingReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if(ConnectMissedCalls.receive(context,listOf("kind","callId","conversationId","userId","endedAt","title","body").mapNotNull{key->intent.getStringExtra(key)?.let{key to it}}.toMap()))return
         val kind = intent.getStringExtra("kind")
         val id = intent.getStringExtra("callId") ?: ""
         if (ConnectCallIngress.receive(context,kind,id)) return

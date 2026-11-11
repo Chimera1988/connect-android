@@ -12,6 +12,7 @@ import org.json.JSONObject
 /** Token rotation must reach the existing server even when React never starts. */
 class ConnectPushTokenService : ReactNativeFirebaseMessagingService() {
     override fun onMessageReceived(message:com.google.firebase.messaging.RemoteMessage){
+        if(ConnectMissedCalls.receive(applicationContext,message.data))return
         if(!ConnectCallIngress.receive(applicationContext,message.data["kind"],message.data["callId"]))super.onMessageReceived(message)
     }
     override fun onNewToken(token:String){

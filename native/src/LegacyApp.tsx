@@ -217,6 +217,7 @@ function AppMain({onBootReady}:{onBootReady:(ready:boolean)=>void}){
   },[ownId]);
   useEffect(()=>{
     if(!pushDestination||!ownId)return;
+    if(pushDestination.kind==='calls'){setScreen({kind:'tab'});setTab('calls');setPushDestination(null);return;}
     if(pushDestination.kind==='call'){
       setScreen({kind:'tab'});setTab('calls');
       void voice.checkIncoming(pushDestination.callId);

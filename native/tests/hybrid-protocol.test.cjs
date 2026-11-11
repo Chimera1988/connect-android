@@ -140,3 +140,10 @@ test('history bridge accepts bounded snapshots and rejects foreign conversations
   assert.ok(read('history:wipe',{userId:uuid}));
   assert.ok(read('history:limit',{userId:uuid,limit:'500'}));
 });
+
+test('native metadata catalogs reject credential fields, signed URLs and foreign namespaces',()=>{
+ const key='profile:'+uuid+':photos';
+ assert.ok(read('history:catalog-write',{userId:uuid,key,epoch:0,value:{items:[{path:uuid+'/photos/file.webp',createdAt:'2026-11-11T00:00:00Z'}]}}));
+ for(const value of [{access_token:token},{nested:{signedUrl:'https://host/x?token='+token}},{items:[{path:'/x?token=secret'}]},{value:token}])assert.equal(read('history:catalog-write',{userId:uuid,key,epoch:0,value}),null);
+ assert.equal(read('history:catalog-read',{userId:uuid,key:'auth'}),null);
+});

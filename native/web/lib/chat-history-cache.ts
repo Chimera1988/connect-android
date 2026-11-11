@@ -1,3 +1,4 @@
+import type {} from '../hybrid/bridge-types';
 /** Android history is native SQLite, never browser IndexedDB. Auth is checked
  * again in the native module; the WebView never receives database paths/keys.
  */
@@ -6,6 +7,17 @@ type Row={id:string;conversation_id:string;created_at:string;deleted_at?:string|
 type Snapshot<T>={messages:T[];readAt:string;savedAt:number;hasMore?:boolean;hasNewer?:boolean};
 type Packet<T>=Snapshot<T>&{epoch:number;continuation:string|null};
 export type NativeHistoryStats={chats:number;messages:number;bytes:number;epoch:number;nativeSystemBytes:number};
+const hot=new Map<string,{snapshot:Snapshot<any>;at:number}>();
+const reading=new Map<string,Promise<Snapshot<any>>>();
+const generations=new Map<string,number>();
+const verified=new Map<string,number>();
+const keyFor=(user:string,chat:string)=>user+':'+chat;
+function warm(key:string,value:Snapshot<any>){hot.delete(key);hot.set(key,{snapshot:value,at:Date.now()});while(hot.size>12)hot.delete(hot.keys().next().value!);}
+function invalidate(user:string,chat?:string){for(const key of new Set([...hot.keys(),...reading.keys()]))if(key.startsWith(user+':')&&(!chat||key===keyFor(user,chat))){hot.delete(key);generations.set(key,(generations.get(key)||0)+1);}}
+export function releaseHistoryMemory(){hot.clear();verified.clear();feedFingerprints.clear();for(const key of reading.keys())generations.set(key,(generations.get(key)||0)+1);}
+export function chatNetworkDue(user:string,chat:string){return Date.now()-(verified.get(keyFor(user,chat))||0)>=20000;}
+export function chatNetworkVerified(user:string,chat:string){verified.set(keyFor(user,chat),Date.now());while(verified.size>24)verified.delete(verified.keys().next().value!);}
+export async function prewarmChatHistory(user:string,chat:string){await readChatHistory(user,chat);}
 const epochs=new Map<string,number>();
 const writes=new Map<string,Promise<void>>();
 async function request(command:string,userId:string,data:Record<string,unknown>={}){
@@ -25,7 +37,19 @@ async function snapshot<T extends Row>(user:string,chat:string,command:string,da
   throw Error('Слишком много частей локальной истории');
 }
 export async function readChatHistory<T extends Row>(user:string,chat:string):Promise<Snapshot<T>|null>{
-  if(!user||!chat)return null;return snapshot<T>(user,chat,'read');
+  if(!user||!chat)return null;
+  const key=keyFor(user,chat),cached=hot.get(key);if(cached&&Date.now()-cached.at<20000){warm(key,cached.snapshot);return cached.snapshot;}
+  if(reading.has(key))return reading.get(key)!;
+  const task=(async()=>{
+    // Inbox writes can overlap chunked hydration. Retry against the same native
+    // database rather than dropping an otherwise available offline history.
+    for(let attempt=0;attempt<3;attempt++){
+      const generation=generations.get(key)||0,value=await snapshot<T>(user,chat,'read');
+      if((generations.get(key)||0)===generation){warm(key,value);return value;}
+    }
+    throw Error('История обновляется, повторите открытие');
+  })().finally(()=>{if(reading.get(key)===task)reading.delete(key);});
+  reading.set(key,task);return task;
 }
 export async function readOlderChatHistory<T extends Row>(user:string,chat:string,before:string,beforeId:string):Promise<Snapshot<T>|null>{
   if(!user||!chat)return null;return snapshot<T>(user,chat,'page',{before,beforeId});
@@ -47,15 +71,32 @@ export function writeChatHistory<T extends Row>(user:string,chat:string,messages
     const flush=async()=>{if(batch.length){await request('write',user,{conversationId:chat,messages:batch,readAt,epoch});batch=[];bytes=0;}};
     for(const json of frozen){const size=new TextEncoder().encode(json).length;if(size>72000)continue;if(bytes+size>72000||batch.length>=100)await flush();batch.push(JSON.parse(json));bytes+=size;}
     if(!frozen.length)await request('write',user,{conversationId:chat,messages:[],readAt,epoch});
-    await flush();window.dispatchEvent(new Event('connect:history-cache-changed'));
+    await flush();invalidate(user,chat);window.dispatchEvent(new Event('connect:history-cache-changed'));
   }).finally(()=>{if(writes.get(key)===pending)writes.delete(key);});
   writes.set(key,pending);return pending;
 }
-export async function dropCachedMessage(user:string,_chat:string,id:string){if(user&&id)await request('drop',user,{messageId:id});}
-export async function dropCachedMessageById(user:string,id:string){if(user&&id)await request('drop',user,{messageId:id});}
-export async function wipeChatHistory(user:string,chat:string){if(user&&chat)await request('wipe',user,{conversationId:chat});}
-export async function wipeUserHistory(user:string){if(user)await request('wipe',user);}
+export async function dropCachedMessage(user:string,_chat:string,id:string){if(user&&id){invalidate(user);await request('drop',user,{messageId:id});}}
+export async function dropCachedMessageById(user:string,id:string){if(user&&id){invalidate(user);await request('drop',user,{messageId:id});}}
+export async function wipeChatHistory(user:string,chat:string){if(user&&chat){invalidate(user,chat);await request('wipe',user,{conversationId:chat});}}
+export async function wipeUserHistory(user:string){if(user){invalidate(user);await request('wipe',user);}}
 export async function chatHistoryStats(user:string):Promise<NativeHistoryStats>{
   if(!user)return{chats:0,messages:0,bytes:0,epoch:0,nativeSystemBytes:0};return request('stats',user);
 }
 export async function setNativeHistoryLimit(user:string,limit:string){if(user)await request('limit',user,{limit});}
+
+/** Reuse already authorized inbox rows; no extra SELECT of message history. */
+export async function seedInboxHistory<T extends Row>(user:string,rows:T[],readTimes:Record<string,string>,signal?:AbortSignal){
+ const grouped=new Map<string,T[]>();
+ for(const row of rows){if(!row.deleted_at){const list=grouped.get(row.conversation_id)||[];if(list.length<200)list.push(row);grouped.set(row.conversation_id,list);}}
+ for(const [chat,messages] of [...grouped].slice(0,8)){
+   if(signal?.aborted)break;
+   const fingerprint=messages.map(m=>JSON.stringify(m)).join('')+'|'+(readTimes[chat]||'');
+   const key=user+':'+chat;
+   if(feedFingerprints.get(key)===fingerprint)continue;
+   await writeChatHistory(user,chat,messages,readTimes[chat]||'');
+   if(signal?.aborted)break;feedFingerprints.set(key,fingerprint);
+   if(feedFingerprints.size>16)feedFingerprints.delete(feedFingerprints.keys().next().value!);
+   await prewarmChatHistory(user,chat);
+ }
+}
+const feedFingerprints=new Map<string,string>();

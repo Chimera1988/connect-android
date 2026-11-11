@@ -64,8 +64,8 @@ internal object ConnectCallScreen : Application.ActivityLifecycleCallbacks {
         handler.postDelayed({ if(ConnectCallService.owns(id)&&!ConnectIncomingCallActivity.visible)
             ConnectCallDiagnostics.event(context,id,"presentation","VISIBILITY_UNCONFIRMED","SCREEN_NOT_CONFIRMED") },1800)
     }
-    override fun onActivityResumed(activity: Activity) { resumed=WeakReference(activity); handler.post { restore(activity,"HOST_RESUMED") } }
-    override fun onActivityPaused(activity: Activity) { if(resumed?.get()===activity)resumed=null }
+    override fun onActivityResumed(activity: Activity) { ConnectMissedCalls.foreground=activity is MainActivity;resumed=WeakReference(activity); handler.post { restore(activity,"HOST_RESUMED") } }
+    override fun onActivityPaused(activity: Activity) { if(resumed?.get()===activity){resumed=null;ConnectMissedCalls.foreground=false} }
     override fun onActivityCreated(activity: Activity, saved: Bundle?) {}
     override fun onActivityStarted(activity: Activity) {}
     override fun onActivityStopped(activity: Activity) {}

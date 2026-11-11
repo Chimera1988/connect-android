@@ -6,6 +6,10 @@ import android.media.*
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 
 /** Sole incoming signal owner, independent of Telecom conversation focus. */
 internal class ConnectCallAudio(private val context:Context,private val onRingWarning:()->Unit={}) {
@@ -20,7 +24,7 @@ internal class ConnectCallAudio(private val context:Context,private val onRingWa
     private var alertId=""
     private var proximity:PowerManager.WakeLock?=null
     private fun attributes(usage:Int)=AudioAttributes.Builder().setUsage(usage).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
-    private fun log(stage:String,state:String,code:String="",details:Map<String,Any> = emptyMap())=ConnectCallDiagnostics.event(context,alertId.ifEmpty{ConnectCallService.snapshot().optString("callId")},stage,state,code,details)
+    private fun log(stage:String,state:String,code:String="",details:Map<String,Any> = emptyMap())=ConnectCallDiagnostics.event(context,if(stage=="proximity")ConnectCallService.snapshot().optString("callId")else alertId.ifEmpty{ConnectCallService.snapshot().optString("callId")},stage,state,code,details)
     private fun releaseRing(){val player=ring;ring=null;try{player?.setOnPreparedListener(null);player?.setOnErrorListener(null);player?.release()}catch(_:Exception){}}
     fun stopIncoming(reason:String){
         if(ringing||ring!=null||vibrator!=null)log("signals","stopped",reason)
@@ -139,16 +143,45 @@ internal class ConnectCallAudio(private val context:Context,private val onRingWa
         }
         player.play()
     }
-    fun route(route: Int, active: Boolean) {
-        if (active && route == android.telecom.CallAudioState.ROUTE_EARPIECE) {
-            val power = context.getSystemService(PowerManager::class.java)
-            if (proximity?.isHeld != true && power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
-                if(proximity==null)proximity=power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "Connect:call-proximity")
-                proximity?.acquire(10 * 60 * 1000L)
-            }
-        } else { try { proximity?.release() } catch (_: Exception) {}; proximity = null }
+    private var lastProximity:Boolean?=null
+    private var proximityRoute=0
+    private var proximitySelection:Pair<Int,Boolean>?=null
+    private val proximitySupported by lazy{context.getSystemService(PowerManager::class.java).isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)}
+    private val sensorListener=object:SensorEventListener{
+        override fun onAccuracyChanged(sensor:Sensor?,accuracy:Int){}
+        override fun onSensorChanged(event:SensorEvent){
+            val near=event.values.isNotEmpty()&&event.values[0]<event.sensor.maximumRange
+            if(lastProximity!=near){lastProximity=near;log("proximity",if(near)"NEAR" else "FAR","SENSOR_EVENT",mapOf("route" to proximityRoute,"held" to (proximity?.isHeld==true)))}
+        }
+    }
+    private val proximityOwner=ConnectProximityOwner(object:ConnectProximityDriver{
+        override fun supported():Boolean{
+            return proximitySupported
+        }
+        override fun held()=proximity?.isHeld==true
+        override fun acquire(){
+            if(proximity==null)proximity=context.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,"Connect:call-proximity").apply{setReferenceCounted(false)}
+            proximity!!.acquire()
+            log("proximity","ACQUIRED","SERVICE_OWNS",mapOf("route" to proximityRoute,"held" to true,"wakeLockSupported" to true,"phase" to ConnectCallService.snapshot().optString("state")))
+        }
+        override fun release(){
+            try{proximity?.release();log("proximity","RELEASED","ROUTE_OR_LIFECYCLE",mapOf("route" to proximityRoute))}finally{proximity=null}
+        }
+        override fun observe(enabled:Boolean){
+            val sensors=context.getSystemService(SensorManager::class.java)
+            if(enabled){lastProximity=null;val sensor=sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+                if(sensor==null||!sensors.registerListener(sensorListener,sensor,SensorManager.SENSOR_DELAY_NORMAL,handler))log("proximity","SENSOR_EVENTS_UNAVAILABLE")
+            }else{sensors.unregisterListener(sensorListener);lastProximity=null}
+        }
+    })
+    fun route(route:Int,active:Boolean){
+        proximityRoute=route
+        val selection=route to active
+        if(proximitySelection!=selection){proximitySelection=selection;log("proximity",if(active)"ELIGIBLE" else "INELIGIBLE","ROUTE_STATE",mapOf("route" to route,"phase" to ConnectCallService.snapshot().optString("state"),"wakeLockSupported" to proximitySupported))}
+        try{proximityOwner.update(active&&route==android.telecom.CallAudioState.ROUTE_EARPIECE)}
+        catch(error:Exception){ConnectCallDiagnostics.exception(context,ConnectCallService.snapshot().optString("callId"),"proximity","WAKE_LOCK_ERROR",error);try{proximityOwner.update(false)}catch(_:Exception){}}
     }
     fun release(reason:String="CALL_CLEANUP") {
-        stopSignals(reason); route(0, false)
+        try{stopSignals(reason)}finally{route(0,false)}
     }
 }

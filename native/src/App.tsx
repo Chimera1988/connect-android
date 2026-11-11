@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {ActivityIndicator,AppState,BackHandler,Linking,NativeModules,Text,View,Pressable} from 'react-native';
+import {ActivityIndicator,AppState,BackHandler,DeviceEventEmitter,Linking,NativeModules,Text,View,Pressable} from 'react-native';
 import {SafeAreaProvider,SafeAreaView} from 'react-native-safe-area-context';
 import {StatusBar} from 'expo-status-bar';
 import * as Crypto from 'expo-crypto';
@@ -98,9 +98,11 @@ function HybridConnect(){
     if(!ownerId)return;
     return subscribeNativePush(ownerId,dest=>{
       if(dest.kind==='chat')send('chat',dest.conversationId);
+      else if(dest.kind==='calls')send('calls-open',null);
       else void voiceRef.current.checkIncoming(dest.callId);
     },message=>send('error',message));
   },[ownerId,send]);
+  useEffect(()=>{if(!ownerId)return;const listener=DeviceEventEmitter.addListener('connect:missed-changed',(e:any)=>{if(e?.userId===ownerId)send('missed-changed',{userId:ownerId});});return()=>listener.remove();},[ownerId,send]);
   useEffect(()=>{
     send('call',{phase:voice.phase,callId:voice.shown?.id,remoteName:voice.remoteName,remoteAvatar:voice.remoteAvatar,elapsed:voice.elapsed,muted:voice.muted,speaker:voice.speaker,audioOutput:voice.audioOutput,error:voice.error,notice:voice.notice});
   },[voice.phase,voice.shown?.id,voice.remoteName,voice.remoteAvatar,voice.elapsed,voice.muted,voice.speaker,voice.audioOutput,voice.error,voice.notice,send]);
@@ -166,7 +168,7 @@ function HybridConnect(){
     const category=command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command==='calls:dial'?'call-dial':command==='calls:accept'?'call-answer':null;
     if(category&&busy.current.has(category)){respond(false,undefined,'Предыдущее действие ещё выполняется');return;}
     if(category)busy.current.add(category);
-    const traceCall=(stage:string)=>{if(command.startsWith('calls:'))void NativeModules.ConnectCallCoordinator.traceBridge(command,id,stage).catch(()=>{});};
+    const traceCall=(stage:string)=>{if(command.startsWith('calls:')&&command!=='calls:journal')void NativeModules.ConnectCallCoordinator.traceBridge(command,id,stage).catch(()=>{});};
     traceCall('START');
     try{
       let result:unknown=null;
@@ -174,7 +176,8 @@ function HybridConnect(){
       if(v.phase!=='idle'&&['sounds:preview','sounds:previewBuiltin'].includes(command))throw Error('Прослушивание доступно после завершения аудиозвонка');
       if(command.startsWith('calls:')&&command!=='calls:accept'&&p.callId&&p.callId!==v.shown?.id)throw Error('Этот звонок уже завершён');
       switch(command){
-        case 'history:read':case 'history:page':case 'history:chunk':case 'history:write':case 'history:drop':case 'history:wipe':case 'history:stats':case 'history:limit':{
+        case 'calls:journal':{if(p.userId!==ownerId)throw Error('Аккаунт изменился');result=JSON.parse(await NativeModules.ConnectCallCoordinator.journal(p.userId,JSON.stringify(p)));break;}
+        case 'history:catalog-retire':case 'history:catalog-read':case 'history:catalog-write':case 'history:catalog-drop':case 'history:read':case 'history:page':case 'history:chunk':case 'history:write':case 'history:drop':case 'history:wipe':case 'history:stats':case 'history:limit':{
           // Native storage verifies the locally encrypted session owner itself.
           // Do not require a network token refresh to show already cached history.
           result=JSON.parse(await NativeModules.ConnectHistory.execute(p.userId,command.slice('history:'.length),JSON.stringify(p)));break;

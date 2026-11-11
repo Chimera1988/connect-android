@@ -2,8 +2,11 @@
 
 import RecordingBar from '../components/ConnectRecordingBar';
 import CacheSettings from '../components/ConnectCacheSettings';
+import {warmOwnProfileLibraries,warmPeerProfileLibraries} from '../lib/profile-media-index';
+import {readNativeCatalog,writeNativeCatalog} from '../lib/native-catalog';
+import {seedInboxHistory,releaseHistoryMemory,chatNetworkDue,chatNetworkVerified} from '../lib/chat-history-cache';
 import {mediaIdentity, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';
-import { prefetchCachedMedia } from '../lib/media-cache';
+import { resolveCachedStorageFile,prefetchCachedMedia } from '../lib/media-cache';
 import { readChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
 import {compareChatMessages,chatTimeKey} from '../lib/chat-order';
 import { makePhotoPreview, photoPreviewPath, supportsPhotoPreview } from '../lib/chat-thumbnails';
@@ -919,6 +922,7 @@ export default function Home() {
   activePreviewUser.current=user?.id||'';
   const messagesById=useMemo(()=>new Map(messages.map(m=>[m.id,m])),[messages]);
   const [latest, setLatest] = useState<Record<string, Message>>({});
+  const [hydratedOwner,setHydratedOwner]=useState<string|null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const recentMessagesRef=useRef<Message[]>([]);
   const [typing, setTyping] = useState(false);
@@ -950,6 +954,20 @@ export default function Home() {
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [recording, setRecording] = useState(false);
   useEffect(()=>{if(!user?.id)return;return installMediaCache(user.id, refreshMediaUrl);},[user?.id]);
+  useEffect(()=>{releaseHistoryMemory();return releaseHistoryMemory;},[user?.id]);
+  useEffect(()=>{
+    if(!user?.id||!supabase)return;const controller=new AbortController();
+    const timer=window.setTimeout(()=>void warmOwnProfileLibraries(supabase!,user.id,mediaUrl,controller.signal),1200);
+    return()=>{controller.abort();window.clearTimeout(timer);};
+  },[user?.id]);
+  useEffect(()=>{
+    if(!user?.id||!supabase||!activeChat)return;
+    const chat=conversations.find(x=>x.id===activeChat);if(!chat)return;
+    const peer=chat.user_a===user.id?chat.user_b:chat.user_a,controller=new AbortController();
+    const timer=window.setTimeout(()=>void warmPeerProfileLibraries(supabase!,user.id,peer,mediaUrl,controller.signal),800);
+    return()=>{controller.abort();window.clearTimeout(timer);};
+  },[user?.id,activeChat,conversations]);
+
   const [recordSeconds, setRecordSeconds] = useState(0);
   const attachmentInput = useRef<HTMLInputElement | null>(null);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
@@ -1319,27 +1337,53 @@ export default function Home() {
     catch(e){setNotice(e instanceof Error?e.message:'Не удалось удалить аккаунт');}
     finally{setBusy(false);}
   }
+  const directoryOwner=useRef(user?.id);directoryOwner.current=user?.id;
   const loadDirectory = useCallback(async () => {
     if (!supabase || !user) return;
+    const viewer=user.id;
     const [p, c] = await Promise.all([
       supabase.from('profiles').select('id,display_name,is_blocked,bio,avatar_path,last_seen_at,online_until'),
       supabase.from('conversations').select('id,user_a,user_b,created_at').order('created_at', { ascending: false }),
     ]);
+    if(directoryOwner.current!==viewer)return;
+    if(!c.error)setConversations((c.data||[]) as Conversation[]);setDirectoryReady(true);
+    if(!p.error&&!c.error){void readNativeCatalog(viewer,'inbox').then(snapshot=>{if(directoryOwner.current===viewer)return writeNativeCatalog(viewer,'inbox',{profiles:p.data||[],conversations:c.data||[]},snapshot.epoch);}).catch(()=>{});}
     if (p.error) setNotice(p.error.message); else {
       const directory = (p.data || []) as Profile[];
       setProfiles(directory);
       setPresence(Object.fromEntries(directory.map(p=>[p.id,{last_seen_at:p.last_seen_at,online_until:p.online_until}])));
-      const urls: Record<string,string> = {};
-      await Promise.all(directory.filter(x=>x.avatar_path).map(async x => {
-        const { data } = await supabase.storage.from('connect-avatars').createSignedUrl(x.avatar_path!, 3600);
-        if (data?.signedUrl) urls[x.id] = mediaUrl(data.signedUrl);
-      }));
-      setAvatarUrls(urls);
+      const urls:Record<string,string>={},missing:string[]=[];
+      for(const person of directory.filter(x=>x.avatar_path)){
+        const local=await resolveCachedStorageFile(viewer,'connect-avatars',person.avatar_path!);
+        if(local)urls[person.id]=local;else missing.push(person.avatar_path!);
+      }
+      if(directoryOwner.current!==viewer)return;
+      setAvatarUrls(old=>({...old,...urls}));
+      if(missing.length){const batch=await supabase.storage.from('connect-avatars').createSignedUrls([...new Set(missing)],3600);
+        const signed=new Map((batch.data||[]).filter(x=>x.path&&x.signedUrl).map(x=>[x.path,x.signedUrl]));
+        for(const person of directory){const url=person.avatar_path&&signed.get(person.avatar_path);if(url)urls[person.id]=mediaUrl(url);}
+      }
+      if(directoryOwner.current===viewer)setAvatarUrls(urls);
     }
     if (c.error) setNotice(c.error.message); else setConversations((c.data || []) as Conversation[]);
     setDirectoryReady(true);
   }, [user?.id]);
-  useEffect(() => { void loadDirectory(); }, [loadDirectory]);
+  useEffect(()=>{
+    let alive=true;setHydratedOwner(null);setDirectoryReady(false);setActiveChat(null);setProfileView(null);setProfiles([]);setConversations([]);setMessages([]);setLatest({});setAvatarUrls({});setUnread({});readCache.current={};
+    if(!user?.id)return;
+    void readNativeCatalog<{profiles:Profile[];conversations:Conversation[]}>(user.id,'inbox').then(async snapshot=>{
+      if(alive&&snapshot.value){setProfiles(snapshot.value.profiles||[]);setConversations(snapshot.value.conversations||[]);setDirectoryReady(true);
+        const localLatest:Record<string,Message>={},localUnread:Record<string,number>={};
+        for(const chat of (snapshot.value.conversations||[]).slice(0,8)){
+          const saved=await readChatHistory<Message>(user.id,chat.id).catch(()=>null);if(!alive)return;
+          if(saved?.messages.length){const rows=saved.messages;localLatest[chat.id]=rows[rows.length-1];localUnread[chat.id]=rows.filter(m=>m.sender_id!==user.id&&m.created_at>saved.readAt).length;if(saved.readAt)readCache.current[chat.id]=saved.readAt;}
+        }
+        if(alive){setLatest(localLatest);setUnread(localUnread);}
+
+        void Promise.all((snapshot.value.profiles||[]).filter(p=>p.avatar_path).map(async p=>[p.id,await resolveCachedStorageFile(user.id,'connect-avatars',p.avatar_path!)] as const)).then(rows=>{if(alive)setAvatarUrls(Object.fromEntries(rows.filter((r):r is readonly[string,string]=>!!r[1])));});}
+    }).catch(()=>{}).finally(()=>{if(alive){setHydratedOwner(user.id);void loadDirectory();}});
+    return()=>{alive=false;};
+  },[loadDirectory,user?.id]);
   useEffect(()=>{
     if(!user)return;
     const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void loadDirectory()},60000);
@@ -1443,10 +1487,10 @@ export default function Home() {
     document.addEventListener('visibilitychange',hidden);
     return()=>{clearInterval(pulse);document.removeEventListener('visibilitychange',hidden);void updateActivity(activeChat,null);};
   },[activeChat,videoNoteOpen,stickerPicker,updateActivity]);
-  // Realtime has a 3s polling fallback for mobile Safari when WebSockets are suspended.
+  // Realtime polling starts after local inbox hydration; it never blocks it.
   useEffect(() => {
-    if (!supabase || !user) return;
-    let alive = true, refreshing=false;
+    if (!supabase || !user || hydratedOwner!==user.id) return;
+    let alive = true, refreshing=false;const inboxWork=new AbortController();
     const refresh = async () => {
       if (!alive || refreshing || document.visibilityState === 'hidden') return;
       refreshing=true;
@@ -1485,6 +1529,7 @@ export default function Home() {
         if (m.sender_id !== user.id && m.created_at > (readCache.current[m.conversation_id] || '')) counts[m.conversation_id] = (counts[m.conversation_id] || 0) + 1;
       }
       setLatest(newest); setUnread(counts);
+      void seedInboxHistory(user.id,recent,readCache.current,inboxWork.signal).catch(()=>{});
       const deliveredByChat:Record<string,string>={};
       for(const m of recent)if(m.sender_id!==user.id && (!deliveredByChat[m.conversation_id] || deliveredByChat[m.conversation_id]<m.created_at))deliveredByChat[m.conversation_id]=m.created_at;
       for(const [id,iso] of Object.entries(deliveredByChat))void markDelivered(id,iso);
@@ -1494,8 +1539,8 @@ export default function Home() {
     void refresh(); const interval = window.setInterval(() => { void refresh(); }, 3000);
     const onVisible = () => { if (document.visibilityState === 'visible') { void refresh(); void loadDirectory(); } };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { alive = false; window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
-  }, [user?.id, loadDirectory, markDelivered]);
+    return () => { alive = false;inboxWork.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, [user?.id, hydratedOwner,loadDirectory, markDelivered]);
 
   useEffect(() => {
     if (!supabase || !activeChat || !user) return;
@@ -1527,6 +1572,7 @@ export default function Home() {
       if (!alive) return;
       const { data, error } = messageResult;
       if (error) { firstLoadPending = false; setChatHistoryLoading(false); setNotice(error.message); return; }
+      chatNetworkVerified(user.id,id);
       let incoming = ((data || []) as Message[]).reverse();
       const firstResponse=firstLoad;let recentered=false;
       if(firstLoad){
@@ -1593,6 +1639,7 @@ export default function Home() {
       const saved=snapshot.messages;
       historyOldest.current=saved[0];historyNewest.current=saved[saved.length-1];setNewerHistory(!!snapshot.hasNewer);
       setMessages(saved);
+      if(!chatNetworkDue(user.id,id)){firstLoad=false;firstLoadPending=false;}
       const readAt=readCache.current[id]>snapshot.readAt?readCache.current[id]:snapshot.readAt;
       const unreadIndex=saved.findIndex(m=>m.sender_id!==user.id&&m.created_at>readAt);
       const anchorIndex=unreadIndex>=0?Math.max(0,unreadIndex-1):saved.length-1;
@@ -1652,19 +1699,27 @@ export default function Home() {
     historyPaging.current=true;
     setHistoryLoadingMore(true);
     const root=scrollRef.current;
-    const first=root?.querySelector<HTMLElement>('.message-day-group[id]');
+    const first=Array.from(root?.querySelectorAll<HTMLElement>('.message-day-group[id]')||[]).find(node=>node.getBoundingClientRect().bottom>(root?.getBoundingClientRect().top||0));
     if(first)olderHistoryAnchor.current={id:first.id,top:first.getBoundingClientRect().top};
     try{
       const cached=await(forward?readNewerChatHistory<Message>(user.id,id,cursor.created_at,cursor.id):readOlderChatHistory<Message>(user.id,id,cursor.created_at,cursor.id)).catch(()=>null);
       if(activeChatRef.current!==id||historyGeneration.current!==generation)return;
-      const merge=(rows:Message[])=>setMessages(prev=>{const ids=new Set(prev.map(m=>m.id)),added=rows.filter(m=>!ids.has(m.id)&&!m.deleted_at&&!serverDeleted.current.has(m.id));if(!added.length)return prev;if(forward){historyAppend.current=true;stickToBottom.current=false;}return[...prev,...added].sort(compareChatMessages);});
-      if(cached?.messages.length)merge(cached.messages);
+      const merge=(rows:Message[])=>setMessages(prev=>{
+        const byId=new Map(prev.map(m=>[m.id,m]));for(const row of rows)if(!row.deleted_at&&!serverDeleted.current.has(row.id))byId.set(row.id,row);
+        let next=[...byId.values()].sort(compareChatMessages);
+        if(next.length>400){next=forward?next.slice(-400):next.slice(0,400);if(forward)setHistoryHasMore(true);else setNewerHistory(true);}
+        if(forward){historyAppend.current=true;stickToBottom.current=false;}
+        historyOldest.current=next[0]||null;historyNewest.current=next[next.length-1]||null;
+        if(prev.length===next.length&&prev.every((m,i)=>JSON.stringify(m)===JSON.stringify(next[i])))return prev;return next;
+      });
+      if(cached?.messages.length){merge(cached.messages);if(forward)setNewerHistory(!!cached.hasNewer);else setHistoryHasMore(!!cached.hasMore);}
       const {data,error}=await supabase.from('messages').select(MESSAGE_COLUMNS).eq('conversation_id',id).is('deleted_at',null)
         .or(`created_at.${forward?'gt':'lt'}.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.${forward?'gt':'lt'}.${cursor.id})`).order('created_at',{ascending:forward}).order('id',{ascending:forward}).limit(120);
       if(error)throw error;
       if(activeChatRef.current!==id||historyGeneration.current!==generation)return;
       const rows=(forward?(data||[]):[...(data||[])].reverse())as Message[];
       for(const row of rows)if(row.deleted_at){serverDeleted.current.add(row.id);await dropCachedMessage(user.id,id,row.id).catch(()=>{});}
+      void writeChatHistory(user.id,id,rows,readCache.current[id]||'').catch(()=>{});
       if(rows.length){if(forward)historyNewest.current=rows[rows.length-1];else historyOldest.current=rows[0];merge(rows);}
       if(forward)setNewerHistory(rows.length===120);else setHistoryHasMore(rows.length===120);
     }catch(e){if(historyGeneration.current===generation){olderHistoryAnchor.current=null;setNotice('Не удалось загрузить историю: '+(e instanceof Error?e.message:String(e)));}}
@@ -2094,7 +2149,7 @@ export default function Home() {
   // Prefetch only small preview images and avatars. Never bulk-download
   // large original videos or audio on slow/mobile connections.
   useEffect(()=>{
-    if(!user?.id||!activeChat)return;
+    if(!user?.id)return;
     const connection=(navigator as Navigator & {connection?:{saveData?:boolean;effectiveType?:string}}).connection;
     if(connection?.saveData||connection?.effectiveType==='2g')return;
     const paths=messages.filter(m=>m.conversation_id===activeChat).slice(-35).flatMap(m=>[
@@ -2590,7 +2645,7 @@ export default function Home() {
   return <div className={'connect-app ' + theme + (keyboardOpen ? ' keyboard-open' : '')} data-visual-scene={visualScene} ref={shellRef} style={{...screenStyle, '--accent':accent,'--accent2':accent} as CSSProperties}>
     {splashVisible && <ConnectSplashScreen ready={!loading && (!user || directoryReady)} onComplete={finishSplash}/>}
     {!supabase ? <div className="connection-error"><Icon name="info" size={32}/><h2>Подключение не настроено</h2><p>Проверьте NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY в Vercel.</p></div>
-      : loading ? <div className="loading-screen"><img src="/icon-192.png" alt=""/><p>Подключаем Connect…</p></div>
+      : loading || user&&hydratedOwner!==user.id ? <div className="loading-screen"><img src="/icon-192.png" alt=""/><p>Подключаем Connect…</p></div>
         : !user || setup ? <div className="login-screen">
           <div className="login-brand"><img src="/icon-192.png" alt=""/><h1>Connect</h1><p>Личные разговоры. Только свои.</p></div>
           <form className="login-form" onSubmit={setup ? savePassword : login}>
@@ -2603,7 +2658,7 @@ export default function Home() {
           {!setup && <button type="button" className="connect-invite-register" onClick={() => window.dispatchEvent(new Event('connect:open-registration-invite'))}>У меня есть код приглашения</button>}
         </div>
           : profileView && viewedProfile ? <div className="profile-view">
-            {profileMediaOpen ? <ConnectProfileMedia key={`${profileView}:${profileMediaOpen}`} client={supabase!} userId={profileView} isOwner={profileView===user.id} kind={profileMediaOpen} onBack={()=>setProfileMediaOpen(null)} onAvatar={selectAvatar}/> : <>
+            {profileMediaOpen ? <ConnectProfileMedia key={`${profileView}:${profileMediaOpen}`} client={supabase!} viewerId={user.id} userId={profileView} isOwner={profileView===user.id} kind={profileMediaOpen} onBack={()=>setProfileMediaOpen(null)} onAvatar={selectAvatar}/> : <>
             <header className="profile-top"><button className="icon-btn" type="button" onClick={()=>setProfileView(null)} aria-label="Назад"><Icon name="back" size={25}/></button><strong>{profileView===user.id?'Мой профиль':'Профиль'}</strong></header>
             <div className="profile-content">
               <div className="profile-hero">

@@ -1,3 +1,4 @@
+import {setMissedActiveCall} from './call-missed';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,Alert,AppState,DeviceEventEmitter,NativeModules,Image,Pressable,ScrollView,Text,View} from 'react-native';
 import * as Crypto from 'expo-crypto';
@@ -19,10 +20,10 @@ export function useConnectNativeVoice(userId:string,_profiles:Profile[],_avatars
   const bridgeRequest=useRef('');
   const starting=useRef(false),operation=useRef(0),pendingId=useRef(''),lastSequence=useRef(-1),lastNotice=useRef(-1);
   useEffect(()=>{
-    operation.current++;starting.current=false;pendingId.current='';latest.current=initial;setState(initial);
+    setMissedActiveCall('','idle');operation.current++;starting.current=false;pendingId.current='';latest.current=initial;setState(initial);
     if(!userId)return;
     let live=true;lastSequence.current=-1;
-    const update=(value:NativeState)=>{if(!live||value.userId&&value.userId!==userId||(value.sequence??0)<lastSequence.current)return;lastSequence.current=value.sequence??0;setState(previous=>previous.sequence===value.sequence&&previous.elapsed===value.elapsed&&previous.phase===value.phase?previous:{...initial,...value});if(value.phase==='idle'&&!starting.current&&value.state!=='IDLE')pendingId.current='';if(value.notice&&(value.sequence??0)>lastNotice.current){lastNotice.current=value.sequence??0;setNotice(value.notice);}};
+    const update=(value:NativeState)=>{if(!live||value.userId&&value.userId!==userId||(value.sequence??0)<lastSequence.current)return;lastSequence.current=value.sequence??0;setMissedActiveCall(value.callId||'',value.phase);setState(previous=>previous.sequence===value.sequence&&previous.elapsed===value.elapsed&&previous.phase===value.phase?previous:{...initial,...value});if(value.phase==='idle'&&!starting.current&&value.state!=='IDLE')pendingId.current='';if(value.notice&&(value.sequence??0)>lastNotice.current){lastNotice.current=value.sequence??0;setNotice(value.notice);}};
     const refresh=()=>{void native.getState().then(update).catch(()=>{});};
     const event=DeviceEventEmitter.addListener('connect:call-state',update);
     const resumes=AppState.addEventListener('change',v=>{if(v==='active')refresh();});

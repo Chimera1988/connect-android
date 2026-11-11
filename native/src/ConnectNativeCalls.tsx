@@ -1,3 +1,4 @@
+import {isMissedIncomingCall as isMissed} from './call-missed';
 /** Connect PWA parity: audio-only calls, contacts picker, realtime journal and editing. */
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {ActivityIndicator,Alert,AppState,FlatList,Image,Modal,Pressable,ScrollView,Text,TextInput,View} from 'react-native';
@@ -10,11 +11,6 @@ const CALL_COLUMNS='id,conversation_id,caller_id,callee_id,status,created_at,ans
 type JournalSetting={owner_id:string;cleared_before:string|null;hidden_ids:string[]};
 type Filter='all'|'missed';
 const settingsDefault=(id:string):JournalSetting=>({owner_id:id,cleared_before:null,hidden_ids:[]});
-const isMissed=(row:Call,selfId:string)=>row.callee_id===selfId&&(
-  row.status==='missed'||row.status==='declined'||
-  (row.status==='ended'&&!row.answered_at)||
-  (row.status==='ringing'&&Date.now()-Date.parse(row.created_at)>60000)
-);
 const dateOf=(iso:string)=>new Date(iso).toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'});
 const timeOf=(iso:string)=>new Date(iso).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 function statusText(row:Call,ownerId:string){

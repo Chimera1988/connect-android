@@ -72,6 +72,7 @@ class ConnectCallHintJob:JobService(){
 class ConnectCallRestoreReceiver:BroadcastReceiver(){
     override fun onReceive(context:Context,intent:Intent){
         if(intent.action !in listOf(Intent.ACTION_BOOT_COMPLETED,Intent.ACTION_MY_PACKAGE_REPLACED))return
+        ConnectMissedCalls.restore(context)
         if(ConnectCallSession.hasSession(context))ConnectPushTokenJob.enable(context)
         ConnectCallIngress.drain(context)
     }
