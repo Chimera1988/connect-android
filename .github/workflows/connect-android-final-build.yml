@@ -99,10 +99,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          # Generate src/generated/pwa.ts before TypeScript checks:
+          # src/App.tsx imports the embedded PWA module at compile time.
+          npm run build:web
           npm run typecheck
           npm run typecheck:web
           npm test
-          npm run build:web
       - name: Restore original signing key if supplied
         env:
           CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
