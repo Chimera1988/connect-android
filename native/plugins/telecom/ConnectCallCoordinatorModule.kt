@@ -108,7 +108,7 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
     }
     @ReactMethod fun configureSounds(uri: String, silent: Boolean, vibrate: Boolean, previousChannel: String, promise: Promise) {
         if (uri.isNotEmpty() && !uri.startsWith("content://media/")) { promise.reject("CALL_SOUND", "Недопустимая мелодия"); return }
-        context.getSharedPreferences("connect_call_settings", 0).edit().putString("uri", uri.takeIf { it.isNotEmpty() }).putBoolean("silent", silent).putBoolean("vibrate", vibrate).putBoolean("callVibrationV2",vibrate).putString("legacyChannel", previousChannel.take(200)).apply()
+        context.getSharedPreferences("connect_call_settings", 0).edit().remove("ringWarning").putString("uri", uri.takeIf { it.isNotEmpty() }).putBoolean("silent", silent).putBoolean("vibrate", vibrate).putBoolean("callVibrationV2",vibrate).putString("legacyChannel", previousChannel.take(200)).apply()
         promise.resolve(ConnectCallService.CHANNEL)
     }
     @ReactMethod fun getAuth(name: String, promise: Promise) { ConnectCallSession.worker.execute { try { promise.resolve(ConnectCallSession.read(context, name)) } catch (error: Exception) { promise.reject("CALL_AUTH_STORAGE", "Сессия недоступна", error) } } }

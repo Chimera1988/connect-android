@@ -9,6 +9,7 @@ import android.telecom.*
 /** One native self-managed Telecom connection; never creates its own ringtone. */
 class ConnectCallConnectionService : ConnectionService() {
     companion object {
+        private fun callId(request:ConnectionRequest):String = request.extras?.getString("connectCallId") ?: request.extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS)?.getString("connectCallId") ?: request.extras?.getBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS)?.getString("connectCallId") ?: ""
         private val connections = java.util.concurrent.ConcurrentHashMap<String, Connection>()
         @Volatile private var hasFocus = false
         private val answered = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -34,7 +35,7 @@ class ConnectCallConnectionService : ConnectionService() {
         else ids.forEach { ConnectCallService.telecomFocus(it,false) { connectionServiceFocusReleased() } }
     }
     private fun create(request: ConnectionRequest, incoming: Boolean): Connection {
-        val id = request.extras?.getString("connectCallId") ?: request.extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS)?.getString("connectCallId") ?: request.extras?.getBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS)?.getString("connectCallId") ?: ""
+        val id = callId(request)
         if (id.isEmpty() || !ConnectCallService.owns(id)) return Connection.createFailedConnection(DisconnectCause(DisconnectCause.CANCELED))
         val connection = object : Connection() {
             override fun onAnswer() { ConnectCallService.action(this@ConnectCallConnectionService, "answer", id) }
@@ -43,7 +44,8 @@ class ConnectCallConnectionService : ConnectionService() {
             override fun onDisconnect() { ConnectCallService.action(this@ConnectCallConnectionService, "end", id) }
             override fun onAbort() { onDisconnect() }
             override fun onCallAudioStateChanged(state: CallAudioState) { ConnectCallService.audioState(id, state) }
-            override fun onShowIncomingCallUi() { /* The service's CallStyle notification owns presentation. */ }
+            override fun onShowIncomingCallUi() { ConnectCallService.showIncomingUi(id) }
+            override fun onSilence() { ConnectCallService.silenceIncoming(id) }
         }
         connection.connectionProperties = Connection.PROPERTY_SELF_MANAGED
         connection.connectionCapabilities = Connection.CAPABILITY_MUTE
@@ -51,6 +53,7 @@ class ConnectCallConnectionService : ConnectionService() {
         connection.setAddress(Uri.fromParts("sip", id, null), TelecomManager.PRESENTATION_RESTRICTED)
         connection.setCallerDisplayName(request.extras?.getString("connectName") ?: "Connect", TelecomManager.PRESENTATION_ALLOWED)
         connections[id] = connection
+        ConnectCallDiagnostics.event(this,id,"telecom",if(incoming)"INCOMING_CONNECTION_CREATED" else "OUTGOING_CONNECTION_CREATED")
         if (answered.contains(id) || ConnectCallService.snapshot().optString("phase") in listOf("active","connecting","reconnecting")) connection.setActive()
         else if (incoming) connection.setRinging() else connection.setDialing()
         ConnectCallService.telecomFocus(id,hasFocus)
@@ -58,6 +61,6 @@ class ConnectCallConnectionService : ConnectionService() {
     }
     override fun onCreateIncomingConnection(handle: PhoneAccountHandle?, request: ConnectionRequest) = create(request, true)
     override fun onCreateOutgoingConnection(handle: PhoneAccountHandle?, request: ConnectionRequest) = create(request, false)
-    override fun onCreateIncomingConnectionFailed(handle: PhoneAccountHandle?, request: ConnectionRequest) { ConnectCallService.telecomFailed(request.extras?.getString("connectCallId") ?: "") }
-    override fun onCreateOutgoingConnectionFailed(handle: PhoneAccountHandle?, request: ConnectionRequest) { ConnectCallService.telecomFailed(request.extras?.getString("connectCallId") ?: "") }
+    override fun onCreateIncomingConnectionFailed(handle: PhoneAccountHandle?, request: ConnectionRequest) { ConnectCallDiagnostics.event(this,callId(request),"telecom","CONNECTION_FAILED");ConnectCallService.telecomFailed(callId(request)) }
+    override fun onCreateOutgoingConnectionFailed(handle: PhoneAccountHandle?, request: ConnectionRequest) { ConnectCallDiagnostics.event(this,callId(request),"telecom","CONNECTION_FAILED");ConnectCallService.telecomFailed(callId(request)) }
 }

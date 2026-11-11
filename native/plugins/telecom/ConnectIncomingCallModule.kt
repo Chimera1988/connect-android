@@ -79,7 +79,7 @@ class ConnectIncomingCallModule(private val context: ReactApplicationContext) : 
   @ReactMethod fun prepareCalls(once:Boolean,promise:Promise){
     context.runOnUiQueueThread{
       val prefs=context.getSharedPreferences("connect_call_settings",0)
-      if(once&&prefs.getInt("setupVersion",0)>=14){promise.resolve(false);return@runOnUiQueueThread}
+      if(once&&prefs.getInt("setupVersion",0)>=17){promise.resolve(false);return@runOnUiQueueThread}
       val activity=context.currentActivity
       if(activity==null||!activity.hasWindowFocus()){promise.resolve(false);return@runOnUiQueueThread}
       activity.startActivity(Intent(activity,ConnectCallSetupActivity::class.java))

@@ -15,7 +15,7 @@ internal object ConnectCallDiagnostics {
         val record=JSONObject().put("time",java.time.Instant.now().toString()).put("elapsedMs",android.os.SystemClock.elapsedRealtime())
             .put("sdk",android.os.Build.VERSION.SDK_INT).put("version",context.packageManager.getPackageInfo(context.packageName,0).versionName)
             .put("device",device).put("callId",safe(callId)).put("stage",safe(stage)).put("state",safe(state)).put("code",safe(code))
-        for((key,value)in details)if(key in setOf("from","to","source","generation","deadlineElapsedMs","remainingMs","serverAgeMs","createdEpochMs","serverNowMs","operationId","requestId","command","clock","failedResources","localCandidateType","remoteCandidateType","audioCodec","exceptionClass","method","line","keyguardLocked","channelImportance","notificationsEnabled","fullScreenAllowed","recording","playout","remoteAudio","focus","rtp","transport"))record.put(key,when(value){is Number,is Boolean->value;else->safe(value.toString())})
+        for((key,value)in details)if(key in setOf("from","to","source","generation","deadlineElapsedMs","remainingMs","serverAgeMs","createdEpochMs","serverNowMs","operationId","requestId","command","clock","failedResources","localCandidateType","remoteCandidateType","audioCodec","exceptionClass","method","line","keyguardLocked","channelImportance","notificationsEnabled","fullScreenAllowed","recording","playout","remoteAudio","focus","rtp","transport","notificationId","bootstrapId","firstAlert","hasFullScreenIntent","screenInteractive"))record.put(key,when(value){is Number,is Boolean->value;else->safe(value.toString())})
         val line=record.toString()
         Log.i("ConnectCall",line)
         val app=context.applicationContext
