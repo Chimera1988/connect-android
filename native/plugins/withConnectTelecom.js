@@ -42,13 +42,13 @@ function writeNative(platform){
  const values=path.join(platform,'app/src/main/res/values');fs.mkdirSync(values,{recursive:true});
  fs.writeFileSync(path.join(values,'connect_incoming.xml'),`<resources>
 <style name="ConnectIncomingCallTheme" parent="android:style/Theme.Material.NoActionBar">
-<item name="android:windowBackground">#0a0e16</item><item name="android:windowDisablePreview">true</item><item name="android:windowIsTranslucent">true</item>
+<item name="android:windowBackground">#0a0e16</item><item name="android:windowDisablePreview">true</item><item name="android:windowIsTranslucent">false</item>
 <item name="android:windowActionModeOverlay">true</item><item name="android:windowLightStatusBar">false</item><item name="android:windowLightNavigationBar">false</item>
 </style></resources>`);
 }
 module.exports=function(config){
  config=withAppBuildGradle(config,mod=>{mod.modResults.contents=configureBuild(mod.modResults.contents);return mod;});
- config=withMainApplication(config,mod=>{let s=mod.modResults.contents;if(!s.includes('add(ConnectIncomingCallPackage())')){const anchor=/PackageList\(this\)\.packages\.apply\s*\{/;if(!anchor.test(s))throw Error('Connect package registration changed');s=s.replace(anchor,m=>m+'\n        add(ConnectIncomingCallPackage())');}mod.modResults.contents=s;return mod;});
+ config=withMainApplication(config,mod=>{let s=mod.modResults.contents;if(!s.includes('add(ConnectIncomingCallPackage())')){const anchor=/PackageList\(this\)\.packages\.apply\s*\{/;if(!anchor.test(s))throw Error('Connect package registration changed');s=s.replace(anchor,m=>m+'\n        add(ConnectIncomingCallPackage())');}if(!s.includes('ConnectCallScreen.install(this)')){const anchor='super.onCreate()';if(!s.includes(anchor))throw Error('Connect Application lifecycle changed');s=s.replace(anchor,anchor+'\n    ConnectCallScreen.install(this)');}mod.modResults.contents=s;return mod;});
  config=withDangerousMod(config,['android',async mod=>{writeNative(mod.modRequest.platformProjectRoot);return mod;}]);
  return withAndroidManifest(config,mod=>{configureManifest(mod.modResults.manifest);return mod;});
 };

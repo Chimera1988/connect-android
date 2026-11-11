@@ -15,7 +15,7 @@ internal object ConnectCallDiagnostics {
         val record=JSONObject().put("time",java.time.Instant.now().toString()).put("elapsedMs",android.os.SystemClock.elapsedRealtime())
             .put("sdk",android.os.Build.VERSION.SDK_INT).put("version",context.packageManager.getPackageInfo(context.packageName,0).versionName)
             .put("device",device).put("callId",safe(callId)).put("stage",safe(stage)).put("state",safe(state)).put("code",safe(code))
-        for((key,value)in details)if(key in setOf("from","to","source","generation","deadlineElapsedMs","remainingMs","serverAgeMs","createdEpochMs","serverNowMs","operationId","requestId","command","clock","failedResources","localCandidateType","remoteCandidateType","audioCodec"))record.put(key,when(value){is Number,is Boolean->value;else->safe(value.toString())})
+        for((key,value)in details)if(key in setOf("from","to","source","generation","deadlineElapsedMs","remainingMs","serverAgeMs","createdEpochMs","serverNowMs","operationId","requestId","command","clock","failedResources","localCandidateType","remoteCandidateType","audioCodec","exceptionClass","method","line","keyguardLocked","channelImportance","notificationsEnabled","fullScreenAllowed","recording","playout","remoteAudio","focus","rtp","transport"))record.put(key,when(value){is Number,is Boolean->value;else->safe(value.toString())})
         val line=record.toString()
         Log.i("ConnectCall",line)
         val app=context.applicationContext
@@ -25,6 +25,11 @@ internal object ConnectCallDiagnostics {
             if(file.length()>256*1024){val old=java.io.File(dir,"previous.jsonl");old.delete();file.renameTo(old)}
             file.appendText(line+"\n")
         } catch(_:Exception){} }
+    }
+    fun exception(context:Context,id:String,stage:String,code:String,error:Exception){
+        val cause=error.cause?:error
+        val frame=cause.stackTrace.firstOrNull{it.className.startsWith("com.connect.messenger.")}
+        event(context,id,stage,"EXCEPTION",code,mapOf("exceptionClass" to cause.javaClass.simpleName,"method" to (frame?.let{it.className.substringAfterLast('.')+"."+it.methodName}?:"unknown"),"line" to (frame?.lineNumber?:-1)))
     }
     fun export(activity:android.app.Activity){
         disk.execute { try {

@@ -21,15 +21,22 @@ class ConnectIncomingCallActivity:Activity(){
  companion object{const val DISMISS="com.connect.messenger.DISMISS_INCOMING";const val STATE="com.connect.messenger.CALL_STATE"; @Volatile var visible=false}
  private val handler=Handler(Looper.getMainLooper());private var callId="";private var presentationId="";private var registered=false
  private val worker=java.util.concurrent.Executors.newSingleThreadExecutor();private var avatarView:ImageView?=null;private var avatarSource=""
- private var permissionOnly=false;private var permissionShowing=false
+ private var resumed=false;private var permissionOnly=false;private var permissionShowing=false
  private var timer:TextView?=null;private var activeStarted=0L;private var callScroll:ScrollView?=null
  private val close=Runnable{finish()}
  private val ticker=object:Runnable{override fun run(){if(activeStarted>0){val seconds=((SystemClock.elapsedRealtime()-activeStarted)/1000).coerceAtLeast(0);timer?.text="Разговор · ${seconds/60}:${(seconds%60).toString().padStart(2,'0')}"};handler.postDelayed(this,1000)}}
  private val receiver=object:BroadcastReceiver(){override fun onReceive(context:Context?,intent:Intent?){if(intent==null||!ConnectCallPresentation.accepts(callId,presentationId,intent.getStringExtra("callId")?:"",intent.getStringExtra("presentationId")?:""))return;if(intent.action==DISMISS)finish() else{drawCall();tryAccept()}}}
  private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
- override fun onCreate(saved:Bundle?){super.onCreate(saved);volumeControlStream=android.media.AudioManager.STREAM_VOICE_CALL;setShowWhenLocked(true);setTurnScreenOn(true);window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);window.statusBarColor=Color.rgb(10,14,22);window.navigationBarColor=Color.rgb(10,14,22);val filter=IntentFilter().apply{addAction(DISMISS);addAction(STATE)};androidx.core.content.ContextCompat.registerReceiver(this,receiver,filter,androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);registered=true;drawCall();handler.post(ticker)}
- override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);drawCall();requestCallMicrophone()}
- override fun onResume(){super.onResume();visible=true;if(callId.isNotEmpty())ConnectCallDiagnostics.event(this,callId,"screen","visible");requestCallMicrophone();tryAccept()}
+ override fun onCreate(saved:Bundle?){super.onCreate(saved);ConnectCallDiagnostics.event(this,intent.getStringExtra("callId")?:"","presentation","ACTIVITY_CREATED");volumeControlStream=android.media.AudioManager.STREAM_VOICE_CALL;setShowWhenLocked(true);setTurnScreenOn(true);window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);window.statusBarColor=Color.rgb(10,14,22);window.navigationBarColor=Color.rgb(10,14,22);val filter=IntentFilter().apply{addAction(DISMISS);addAction(STATE)};androidx.core.content.ContextCompat.registerReceiver(this,receiver,filter,androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);registered=true;drawCall();handler.post(ticker)}
+ override fun onNewIntent(intent:Intent){super.onNewIntent(intent);ConnectCallDiagnostics.event(this,intent.getStringExtra("callId")?:"","presentation","ACTIVITY_NEW_INTENT");setIntent(intent);drawCall();requestCallMicrophone()}
+ override fun onStart(){super.onStart();ConnectCallDiagnostics.event(this,callId,"presentation","ACTIVITY_STARTED")}
+ override fun onResume(){super.onResume();resumed=true;ConnectCallDiagnostics.event(this,callId,"presentation","ACTIVITY_RESUMED",details=mapOf("keyguardLocked" to getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked));requestCallMicrophone();window.decorView.post{confirmVisible()}}
+ override fun onWindowFocusChanged(hasFocus:Boolean){super.onWindowFocusChanged(hasFocus);if(hasFocus)confirmVisible()else visible=false}
+ private fun confirmVisible(){
+  val shown=resumed&&hasWindowFocus()&&window.decorView.isShown&&!isFinishing&&!isDestroyed
+  if(shown&&!visible){visible=true;ConnectCallDiagnostics.event(this,callId,"presentation","SCREEN_VISIBLE",details=mapOf("keyguardLocked" to getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked))}
+  if(shown)tryAccept()
+ }
  private fun tryAccept(){
   val requested=intent.getStringExtra("acceptCall")
   if(!requested.isNullOrEmpty()&&requested==callId&&ConnectCallService.owns(callId)){
@@ -38,7 +45,7 @@ class ConnectIncomingCallActivity:Activity(){
    else{intent.putExtra("acceptPermission",true);requestCallMicrophone()}
   }
  }
- override fun onPause(){visible=false;super.onPause()}
+ override fun onPause(){resumed=false;visible=false;super.onPause()}
  private fun requestCallMicrophone(){
   if((ConnectCallMicrophone.pending==null&&!intent.getBooleanExtra("acceptPermission",false))||permissionShowing)return
   if(checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED){ConnectCallMicrophone.complete(true);if(permissionOnly)finish();return}
@@ -60,6 +67,8 @@ class ConnectIncomingCallActivity:Activity(){
 
  private fun drawCall(){
   val state=getSharedPreferences("connect_incoming",0);callId=state.getString("id","")?:"";presentationId=state.getString("presentationId",callId)?:callId;val expires=state.getLong("expires",0)
+  val requested=intent.getStringExtra("callId")?:intent.getStringExtra("acceptCall")
+  if(!requested.isNullOrEmpty()&&requested!=callId&&requested!=presentationId){ConnectCallDiagnostics.event(this,requested,"presentation","PRESENTATION_DENIED","STALE_INTENT");finish();return}
   if(callId.isEmpty()||expires<=System.currentTimeMillis()){
    if(ConnectCallMicrophone.pending!=null){permissionOnly=true;setContentView(TextView(this).apply{text="Connect · Доступ к микрофону для аудиозвонка";setTextColor(Color.WHITE);setBackgroundColor(Color.rgb(10,14,22));gravity=Gravity.CENTER;setPadding(dp(24),dp(32),dp(24),dp(32))});return}
    finish();return

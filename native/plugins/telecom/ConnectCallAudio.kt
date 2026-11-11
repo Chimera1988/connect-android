@@ -8,12 +8,11 @@ import android.os.*
 import android.provider.Settings
 
 /** Sole signal owner. Call notifications are always silent; Telecom never rings. */
-internal class ConnectCallAudio(private val context: Context, private val onFocusChange: (Boolean, Boolean) -> Unit) {
+internal class ConnectCallAudio(private val context: Context) {
     private val manager = context.getSystemService(AudioManager::class.java)
     private var ring: Ringtone? = null
     private var tone: AudioTrack? = null
     private var vibrator: Vibrator? = null
-    private var focus: AudioFocusRequest? = null
     private var ringing = false
     private var proximity: PowerManager.WakeLock? = null
     private fun attributes(usage: Int) = AudioAttributes.Builder().setUsage(usage).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
@@ -73,21 +72,9 @@ internal class ConnectCallAudio(private val context: Context, private val onFocu
         blocked("RING_UNAVAILABLE")
     }
     fun communication() {
+        // Self-managed ConnectionService owns focus. SDP/ADM construction must not
+        // request a second focus lease while Telecom already locks call audio.
         stopSignals()
-        if (focus == null) {
-            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setOnAudioFocusChangeListener { change ->
-                    when(change){
-                        AudioManager.AUDIOFOCUS_GAIN -> onFocusChange(true,false)
-                        AudioManager.AUDIOFOCUS_LOSS -> onFocusChange(false,true)
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {stopSignals();onFocusChange(false,false)}
-                    }
-                }.build()
-            check(manager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "Аудиоустройство занято другим вызовом" }
-            focus = request
-        }
-        manager.mode = AudioManager.MODE_IN_COMMUNICATION
     }
     fun signal(connected: Boolean) {
         stopSignals()
@@ -118,9 +105,5 @@ internal class ConnectCallAudio(private val context: Context, private val onFocu
     }
     fun release() {
         stopSignals(); route(0, false)
-        if (focus != null) {
-            try { focus?.let { manager.abandonAudioFocusRequest(it) } } catch (_: Exception) {} finally { focus = null }
-            try { if (manager.mode == AudioManager.MODE_IN_COMMUNICATION) manager.mode = AudioManager.MODE_NORMAL } catch (_: Exception) {}
-        }
     }
 }

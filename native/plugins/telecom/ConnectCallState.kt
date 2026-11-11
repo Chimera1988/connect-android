@@ -11,6 +11,7 @@ internal class ConnectCallState {
     var connectedOnce = false; private set
     private var submittedAnswer: String? = null
     fun submitAnswer(sdp: String) { check(submittedAnswer == null || submittedAnswer == sdp); submittedAnswer = sdp }
+    fun answerFingerprint():String? = submittedAnswer?.let{value -> java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}}
     fun ownsAnswer(sdp: String?) = submittedAnswer != null && submittedAnswer == sdp
     fun begin(callId: String, incoming: Boolean): Int {
         check(phase == Phase.IDLE || terminal())

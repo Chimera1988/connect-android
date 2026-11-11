@@ -10,6 +10,8 @@ import android.telecom.*
 class ConnectCallConnectionService : ConnectionService() {
     companion object {
         private val connections = java.util.concurrent.ConcurrentHashMap<String, Connection>()
+        @Volatile private var hasFocus = false
+        private val answered = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         fun account(c: Context): PhoneAccountHandle {
             val handle = PhoneAccountHandle(ComponentName(c, ConnectCallConnectionService::class.java), "connect-audio")
             c.getSystemService(TelecomManager::class.java).registerPhoneAccount(PhoneAccount.builder(handle, "Connect")
@@ -17,7 +19,19 @@ class ConnectCallConnectionService : ConnectionService() {
             return handle
         }
         fun get(id: String) = connections[id]
-        fun close(id: String, reason: Int) { connections.remove(id)?.apply { setDisconnected(DisconnectCause(reason)); destroy() } }
+        // Telecom's ACTIVE means the user answered, not that RTP is flowing.
+        fun answered(id: String) { answered.add(id); connections[id]?.setActive() }
+        fun close(id: String, reason: Int) { answered.remove(id); connections.remove(id)?.apply { setDisconnected(DisconnectCause(reason)); destroy() } }
+    }
+    override fun onConnectionServiceFocusGained() {
+        hasFocus = true
+        connections.keys.forEach { ConnectCallService.telecomFocus(it,true) }
+    }
+    override fun onConnectionServiceFocusLost() {
+        hasFocus = false
+        val ids = connections.keys.toList()
+        if(ids.isEmpty()) connectionServiceFocusReleased()
+        else ids.forEach { ConnectCallService.telecomFocus(it,false) { connectionServiceFocusReleased() } }
     }
     private fun create(request: ConnectionRequest, incoming: Boolean): Connection {
         val id = request.extras?.getString("connectCallId") ?: request.extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS)?.getString("connectCallId") ?: request.extras?.getBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS)?.getString("connectCallId") ?: ""
@@ -37,8 +51,9 @@ class ConnectCallConnectionService : ConnectionService() {
         connection.setAddress(Uri.fromParts("sip", id, null), TelecomManager.PRESENTATION_RESTRICTED)
         connection.setCallerDisplayName(request.extras?.getString("connectName") ?: "Connect", TelecomManager.PRESENTATION_ALLOWED)
         connections[id] = connection
-        if (ConnectCallService.snapshot().optString("phase") == "active") connection.setActive()
+        if (answered.contains(id) || ConnectCallService.snapshot().optString("phase") in listOf("active","connecting","reconnecting")) connection.setActive()
         else if (incoming) connection.setRinging() else connection.setDialing()
+        ConnectCallService.telecomFocus(id,hasFocus)
         return connection
     }
     override fun onCreateIncomingConnection(handle: PhoneAccountHandle?, request: ConnectionRequest) = create(request, true)

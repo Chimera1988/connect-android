@@ -30,22 +30,10 @@ class ConnectCallCoordinatorModule(private val context: ReactApplicationContext)
         handler.postDelayed(this,3000)
     }}
     init{context.addLifecycleEventListener(this)}
-    override fun onHostResume(){handler.removeCallbacks(discover);handler.post(discover)}
+    override fun onHostResume(){ConnectCallScreen.restore(context,"HOST_RESUMED");handler.removeCallbacks(discover);handler.post(discover)}
     override fun onHostPause(){handler.removeCallbacks(discover)}
     override fun onHostDestroy(){handler.removeCallbacks(discover)}
-    private fun showOnce(state:JSONObject,attempt:Int=0){
-        if(!context.hasActiveReactInstance())return
-        if(state.optString("phase")=="idle"){presented="";return}
-        val identity=state.optString("presentationId",state.optString("callId"))
-        if(identity.isEmpty()||presented==identity)return
-        if(ConnectIncomingCallActivity.visible){presented=identity;return}
-        val activity=context.currentActivity
-        if(activity?.hasWindowFocus()==true){
-            try{activity.startActivity(Intent(context,ConnectIncomingCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP));presented=identity;ConnectCallDiagnostics.event(context,state.optString("callId"),"presentation","activity-requested","FOREGROUND")}
-            catch(_:Exception){ConnectCallDiagnostics.event(context,state.optString("callId"),"presentation","failed","ACTIVITY_START_DENIED")}
-        }
-        else if(attempt<10)handler.postDelayed({val current=ConnectCallService.snapshot();if(current.optString("presentationId",current.optString("callId"))==identity)showOnce(current,attempt+1)},100)
-    }
+    private fun showOnce(state:JSONObject){ConnectCallScreen.restore(context,"REACT_STATE")}
     override fun getName() = "ConnectCallCoordinator"
     private fun map(json: JSONObject): WritableMap = Arguments.createMap().apply {
         for (key in json.keys()) when (val value = json.opt(key)) {
