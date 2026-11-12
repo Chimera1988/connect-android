@@ -17,7 +17,7 @@ tools = sdk / 'build-tools' / '37.0.0'
 badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
 assert "package: name='com.connect.messenger'" in badging, 'Wrong application ID'
 assert "application-label:'Connect'" in badging, 'Wrong visible name'
-assert "versionCode='22'" in badging and "versionName='3.0.4'" in badging, 'Wrong release version'
+assert "versionCode='23'" in badging and "versionName='3.0.5'" in badging, 'Wrong release version'
 assert "sdkVersion:'29'" in badging, 'Android 10 minimum not enforced'
 assert 'application-debuggable' not in badging, 'Release must not be debuggable'
 with zipfile.ZipFile(apk) as z:
@@ -68,13 +68,13 @@ if compatible is False:
     raise SystemExit('Certificate differs from configured previous release; refusing incompatible update artifact')
 report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
-    'version': '3.0.4', 'versionCode': 22, 'minSdk': 29,
+    'version': '3.0.5', 'versionCode': 23, 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
     'signerSha256': fingerprint[1],
     'signing': 'supplied-release-key' if os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE') else 'Android debug key (fallback)',
     'compatibleWithPreviousCertificate': compatible,
-    'previousArtifactVersion': '3.0.1 (19)',
-    'previousArtifactApkSha256': '89a20772daf9acbeaabd4a60b0aead6effd62df27c0a3baeb6f1013388a4b650',
+    'previousArtifactVersion': '3.0.4 (22)',
+    'previousArtifactApkSha256': '835f076c896d48205b286beed5d9c77b164d18a0bab9fa0f1cae9bb00a7843f4',
     'matchesPreviousArtifactCertificate': fingerprint[1].lower() == previous_artifact_certificate,
     'embeddedJavaScript': True,
     'deviceAcceptance': 'Not established by APK verification. See SOUNDS_301_REPORT.md.',
