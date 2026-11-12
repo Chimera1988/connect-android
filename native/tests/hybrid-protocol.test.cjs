@@ -75,6 +75,8 @@ test('notification preferences and sounds cannot smuggle paths or arbitrary sett
   assert.ok(read('sounds:silent',{kind:'call',muted:true}));
   assert.equal(read('sounds:silent',{kind:'call',muted:1}),null);
   assert.ok(read('sounds:previewBuiltin',{tone:'gentle'}));
+  assert.ok(read('sounds:previewBuiltin',{tone:'legacy-soft'}));
+  assert.ok(read('preferences',{enabled:true,sound:'legacy-soft',vibrate:true}));
   assert.equal(read('sounds:previewBuiltin',{tone:'arbitrary-resource'}),null);
 });
 

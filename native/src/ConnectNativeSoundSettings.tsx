@@ -3,32 +3,50 @@
  * in a temporary document picker cache directory.
  */
 import React,{useEffect,useState} from 'react';
-import {ActivityIndicator,NativeModules,Platform,Pressable,Text,View} from 'react-native';
+import {ActivityIndicator,AppState,NativeModules,Platform,Pressable,Text,View} from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as SecureStore from 'expo-secure-store';
 import notifee,{AndroidImportance} from '@notifee/react-native';
 import type {Palette} from './theme';
+import {NOTIFICATION_KEY,TONE_LABELS,notificationResource,parseNotificationPrefs,type NotificationTone} from '../web/lib/android-sound-policy';
 
 export type SoundKind='messages'|'calls';
 export type SoundPreference={uri:string;name:string};
 const STORAGE={messages:'connect-native-msg-sound-v2',calls:'connect-native-call-sound-v2'} as const;
 const SILENT_STORAGE={messages:'connect-native-message-silent-v1',calls:'connect-native-call-silent-v1'} as const;
-const DEFAULT_NAME='По умолчанию';
+const DEFAULT_NAME='Connect — сообщение';
+const DEFAULT_CALL='Connect — звонок';
 const MAX_SOUND=20*1024*1024;
 const supported=/\.(mp3|m4a|aac|ogg|wav)$/i;
 const native=NativeModules.ConnectSoundModule as {
   importSound?:(uri:string,name:string,kind:string)=>Promise<string>;
   previewSound?:(uri:string)=>Promise<boolean>;
   stopPreviewSound?:()=>Promise<boolean>;
+  migratedMessageSound?:(id:string)=>Promise<string>;
   createCallChannel?:(id:string,sound:string,silent:boolean,vibrate:boolean)=>Promise<boolean>;
 }|undefined;
-export type BuiltinNotificationTone='soft'|'bright'|'gentle'|'silent';
-export async function previewBuiltinSound(tone:BuiltinNotificationTone){
-  if(tone==='silent')return;
+export type BuiltinNotificationTone=NotificationTone;
+let previewGeneration=0;
+export async function stopSoundPreview(){++previewGeneration;await native?.stopPreviewSound?.();}
+async function previewResolved(resolve:()=>Promise<string|null>){
+  const generation=++previewGeneration;
+  await native?.stopPreviewSound?.();
+  const uri=await resolve();
+  if(!uri||generation!==previewGeneration||(AppState?.currentState&&AppState.currentState!=='active'))return;
   if(!native?.previewSound)throw new Error('Прослушивание доступно только в новом APK Connect');
-  await native.previewSound('android.resource://com.connect.messenger/raw/connect_'+tone);
+  await native.previewSound(uri);
 }
-export async function stopSoundPreview(){await native?.stopPreviewSound?.();}
+export async function previewBuiltinSound(tone:BuiltinNotificationTone){
+  await previewResolved(async()=>tone==='silent'?null:'android.resource://com.connect.messenger/raw/'+notificationResource(tone));
+}
+export async function getMessageSoundPrefs(){
+  try{return parseNotificationPrefs(JSON.parse(await SecureStore.getItemAsync(NOTIFICATION_KEY)||'null'));}
+  catch{return parseNotificationPrefs(null);}
+}
+export async function getConnectSoundLabel(kind:SoundKind){
+  const pref=await getConnectSoundPreference(kind);
+  return pref?.name||(kind==='calls'?DEFAULT_CALL:TONE_LABELS[(await getMessageSoundPrefs()).sound]);
+}
 function hashUri(uri:string):string{
   // Non-cryptographic, stable channel key. A channel's sound cannot be edited
   // once Android creates it, hence a new channel for every imported sound.
@@ -52,30 +70,48 @@ export async function getConnectSoundSilence(kind:SoundKind):Promise<boolean>{
 }
 export async function setConnectSoundSilence(kind:SoundKind,silent:boolean){
   assertKind(kind);
+  await stopSoundPreview();
   await SecureStore.setItemAsync(SILENT_STORAGE[kind],silent?'yes':'no');
   await getConnectSoundChannel(kind);
 }
+const channelWrites=new Map<string,Promise<void>>();
 export async function getConnectSoundChannel(kind:SoundKind,options?:{silent?:boolean;vibrate?:boolean;tone?:BuiltinNotificationTone}):Promise<string>{
+  assertKind(kind);
   const pref=await getConnectSoundPreference(kind);
-  const silent=options?.silent===true||await getConnectSoundSilence(kind);
-  // Message vibration never disables incoming calls. Dedicated call preference is native.
-  const vibration=kind==='calls'?await NativeModules.ConnectCallCoordinator.getCallVibration():options?.vibrate??true;
-  const tone=options?.tone&&options.tone!=='silent'?options.tone:'soft';
-  const soundName=kind==='messages'?'connect_'+tone:'android.resource://com.connect.messenger/raw/connect_call';
-  const channelId=`connect-native-${kind}-${pref?'chosen-'+hashUri(pref.uri)+'-v5':(kind==='calls'?'connect-call':soundName)+'-v5'}-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
+  const stored=await getMessageSoundPrefs();
+  const tone=options?.tone??stored.sound;
+  const silent=options?.silent===true||await getConnectSoundSilence(kind)||(kind==='messages'&&tone==='silent');
+  // Dedicated call preferences and the single native signal owner stay unchanged.
+  const vibration=kind==='calls'?await NativeModules.ConnectCallCoordinator.getCallVibration():options?.vibrate??stored.vibrate;
+  const soundName=notificationResource(tone==='silent'?'soft':tone);
+  const factory=kind==='messages'&&!pref&&(tone==='soft'||tone==='silent');
+  const channelId=`connect-native-${kind}-${pref?'chosen-'+hashUri(pref.uri)+'-v5':kind==='calls'?'connect-call-v5':soundName+(factory?'-v6':'-v5')}-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
   if(kind==='calls'){
-    // The coordinator owns the ringtone/vibrator. Its stable notification
-    // channel is silent and keeps the user's Android importance/DND choices.
     if(!NativeModules.ConnectCallCoordinator)throw Error('Нативная система звонков недоступна');
     return NativeModules.ConnectCallCoordinator.configureSounds(pref?.uri||'',silent,vibration,channelId);
   }
-  await notifee.createChannel({
-    id:channelId,name:'Connect · Новые сообщения',
-    description:'Звук входящих сообщений Connect',
-    // Silent incoming calls still need heads-up/full-screen presentation.
-    importance:AndroidImportance.HIGH,
-    sound:silent?undefined:pref?.uri||soundName,vibration,
-  });
+  if(!channelWrites.has(channelId)){
+    const write=(async()=>{
+      if(await notifee.getChannel(channelId))return; // Never rewrite user-edited channels.
+      const legacyId=`connect-native-messages-connect_soft-v5-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
+      const old=factory?await notifee.getChannel(legacyId):undefined;
+      // Native resolution also recognizes Android's numeric resource URIs. An
+      // explicit system mute/custom channel sound survives the version migration.
+      let sound=silent?undefined:pref?.uri||soundName;
+      if(old&&!silent){
+        const migrated=await native?.migratedMessageSound?.(legacyId);
+        sound=migrated!==undefined?(migrated||undefined):old.sound==='connect_soft'?soundName:old.soundURI||old.sound;
+      }
+      const inherited=old?Object.fromEntries(Object.entries({importance:old.blocked?AndroidImportance.NONE:old.importance,badge:old.badge,bypassDnd:old.bypassDnd,lights:old.lights,lightColor:old.lightColor,visibility:old.visibility,vibration:old.vibration,vibrationPattern:old.vibrationPattern,groupId:old.groupId}).filter(([,v])=>v!==undefined)):{importance:AndroidImportance.HIGH,vibration};
+      await notifee.createChannel({
+        ...inherited,
+        id:channelId,name:'Connect · Новые сообщения',description:'Звук входящих сообщений Connect',sound,
+      });
+    })();
+    channelWrites.set(channelId,write);
+    void write.finally(()=>{if(channelWrites.get(channelId)===write)channelWrites.delete(channelId);}).catch(()=>{});
+  }
+  await channelWrites.get(channelId);
   return channelId;
 }
 let choosing=false;
@@ -103,21 +139,24 @@ export async function chooseConnectSound(kind:SoundKind):Promise<SoundPreference
   }finally{choosing=false;}
 }
 export async function previewConnectSound(kind:SoundKind){
-  const pref=await getConnectSoundPreference(kind);
-  if(!native?.previewSound)throw new Error('Прослушивание доступно только в обновлённом APK');
-  // Match the notification channel's built-in soft tone, not Android's unrelated
-  // default notification sound. A chosen URI always takes precedence.
-  await native.previewSound(pref?.uri||(kind==='calls'?'android.resource://com.connect.messenger/raw/connect_call':'android.resource://com.connect.messenger/raw/connect_soft'));
+  assertKind(kind);
+  await previewResolved(async()=>{
+    const pref=await getConnectSoundPreference(kind);
+    const tone=(await getMessageSoundPrefs()).sound;
+    if(await getConnectSoundSilence(kind)||(kind==='messages'&&tone==='silent'))return null;
+    return pref?.uri||'android.resource://com.connect.messenger/raw/'+(kind==='calls'?'connect_ringtone':notificationResource(tone));
+  });
 }
 export async function resetConnectSound(kind:SoundKind){
   assertKind(kind);
   await stopSoundPreview();
   await SecureStore.deleteItemAsync(STORAGE[kind]);
-  if(kind==='calls')await SecureStore.setItemAsync(SILENT_STORAGE.calls,'no');
+  // Reset the melody only; explicit silence remains a separate user choice.
+  if(kind==='messages'){const p=await getMessageSoundPrefs();await SecureStore.setItemAsync(NOTIFICATION_KEY,JSON.stringify({...p,sound:'soft'}));}
   await getConnectSoundChannel(kind);
 }
-export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
-  const [picked,setPicked]=useState<Record<SoundKind,string>>({messages:DEFAULT_NAME,calls:'Connect Call'});
+export default function ConnectNativeSoundSettings({colors,onReset}:{colors:Palette;onReset?:(kind:SoundKind)=>void}){
+  const [picked,setPicked]=useState<Record<SoundKind,string>>({messages:DEFAULT_NAME,calls:DEFAULT_CALL});
   const [busy,setBusy]=useState<SoundKind|null>(null);
   const [previewing,setPreviewing]=useState<SoundKind|null>(null);
   const [problem,setProblem]=useState('');
@@ -132,8 +171,8 @@ export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
   }
   useEffect(()=>{
     let active=true;
-    void Promise.all([getConnectSoundPreference('messages'),getConnectSoundPreference('calls')]).then(([messages,calls])=>{
-      if(active)setPicked({messages:messages?.name||DEFAULT_NAME,calls:calls?.name||'Connect Call'});
+    void Promise.all([getConnectSoundLabel('messages'),getConnectSoundLabel('calls')]).then(([messages,calls])=>{
+      if(active)setPicked({messages,calls});
     });
     return()=>{active=false;};
   },[]);
@@ -151,8 +190,8 @@ export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
     if(busy)return;
     setProblem('');setBusy(kind);
     try{
-      await resetConnectSound(kind);setPreviewing(null);
-      setPicked(prev=>({...prev,[kind]:kind==='calls'?'Connect Call':DEFAULT_NAME}));
+      await resetConnectSound(kind);onReset?.(kind);setPreviewing(null);
+      setPicked(prev=>({...prev,[kind]:kind==='calls'?DEFAULT_CALL:DEFAULT_NAME}));
     }catch(e){setProblem(e instanceof Error?e.message:String(e));}
     finally{setBusy(null);}
   }
@@ -167,8 +206,8 @@ export default function ConnectNativeSoundSettings({colors}:{colors:Palette}){
         <Pressable accessibilityRole="button" disabled={!!busy} accessibilityLabel={previewing===kind?'Остановить звук':'Прослушать звук'} onPress={()=>void preview(kind)} style={{padding:10}}>
           <Text style={{color:colors.accent}}>{previewing===kind?'■ Стоп':'▶ Прослушать'}</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" disabled={!!busy||picked[kind]===(kind==='calls'?'Connect Call':DEFAULT_NAME)} onPress={()=>void restore(kind)} style={{padding:10,opacity:picked[kind]===(kind==='calls'?'Connect Call':DEFAULT_NAME)?0.45:1}}>
-          <Text style={{color:colors.muted}}>{kind==='calls'?'Вернуть Connect Call':'Сбросить'}</Text>
+        <Pressable accessibilityRole="button" disabled={!!busy||picked[kind]===(kind==='calls'?DEFAULT_CALL:DEFAULT_NAME)} onPress={()=>void restore(kind)} style={{padding:10,opacity:picked[kind]===(kind==='calls'?DEFAULT_CALL:DEFAULT_NAME)?0.45:1}}>
+          <Text style={{color:colors.muted}}>{kind==='calls'?'Вернуть Connect':'Сбросить'}</Text>
         </Pressable>
         {busy===kind&&<ActivityIndicator color={colors.accent}/>}
       </View>

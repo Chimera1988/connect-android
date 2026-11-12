@@ -19,11 +19,17 @@ import com.facebook.react.bridge.LifecycleEventListener
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Copy a picked phone audio file to Android's persistent ringtone library.
  * The SYSTEM process needs a public MediaStore URI to play a notification.
  * Supported: Android 10+ with scoped storage (no storage permission needed).
  */
+internal object ConnectSoundResources {
+  fun isLegacy(scheme:String?,authority:String?,path:String?,pkg:String,id:Int):Boolean =
+    scheme=="android.resource"&&authority==pkg&&
+      (path=="/raw/connect_soft"||(id!=0&&path=="/$id"))
+}
 class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextBaseJavaModule(ctx),LifecycleEventListener {
   private val audioWorker=Executors.newSingleThreadExecutor()
   private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
@@ -100,6 +106,24 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
     }.start()
   }
 
+  /** Preserve an Android-edited legacy channel sound while changing only the
+   * factory resource. Resource IDs may be numeric or use raw/name. */
+  @ReactMethod
+  fun migratedMessageSound(id:String,promise:Promise){
+    try{
+      val manager=ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+      val channel=manager.getNotificationChannel(id)
+      if(channel==null){promise.resolve("connect_notification");return}
+      val uri=channel.sound
+      if(uri==null){promise.resolve("");return}
+      val legacy=ctx.resources.getIdentifier("connect_soft","raw",ctx.packageName)
+      val factory=ConnectSoundResources.isLegacy(uri.scheme,uri.authority,uri.path,ctx.packageName,legacy)
+      promise.resolve(if(factory)"connect_notification" else uri.toString())
+    }catch(e:Exception){promise.reject("CONNECT_CHANNEL_MIGRATION_FAILED","Не удалось прочитать настройки канала сообщений",e)}
+  }
+
+  private val previewEpoch=AtomicInteger(0)
+  @Volatile private var previewForeground=true
   private var previewPlayer:android.media.MediaPlayer?=null
   private fun releasePreview(){
     synchronized(this){
@@ -110,10 +134,12 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
   }
   @ReactMethod
   fun previewSound(source:String, promise:Promise){
+    val epoch=previewEpoch.incrementAndGet()
     audioWorker.execute {
     try {
       synchronized(this){
         releasePreview()
+        if(epoch!=previewEpoch.get()||!previewForeground){promise.resolve(false);return@execute}
         val location=when(source){
           "default-notification"->android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
           "default-ringtone"->android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
@@ -130,6 +156,7 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
           .setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
         p.setDataSource(ctx,location)
         p.prepare()
+        if(epoch!=previewEpoch.get()||!previewForeground){releasePreview();promise.resolve(false);return@execute}
         p.setOnCompletionListener { completed->
           synchronized(this){
             if(previewPlayer===completed)previewPlayer=null
@@ -146,7 +173,7 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
               p.release()
             }
           }
-        },10000)
+        },60000)
       }
       promise.resolve(true)
     }catch(e:Exception){
@@ -157,6 +184,7 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
   }
   @ReactMethod
   fun stopPreviewSound(promise:Promise){
+    previewEpoch.incrementAndGet()
     audioWorker.execute {
     try{
       releasePreview()
@@ -164,10 +192,17 @@ class ConnectSoundModule(private val ctx: ReactApplicationContext):ReactContextB
     }catch(e:Exception){promise.reject("CONNECT_SOUND_STOP_FAILED",e.message,e)}
     }
   }
-  override fun onHostResume() {}
-  override fun onHostPause() { if(!audioWorker.isShutdown)audioWorker.execute { releasePreview() } }
-  override fun onHostDestroy() { if(!audioWorker.isShutdown)audioWorker.execute { releasePreview() } }
+  private fun cancelPreview(){
+    previewForeground=false
+    previewEpoch.incrementAndGet()
+    if(!audioWorker.isShutdown)audioWorker.execute { releasePreview() }
+  }
+  override fun onHostResume() { previewForeground=true }
+  override fun onHostPause() { cancelPreview() }
+  override fun onHostDestroy() { cancelPreview() }
   override fun invalidate(){
+    previewForeground=false
+    previewEpoch.incrementAndGet()
     ctx.removeLifecycleEventListener(this)
     mainHandler.removeCallbacksAndMessages(null)
     if(!audioWorker.isShutdown){audioWorker.execute { releasePreview() };audioWorker.shutdown()}
@@ -206,3 +241,5 @@ module.exports=function withConnectSounds(config){
     return mod;
   }]);
 };
+
+module.exports.kotlinModule=kotlinModule;

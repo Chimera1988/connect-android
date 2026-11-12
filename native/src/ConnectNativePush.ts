@@ -6,6 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
 import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
 import {getConnectSoundChannel} from './ConnectNativeSoundSettings';
+import {NOTIFICATION_KEY,parseNotificationPrefs,mergeServerNotificationPrefs,type NotificationPrefs} from '../web/lib/android-sound-policy';
 
 const API=(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'');
 const OPEN_KEY='connect-native-push-open-v1';
@@ -15,20 +16,11 @@ const MESSAGES='connect-native-messages-v1';
 const CALLS='connect-native-calls-v1';
 const READ_KEY='connect-native-read-marker-v1-';
 // connect-native-push-pref-phase9: preserve the same user-facing settings as PWA.
-const NOTIFICATION_KEY='connect-native-notifications-v1';
 const LAST_RECEIVED_KEY='connect-native-fcm-last-message-v1';
 const LAST_REGISTERED_KEY='connect-native-fcm-last-registration-v1';
-type NotificationPrefs={enabled:boolean;vibrate:boolean;sound:'soft'|'bright'|'gentle'|'silent'};
 async function notificationPrefs():Promise<NotificationPrefs>{
-  const fallback:NotificationPrefs={enabled:true,vibrate:true,sound:'soft'};
-  try{
-    const raw=await SecureStore.getItemAsync(NOTIFICATION_KEY);
-    if(!raw)return fallback;
-    const parsed=JSON.parse(raw) as Partial<NotificationPrefs>;
-    return {enabled:typeof parsed.enabled==='boolean'?parsed.enabled:true,
-      vibrate:typeof parsed.vibrate==='boolean'?parsed.vibrate:true,
-      sound:['soft','bright','gentle','silent'].includes(parsed.sound||'') ? parsed.sound as NotificationPrefs['sound'] : 'soft'};
-  }catch{return fallback;}
+  try{return parseNotificationPrefs(JSON.parse(await SecureStore.getItemAsync(NOTIFICATION_KEY)||'null'));}
+  catch{return parseNotificationPrefs(null);}
 }
 
 type Data=Record<string,string|undefined>;
@@ -179,7 +171,7 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
         const p=remote.data;
         if(typeof p.enabled==='boolean'&&typeof p.vibrate==='boolean'&&
           ['soft','bright','gentle','silent'].includes(p.sound||''))
-          await SecureStore.setItemAsync(NOTIFICATION_KEY,JSON.stringify(p));
+          await SecureStore.setItemAsync(NOTIFICATION_KEY,JSON.stringify(mergeServerNotificationPrefs(parseNotificationPrefs(p),await notificationPrefs())));
       }
       await ensureChannels();
       const permission=await notifee.requestPermission();

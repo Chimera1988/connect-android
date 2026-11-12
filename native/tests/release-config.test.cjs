@@ -17,6 +17,6 @@ test('release keeps production identity and Android 10 support', () => {
   const expo = JSON.parse(fs.readFileSync(path.join(__dirname, '../app.json'))).expo;
   assert.equal(expo.name, 'Connect');
   assert.equal(expo.android.package, 'com.connect.messenger');
-  assert.equal(expo.android.versionCode, 18);
+  assert.equal(expo.android.versionCode, 19);
   assert.equal(expo.plugins.find(p => Array.isArray(p) && p[0] === 'expo-build-properties')[1].android.minSdkVersion, 29);
 });

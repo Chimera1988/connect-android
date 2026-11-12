@@ -87,7 +87,7 @@ internal class ConnectCallAudio(private val context:Context,private val onRingWa
         }
         if(silent!=null){log("ringtone","SUPPRESSED",silent);return}
         val custom=prefs.getString("uri",null)?.takeIf{it.isNotBlank()}
-        val bundled=Uri.parse("android.resource://${context.packageName}/raw/connect_call")
+        val bundled=Uri.parse("android.resource://${context.packageName}/raw/connect_ringtone")
         val choices=if(custom!=null)listOf(Uri.parse(custom),bundled)else listOf(bundled)
         val token=generation
         fun warning(){prefs.edit().putString("ringWarning","CUSTOM_UNAVAILABLE").apply();onRingWarning()}

@@ -17,7 +17,7 @@ tools = sdk / 'build-tools' / '37.0.0'
 badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
 assert "package: name='com.connect.messenger'" in badging, 'Wrong application ID'
 assert "application-label:'Connect'" in badging, 'Wrong visible name'
-assert "versionCode='18'" in badging and "versionName='3.0.0'" in badging, 'Wrong release version'
+assert "versionCode='19'" in badging and "versionName='3.0.1'" in badging, 'Wrong release version'
 assert "sdkVersion:'29'" in badging, 'Android 10 minimum not enforced'
 assert 'application-debuggable' not in badging, 'Release must not be debuggable'
 with zipfile.ZipFile(apk) as z:
@@ -39,9 +39,23 @@ with zipfile.ZipFile(apk) as z:
     for name in ['ConnectCallService','ConnectCallConnectionService','ConnectIncomingCallActivity','ConnectCallSetupActivity','ConnectCallIngress','ConnectCallTiming','ConnectCallScreen','ConnectCallAudioGate','ConnectIncomingAlerts','ConnectIncomingGate','ConnectPushTokenService','ConnectCallHintJob','ConnectHistoryModule','HistoryStore','ConnectSoundModule','ConnectFilesModule','ConnectMissedCalls','ConnectMissedCallJob','ConnectMissedPolicy','ConnectProximityOwner','HistoryCatalogPolicy']:
         assert ('Lcom/connect/messenger/'+name+';').encode() in dex, 'Native implementation missing: '+name
     resource_table = subprocess.check_output([str(tools/'aapt2'), 'dump', 'resources', str(apk)],text=True)
-    sound_block = resource_table.split(' raw/connect_call',1)[1].split('    resource ',1)[0]
-    sound_path = re.search(r'\(file\) (\S+)',sound_block)[1]
-    assert hashlib.sha256(z.read(sound_path)).hexdigest() == hashlib.sha256((Path(__file__).resolve().parents[1]/'assets/notification_sounds/connect_call.wav').read_bytes()).hexdigest(), 'Bundled call ringtone differs'
+    for index, name in enumerate(['bright','call','gentle','soft','firebase_common_keep','keep','node_modules_expo_vectoricons_build_vendor_reactnativevectoricons_fonts_ionicons','notification','ringtone']):
+        resource_name=name if index in (4,5,6) else 'connect_'+name
+        assert f'resource {0x7f110000+index:#010x} raw/{resource_name}' in resource_table, 'Numeric channel URI compatibility lost: '+name
+    sounds = {
+        'connect_ringtone.mp3': (481171, '974d3a6817676687c04fbce6568b238e31d8a30206fc0e5fe35cfbee9bf6025c'),
+        'connect_notification.mp3': (28103, '8bf5b905ca973d7f38d84feaa4237d2246b10f5e186fb280f14781c05d70622e'),
+    }
+    for filename, (size, digest) in sounds.items():
+        block = resource_table.split(' raw/'+filename.split('.')[0], 1)[1].split('    resource ', 1)[0]
+        resource_path = re.search(r'\(file\) (\S+)', block)[1]
+        audio = z.read(resource_path)
+        assert len(audio) == size and hashlib.sha256(audio).hexdigest() == digest, 'Wrong MP3 in APK: '+filename
+    for name in ['soft', 'bright', 'gentle', 'call']:
+        block = resource_table.split(' raw/connect_'+name, 1)[1].split('    resource ', 1)[0]
+        resource_path = re.search(r'\(file\) (\S+)', block)[1]
+        source = Path(__file__).resolve().parents[1]/('assets/notification_sounds/connect_'+name+'.wav')
+        assert hashlib.sha256(z.read(resource_path)).digest() == hashlib.sha256(source.read_bytes()).digest(), 'Legacy sound removed: '+name
     assert not any(n.lower().endswith(('.jks','.keystore','.p12','.pem')) for n in z.namelist()), 'Signing material must not be shipped'
     assert sorted({n.split('/')[1] for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')})==['arm64-v8a','armeabi-v7a']
 signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
@@ -54,17 +68,18 @@ if compatible is False:
     raise SystemExit('Certificate differs from configured previous release; refusing incompatible update artifact')
 report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
-    'version': '3.0.0', 'versionCode': 18, 'minSdk': 29,
+    'version': '3.0.1', 'versionCode': 19, 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
     'signerSha256': fingerprint[1],
     'signing': 'supplied-release-key' if os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE') else 'Android debug key (fallback)',
     'compatibleWithPreviousCertificate': compatible,
-    'previousArtifactVersion': '2.2.7 (17)',
-    'previousArtifactApkSha256': 'd208bd87158e6786c0cbc9a9e3708b9cb62210b3eae82e29471bccac37db013b',
+    'previousArtifactVersion': '3.0.0 (18)',
+    'previousArtifactApkSha256': '01c3072e92db381ff2b9cea1f2f1f9f9132719e385e98536f07e42318c71eec4',
     'matchesPreviousArtifactCertificate': fingerprint[1].lower() == previous_artifact_certificate,
     'embeddedJavaScript': True,
-    'deviceAcceptance': 'Not established by APK verification. See CONNECT_3_REPORT.md.',
+    'deviceAcceptance': 'Not established by APK verification. See SOUNDS_301_REPORT.md.',
 }
 (output / 'APK-VERIFICATION.json').write_text(json.dumps(report, indent=2) + '\n')
+(output / 'APK-SIGNATURE.txt').write_text(signature)
 (output / 'SHA256.txt').write_text(report['sha256'] + '  Connect.apk\n')
 print(json.dumps(report, indent=2))

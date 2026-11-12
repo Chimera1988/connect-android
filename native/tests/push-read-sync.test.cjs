@@ -7,7 +7,7 @@ const ts=require('typescript');
 const conversationId='11111111-1111-4111-8111-111111111111';
 const older='2026-11-09T10:00:00.000Z',newer='2026-11-09T10:01:00.000Z';
 function harness(notifications=[]){
-  const cancelled=[],displayed=[],stored=new Map(),nativeMissed=[],ended=[];
+  const cancelled=[],displayed=[],stored=new Map(),nativeMissed=[],ended=[],soundChoices=[];
   const notifee={getDisplayedNotifications:async()=>notifications.map(notification=>({notification})),cancelNotification:async id=>{cancelled.push(id);},
     displayNotification:async notification=>{
       displayed.push(notification);
@@ -19,11 +19,12 @@ function harness(notifications=[]){
     assert.match(key,/^[A-Za-z0-9._-]+$/);
     await new Promise(resolve=>setImmediate(resolve));stored.set(key,value);
   }};
-  const stubs={'react-native':{AppState:{},NativeModules:{ConnectCallCoordinator:{receiveMissed:async payload=>nativeMissed.push(JSON.parse(payload))}}},'@react-native-firebase/messaging':{},'@notifee/react-native':{__esModule:true,default:notifee,AndroidCategory:{MESSAGE:'msg'},AndroidImportance:{HIGH:4},AndroidVisibility:{PRIVATE:0}},'expo-secure-store':secureStore,'./backend':{},'./ConnectNativeTelecom':{endSystemCall:async id=>ended.push(id)},'./ConnectNativeSoundSettings':{getConnectSoundChannel:async()=> 'messages'}};
+  const stubs={'react-native':{AppState:{},NativeModules:{ConnectCallCoordinator:{receiveMissed:async payload=>nativeMissed.push(JSON.parse(payload))}}},'@react-native-firebase/messaging':{},'@notifee/react-native':{__esModule:true,default:notifee,AndroidCategory:{MESSAGE:'msg'},AndroidImportance:{HIGH:4},AndroidVisibility:{PRIVATE:0}},'expo-secure-store':secureStore,'./backend':{},'./ConnectNativeTelecom':{endSystemCall:async id=>ended.push(id)},'./ConnectNativeSoundSettings':{getConnectSoundChannel:async(kind,options)=>{soundChoices.push({kind,options});return 'messages';}}};
+  const policy={};vm.runInNewContext(ts.transpileModule(readFileSync(path.join(__dirname,'../web/lib/android-sound-policy.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText,{exports:policy});stubs['../web/lib/android-sound-policy']=policy;
   const source=readFileSync(path.join(__dirname,'../src/ConnectNativePush.ts'),'utf8');
   const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
   const exports={};vm.runInNewContext(compiled,{exports,require:name=>stubs[name],process:{env:{}},console,Map,Date,Promise});
-  return {push:exports,cancelled,stored,displayed,nativeMissed,ended};
+  return {push:exports,cancelled,stored,displayed,nativeMissed,ended,soundChoices};
 }
 function alert(id,kind,createdAt){return {id,data:{conversationId,kind,createdAt}};}
 test('a read receipt preserves the newer message alert and incoming calls',async()=>{
@@ -70,4 +71,12 @@ test('missed-call payload goes to native durable owner without JS message/call n
 test('reading chat never removes persistent missed-call notifications',async()=>{
  const h=harness([alert('chat:'+conversationId,'message',older),alert('connect-missed:owner:call','missed-call',older)]);
  await h.push.dismissChatPush(conversationId,newer);assert.deepEqual(h.cancelled,['chat:'+conversationId]);
+});
+
+test('message handler shared by foreground and headless FCM honors default, alternatives and silence',async()=>{
+ for(const tone of ['soft','bright','gentle','legacy-soft','silent']){
+  const h=harness();h.stored.set('connect-native-fcm-authorized-v1','yes');h.stored.set('connect-native-notifications-v1',JSON.stringify({enabled:true,vibrate:false,sound:tone}));
+  await h.push.handleNativePush({kind:'message',conversationId,createdAt:newer,messageId:'sound-'+tone});
+  assert.equal(h.displayed.length,1);assert.equal(h.soundChoices.length,1);assert.equal(h.soundChoices[0].options.tone,tone);assert.equal(h.soundChoices[0].options.silent,tone==='silent');assert.equal(h.soundChoices[0].options.vibrate,false);
+ }
 });

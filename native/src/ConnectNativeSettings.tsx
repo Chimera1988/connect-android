@@ -13,7 +13,8 @@ import {glassColor} from './ConnectNativeGlass';
 import ConnectNativeGlassPanel from './ConnectNativeGlassPanel';
 import {BUILTIN_PACKS,ACCENTS,type AppearanceController} from './ConnectNativeAppearance';
 import {palettes,themeNames,type Palette} from './theme';
-import ConnectNativeSoundSettings,{previewBuiltinSound} from './ConnectNativeSoundSettings';
+import ConnectNativeSoundSettings,{previewBuiltinSound,stopSoundPreview} from './ConnectNativeSoundSettings';
+import {NOTIFICATION_KEY,TONE_LABELS,serverNotificationPrefs,mergeServerNotificationPrefs,parseNotificationPrefs,type NotificationPrefs as NotificationPref} from '../web/lib/android-sound-policy';
 import {testNativeMessagePush} from './ConnectNativePush';
 import ConnectNativeStickerManager from './ConnectNativeStickerManager';
 import {resetNativeStickerPreferences} from './ConnectNativeStickers';
@@ -29,10 +30,8 @@ type Props={
 };
 const PWA_VERSION='1.5';
 const BASE=(process.env.EXPO_PUBLIC_CONNECT_URL||'https://connect-chat.duckdns.org').replace(/\/$/,'');
-const NOTIFICATION_KEY='connect-native-notifications-v1';
-type NotificationPref={enabled:boolean;vibrate:boolean;sound:'soft'|'bright'|'gentle'|'silent'};
 const DEFAULT_NOTIFICATIONS:NotificationPref={enabled:true,vibrate:true,sound:'soft'};
-const SOUND_OPTIONS:[NotificationPref['sound'],string][]=[['soft','Мягкий'],['bright','Яркий'],['gentle','Нежный'],['silent','Без звука']];
+const SOUND_OPTIONS=Object.entries(TONE_LABELS) as [NotificationPref['sound'],string][];
 function errorOf(e:unknown){return e instanceof Error?e.message:String(e);}
 
 function Row({icon,title,subtitle,onPress,colors,danger=false}: {icon:keyof typeof Ionicons.glyphMap;title:string;subtitle?:string;onPress:()=>void;colors:Palette;danger?:boolean}){
@@ -145,17 +144,19 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
         }
         if(owner){const r=await db.from('notification_preferences').select('enabled,sound,vibrate').eq('user_id',owner.id).maybeSingle();
           const saved=r.data;
-          if(alive&&!r.error&&saved&&SOUND_OPTIONS.some(x=>x[0]===saved.sound))setNotification(saved as NotificationPref);
+          if(alive&&!r.error&&saved&&SOUND_OPTIONS.some(x=>x[0]===saved.sound))setNotification(mergeServerNotificationPrefs(parseNotificationPrefs(saved),parseNotificationPrefs(local?JSON.parse(local):null)));
         }
       }catch{/* Keep defaults when offline. */}
     })();return()=>{alive=false};
   },[owner?.id]);
+  useEffect(()=>{if(page!=='notifications')void stopSoundPreview();return()=>{void stopSoundPreview();};},[page]);
   async function saveNotification(next:NotificationPref){
+    await stopSoundPreview();
     setNotification(next);setNotices('Сохраняем уведомления…');
     try {
       await SecureStore.setItemAsync(NOTIFICATION_KEY,JSON.stringify(next));
       if(!owner)throw Error('Требуется авторизация');
-      const result=await db.from('notification_preferences').upsert({user_id:owner.id,...next,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+      const result=await db.from('notification_preferences').upsert({user_id:owner.id,...serverNotificationPrefs(next),updated_at:new Date().toISOString()},{onConflict:'user_id'});
       if(result.error)throw result.error;
       setNotices('Настройки уведомлений сохранены');
     }catch(e){setNotices('Не удалось сохранить настройки уведомлений: '+errorOf(e));}
@@ -304,7 +305,7 @@ export default function ConnectNativeSettings({owner,email,colors,appearance,adm
           </View>)}
         </Panel>
         <Heading colors={colors}>Звуки Android</Heading>
-        <ConnectNativeSoundSettings colors={colors}/>
+        <ConnectNativeSoundSettings colors={colors} onReset={kind=>{if(kind==='messages')void saveNotification({...notification,sound:'soft'});}}/>
         <Heading colors={colors}>Диагностика уведомлений Android</Heading>
         <Panel colors={colors}>
           <Text style={{color:colors.muted,fontSize:12}}>Проверит системное разрешение, регистрацию Firebase и покажет тестовое локальное уведомление. Для проверки настоящей доставки попросите другого пользователя отправить сообщение, когда Connect в фоне.</Text>

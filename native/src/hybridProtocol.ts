@@ -8,7 +8,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const NONCE = /^[A-Za-z0-9_-]{32,128}$/;
 const ID = /^[A-Za-z0-9_:-]{1,80}$/;
-const TONES = new Set(['soft', 'bright', 'gentle', 'silent']);
+const TONES = new Set(['soft', 'bright', 'gentle', 'silent', 'legacy-soft']);
 const KINDS = new Set(['call', 'message']);
 
 export type HybridCommand =

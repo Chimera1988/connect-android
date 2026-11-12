@@ -3,6 +3,7 @@
  */
 import React from 'react';
 import {createRoot} from 'react-dom/client';
+import ConnectNotificationSettings from '../web/components/ConnectNotificationSettings';
 import ConnectProfileMedia from '../web/components/ConnectProfileMedia';
 import {ConnectMusicProvider,ConnectMusicLibrary} from '../web/components/ConnectMusicSystem';
 import {safeCatalog} from '../src/hybridProtocol';
@@ -131,5 +132,35 @@ await test('music selection obtains a network URL after its cached blob was clea
   assert(signCount===1,'cleared blob was reused instead of signing a network URL');
   assert(container.querySelector('audio')?.getAttribute('src')?.includes('token=refreshed'),'player source not refreshed');
  }finally{root.unmount();container.remove();HTMLMediaElement.prototype.play=play;}
+});
+await test('Android sound settings retain legacy choice, reset to MP3 default and stop preview on close',async()=>{
+ const commands:{kind:string;value?:any}[]=[],writes:any[]=[];
+ const previous=window.ConnectAndroid;
+ (window as any).ConnectAndroid={
+  getSoundSettings:()=>JSON.stringify({message:'Connect — сообщение',call:'Connect — звонок',messageCustom:false,callCustom:false,messageSilent:false,callSilent:false}),
+  canShowFullScreenCalls:()=>true,setPreferences:(value:string)=>commands.push({kind:'preferences',value:JSON.parse(value)}),
+  resetSound:(value:string)=>commands.push({kind:'reset',value}),previewBuiltInSound:(value:string)=>commands.push({kind:'preview',value}),stopPreviewSound:()=>commands.push({kind:'stop'}),
+ };
+ localStorage.setItem('connect-notification-prefs-'+viewer,JSON.stringify({enabled:true,sound:'legacy-soft',vibrate:true}));
+ const client:any={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{enabled:true,sound:'soft',vibrate:true}})})}),upsert:async(value:any)=>{writes.push(value);return{};}})};
+ const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+ try{
+  root.render(<ConnectNotificationSettings supabase={client} userId={viewer}/>);
+  for(let i=0;i<100&&(!container.querySelector('#connect-sound')||commands.filter(x=>x.kind==='preferences').length<2);i++)await new Promise(r=>setTimeout(r,5));
+  const selector=container.querySelector('#connect-sound') as HTMLSelectElement;
+  for(let i=0;i<100&&selector.value!=='legacy-soft';i++)await new Promise(r=>setTimeout(r,5));
+  assert(selector.value==='legacy-soft','remote soft overwrote Android legacy choice: '+JSON.stringify(commands));
+  assert(Array.from(selector.options).some(x=>x.value==='soft'&&x.textContent==='Connect — сообщение'),'new default label missing');
+  assert(container.textContent?.includes('Connect — звонок'),'new call default label missing');
+  const message=Array.from(container.querySelectorAll('strong')).find(x=>x.textContent==='Сообщение')!.parentElement!;
+  (Array.from(message.querySelectorAll('button')).find(x=>x.textContent==='Сбросить') as HTMLButtonElement).click();
+  for(let i=0;i<25&&!writes.length;i++)await delay();
+  assert(selector.value==='soft'&&writes.at(-1)?.sound==='soft','reset not persisted with existing server enum');
+  assert(commands.some(x=>x.kind==='reset'&&x.value==='message'),'native reset missing');
+  const preview=Array.from(container.querySelectorAll('button')).find(x=>x.textContent==='Прослушать') as HTMLButtonElement;preview.click();
+  assert(commands.some(x=>x.kind==='preview'&&x.value==='soft'),'preview did not select new default');
+  const before=commands.filter(x=>x.kind==='stop').length;root.unmount();
+  assert(commands.filter(x=>x.kind==='stop').length>before,'unmount left preview playing');
+ }finally{root.unmount();container.remove();window.ConnectAndroid=previous;localStorage.removeItem('connect-notification-prefs-'+viewer);}
 });
 stop();document.body.innerHTML='';const output=document.createElement('pre');output.id='connect-cache-results';output.textContent=JSON.stringify({results,passed:results.filter(x=>x.pass).length,failed:results.filter(x=>!x.pass).length});document.body.append(output);

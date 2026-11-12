@@ -2,13 +2,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type Sound = 'soft' | 'bright' | 'gentle' | 'silent';
+import {TONE_LABELS,isNotificationTone,serverNotificationPrefs,mergeServerNotificationPrefs,type NotificationTone as Sound} from '../lib/android-sound-policy';
 type Prefs = { enabled: boolean; sound: Sound; vibrate: boolean };
 type NativeSounds = { message: string; call: string; messageCustom: boolean; callCustom: boolean; messageSilent: boolean; callSilent: boolean };
 const defaults: Prefs = { enabled: true, sound: 'soft', vibrate: true };
-const labels: Record<Sound,string> = {
-  soft:'Мягкий (по умолчанию)', bright:'Яркий', gentle:'Нежный', silent:'Без звука',
-};
+const labels=TONE_LABELS;
 declare global {
   interface Window {
     ConnectAndroid?: {
@@ -33,7 +31,7 @@ declare global {
   }
 }
 async function play(sound: Sound) {
-  if (sound === 'silent') return;
+  if (sound === 'silent') {window.ConnectAndroid?.stopPreviewSound();return;}
   if (window.ConnectAndroid?.previewBuiltInSound) {
     window.ConnectAndroid.previewBuiltInSound(sound);
     return;
@@ -64,7 +62,7 @@ function vapidBytes(value:string) {
 }
 function valid(p:any):p is Prefs {
   return p && typeof p.enabled==='boolean' && typeof p.vibrate==='boolean'
-    && ['soft','bright','gentle','silent'].includes(p.sound);
+    && isNotificationTone(p.sound);
 }
 function nativeSounds(): NativeSounds | null {
   try {return window.ConnectAndroid ? JSON.parse(window.ConnectAndroid.getSoundSettings()) as NativeSounds : null;} catch {return null;}
@@ -99,6 +97,7 @@ export default function ConnectNotificationSettings({supabase,userId}:{supabase:
       window.removeEventListener('connect:android-sound-selected',changed);
       window.removeEventListener('focus',changed);
       window.removeEventListener('connect:android-push-status',pushStatus);
+      window.ConnectAndroid?.stopPreviewSound();
     };
   },[]);
   useEffect(()=>{
@@ -110,17 +109,18 @@ export default function ConnectNotificationSettings({supabase,userId}:{supabase:
     void supabase.from('notification_preferences').select('enabled,sound,vibrate').eq('user_id',userId).maybeSingle().then(({data,error})=>{
       if(!live||revision.current!==startedAt)return;
       if(error){setStatus('Не удалось загрузить настройки с сервера');return;}
-      if(valid(data))apply(data);else if(local){void persist(local);}
+      if(valid(data))apply(mergeServerNotificationPrefs(data,latest.current));else if(local){void persist(local);}
     });
     return()=>{live=false;};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[supabase,userId]);
   async function persist(next:Prefs) {
     const {error}=await supabase.from('notification_preferences')
-      .upsert({user_id:userId,...next,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+      .upsert({user_id:userId,...serverNotificationPrefs(next),updated_at:new Date().toISOString()},{onConflict:'user_id'});
     if(error)throw error;
   }
   function save(next:Prefs) {
+    window.ConnectAndroid?.stopPreviewSound();
     revision.current++;const version=revision.current;apply(next);setStatus('Сохраняем…');
     queue.current=queue.current.catch(()=>{}).then(async()=>{
       try {await persist(next);if(revision.current===version)setStatus('Настройки сохранены');}
@@ -171,7 +171,7 @@ export default function ConnectNotificationSettings({supabase,userId}:{supabase:
     </div>
     {sounds && <div className="connect-android-sounds">
       <h3>Мелодии Android</h3>
-      <p>Собственные звуки применяются к новым уведомлениям. Выбор хранится на этом телефоне; прослушивание останавливается при сворачивании или через 10 секунд.</p>
+      <p>Собственные звуки применяются к новым уведомлениям. Выбор хранится на этом телефоне; прослушивание останавливается после окончания записи, закрытия настроек или сворачивания (не дольше 60 секунд).</p>
       <div><strong>Входящий аудиозвонок</strong><p>{sounds.callSilent?'Без звука':sounds.call}</p>
         <button type="button" onClick={()=>window.ConnectAndroid?.pickSound('call')}>Выбрать мелодию</button>
         <button type="button" disabled={sounds.callSilent} onClick={()=>window.ConnectAndroid?.previewSound('call')}>Прослушать</button>
@@ -179,11 +179,11 @@ export default function ConnectNotificationSettings({supabase,userId}:{supabase:
         <button type="button" onClick={()=>window.ConnectAndroid?.resetSound('call')}>Сбросить</button>
         <label><input type="checkbox" checked={sounds.callSilent} onChange={e=>window.ConnectAndroid?.setSilent('call',e.target.checked)}/> Без звука</label>
       </div>
-      <div><strong>Сообщение</strong><p>{sounds.messageSilent?'Без звука':sounds.messageCustom?sounds.message:'Используется сигнал чатов'}</p>
+      <div><strong>Сообщение</strong><p>{sounds.messageSilent?'Без звука':sounds.message}</p>
         <button type="button" onClick={()=>window.ConnectAndroid?.pickSound('message')}>Выбрать звук</button>
         <button type="button" disabled={sounds.messageSilent || (!sounds.messageCustom && prefs.sound==='silent')} onClick={()=>window.ConnectAndroid?.previewSound('message')}>Прослушать</button>
         <button type="button" onClick={()=>window.ConnectAndroid?.stopPreviewSound?.()}>Остановить</button>
-        <button type="button" onClick={()=>window.ConnectAndroid?.resetSound('message')}>Сбросить</button>
+        <button type="button" onClick={()=>{save({...latest.current,sound:'soft'});window.ConnectAndroid?.resetSound('message');}}>Сбросить</button>
         <label><input type="checkbox" checked={sounds.messageSilent} onChange={e=>window.ConnectAndroid?.setSilent('message',e.target.checked)}/> Без звука</label>
       </div>
       {!fullScreenAllowed && <p role="alert">Android запрещает полноэкранный показ. Разреши Connect показывать звонки поверх экрана блокировки в системных настройках.</p>}

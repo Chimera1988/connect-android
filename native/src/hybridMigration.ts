@@ -62,7 +62,7 @@ export async function legacyWebStorage(ownerId:string):Promise<Record<string,str
     .filter(([id,value])=>UUID.test(id)&&typeof value==='string'&&Number.isFinite(Date.parse(value)))));
   const notification=parse(notificationRaw);
   if(object(notification)&&typeof notification.enabled==='boolean'&&typeof notification.vibrate==='boolean'&&
-    ['soft','bright','gentle','silent'].includes(String(notification.sound)))
+    ['soft','bright','gentle','silent','legacy-soft'].includes(String(notification.sound)))
     result['connect-notification-prefs-'+ownerId]=JSON.stringify({enabled:notification.enabled,vibrate:notification.vibrate,sound:notification.sound});
   if(callsRaw&&Number.isFinite(Number(callsRaw))&&Number(callsRaw)>0)result['connect-last-viewed-calls:'+ownerId]=callsRaw;
   const music=parse(musicRaw);

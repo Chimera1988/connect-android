@@ -11,7 +11,7 @@ import {db,mediaUrl,type Profile} from './backend';
 import {parseHybridMessage,CONNECT_ORIGIN} from './hybridProtocol';
 import {useConnectNativeVoice} from './ConnectNativeVoice';
 import {subscribeNativePush,registerNativePushNow,disableNativePush,setVisibleConversation,rememberReadAt,dismissChatPush} from './ConnectNativePush';
-import {chooseConnectSound,getConnectSoundPreference,getConnectSoundSilence,setConnectSoundSilence,previewConnectSound,resetConnectSound,previewBuiltinSound,stopSoundPreview,type BuiltinNotificationTone} from './ConnectNativeSoundSettings';
+import {chooseConnectSound,getConnectSoundLabel,getConnectSoundPreference,getConnectSoundSilence,setConnectSoundSilence,previewConnectSound,resetConnectSound,previewBuiltinSound,stopSoundPreview,type BuiltinNotificationTone} from './ConnectNativeSoundSettings';
 import pwa from './generated/pwa';
 import ConnectHybridRecorder,{type ConnectHybridRecorderHandle,type HybridRecordingFile} from './ConnectHybridRecorder';
 import {File as NativeFile} from 'expo-file-system';
@@ -59,7 +59,7 @@ function HybridConnect(){
   const sendSounds=useCallback(async()=>{
     const [message,call,messageSilent,callSilent]=await Promise.all([getConnectSoundPreference('messages'),getConnectSoundPreference('calls'),getConnectSoundSilence('messages'),getConnectSoundSilence('calls')]);
     const fullScreenAllowed=await NativeModules.ConnectIncomingCallModule?.canShowFullScreenCalls?.().catch(()=>true)??true;
-    send('sounds',{fullScreenAllowed,message:message?.name||'Мягкий',call:call?.name||'Connect Call',messageCustom:!!message,callCustom:!!call,messageSilent,callSilent});
+    send('sounds',{fullScreenAllowed,message:await getConnectSoundLabel('messages'),call:await getConnectSoundLabel('calls'),messageCustom:!!message,callCustom:!!call,messageSilent,callSilent});
   },[send]);
   useEffect(()=>{
     let alive=true;
@@ -217,7 +217,7 @@ function HybridConnect(){
           if(command==='files:chunk')result=await writeChunk(save,p.data as string);
           else{result=command==='files:end'?await finishSave(save):await cancelSave(save);saves.current.delete(save);}break;
         }
-        case 'preferences':await SecureStore.setItemAsync('connect-native-notifications-v1',JSON.stringify(p));break;
+        case 'preferences':await stopSoundPreview();await SecureStore.setItemAsync('connect-native-notifications-v1',JSON.stringify(p));await sendSounds();break;
         case 'appearance':await NativeModules.ConnectIncomingCallModule.setAppearance(p.scene);break;
         case 'vault:seal':case 'vault:open':
           if(!ownerId)throw Error('Войдите в Connect');
