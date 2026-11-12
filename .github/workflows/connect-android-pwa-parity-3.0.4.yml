@@ -1,0 +1,209 @@
+# One-shot exact-source parity update for Connect Android: selected PWA UI patch + APK.
+# Repository: Chimera1988/connect-android
+# Path: .github/workflows/connect-android-pwa-parity-3.0.4.yml
+# Neither the PWA repository nor its deployment is modified.
+name: Connect Android 3.0.4 — PWA UI parity and release APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-android-pwa-parity-3.0.4.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-pwa-parity-304-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  parity-and-apk:
+    if: github.repository == 'Chimera1988/connect-android' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: 'https://tpwkmoxxzjfdsqsomhhr.supabase.co'
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa'
+      EXPO_PUBLIC_CONNECT_URL: 'https://connect-chat.duckdns.org'
+      CONNECT_PREVIOUS_CERT_SHA256: ${{ vars.CONNECT_PREVIOUS_CERT_SHA256 || 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c' }}
+    steps:
+      - name: Checkout verified Android 3.0.3 source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch exact successful PWA source (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Chimera1988/connect-messenger
+          ref: d64183598bdee2efa81a1c6bb96cde1ae14fbc99
+          path: .pwa-reference
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Merge PWA chat/media UI without replacing Android bridges
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/connect-pwa-parity.py.gz.b64" <<'CONNECT_PARITY_PAYLOAD'
+          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
+          CONNECT_PARITY_PAYLOAD
+          python3 - <<'PYTHON_DECODE'
+          import base64,gzip,os,pathlib
+          raw=base64.b64decode(pathlib.Path(os.environ['RUNNER_TEMP'],'connect-pwa-parity.py.gz.b64').read_text().strip())
+          code=gzip.decompress(raw)
+          file=pathlib.Path(os.environ['RUNNER_TEMP'],'connect-pwa-parity.py')
+          file.write_bytes(code)
+          print('Verified embedded parity patch:',len(code),'bytes')
+          PYTHON_DECODE
+          python3 "$RUNNER_TEMP/connect-pwa-parity.py"
+          git diff --check
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android platform and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --channel=3 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+
+      - name: Verify shared PWA interface and unchanged native services
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const x=require('./app.json').expo;if(x.version!=='3.0.4'||x.android.versionCode!==22||x.android.package!=='com.connect.messenger')throw Error('Android version / package changed unexpectedly');"
+          npm ci --no-audit --no-fund
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm run build:web
+          npm run typecheck:web
+          npm run typecheck
+          npm test -- --test-isolation=none
+          CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)" npm run test:browser
+
+      - name: Prepare release certificate
+        env:
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$CONNECT_RELEASE_KEYSTORE_BASE64" ]]; then
+            umask 077
+            printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/connect-release.jks"
+            echo "CONNECT_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/connect-release.jks" >> "$GITHUB_ENV"
+          else
+            echo '::warning::Using existing project signing fallback. Previous certificate hash verification is mandatory.'
+          fi
+
+      - name: Generate the unchanged native Android services and manifest
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install
+          python3 - <<'VERIFY_NATIVE'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          path=Path('android/app/src/main/AndroidManifest.xml')
+          root=ET.parse(path).getroot(); ns='{http://schemas.android.com/apk/res/android}'
+          app=root.find('application')
+          assert app is not None
+          assert app.get(ns+'icon')=='@mipmap/connect_launcher_v303', 'Existing Connect branded icon lost'
+          assert app.get(ns+'roundIcon')=='@mipmap/connect_launcher_v303_round','Existing adaptive icon lost'
+          print('Android launcher manifests unchanged; native calls, push and proximity retained')
+          VERIFY_NATIVE
+
+      - name: Compile and test final Connect Android 3.0.4 APK
+        working-directory: native/android
+        env:
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a -Pkotlin.incremental=false --no-daemon --max-workers=2
+
+      - name: Verify the signed APK and embedded full PWA UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/Connect-Android-3.0.4
+          cp native/android/app/build/outputs/apk/release/app-release.apk release/Connect-Android-3.0.4/Connect.apk
+          python3 native/scripts/verify-apk.py release/Connect-Android-3.0.4/Connect.apk release/Connect-Android-3.0.4
+          python3 - <<'VERIFY_UI'
+          from pathlib import Path
+          import json,zipfile
+          apk=Path('release/Connect-Android-3.0.4/Connect.apk')
+          report=json.loads(Path('release/Connect-Android-3.0.4/APK-VERIFICATION.json').read_text())
+          assert (report['version'],report['versionCode'])==('3.0.4',22)
+          assert report['compatibleWithPreviousCertificate'] is True, 'Signing certificate does not match the expected installed app'
+          assert report['applicationId']=='com.connect.messenger'
+          # Source-level features were compiled into the embedded Vite PWA, not merely copied as unused files.
+          html=Path('native/web/dist/index.html').read_text(encoding='utf-8')
+          for token in ['connect-v5-video-note','connect-forward-compact','connect-full-gallery','connect-unified-media','connect-media-thumb']:
+            assert token in html, 'New PWA UI is missing from the compiled Android WebView: '+token
+          assert 'ConnectTranscript' not in html,'Obsolete transcription UI accidentally restored'
+          with zipfile.ZipFile(apk) as z:
+            assert z.testzip() is None,'APK ZIP integrity failure'
+          print('Embedded interface present; APK signature, package, Android 10 and assets verified')
+          VERIFY_UI
+          cp native/PWA_UI_PARITY_3_0_4.md release/Connect-Android-3.0.4/PWA-PORT-REPORT.md
+          printf 'PWA source d64183598bdee2efa81a1c6bb96cde1ae14fbc99\n' > release/Connect-Android-3.0.4/PWA-SOURCE.txt
+
+      - name: Save only verified Android source changes to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- native/web/app/page.tsx native/web/app/profile-media.css \
+            native/web/app/connect-unified-chat.css native/web/app/connect-media-frame-overlay.css \
+            native/web/components/ConnectGalleryViewer.tsx native/web/components/ConnectProfileMedia.tsx \
+            native/web/hybrid/main.tsx native/app.json native/package.json native/package-lock.json \
+            native/scripts/verify-apk.py native/tests/release-config.test.cjs native/PWA_UI_PARITY_3_0_4.md
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Connect Android 3.0.4: port verified PWA UI while preserving native services [skip ci]'
+            git push origin HEAD:main
+          fi
+          git rev-parse HEAD > release/Connect-Android-3.0.4/SOURCE-COMMIT.txt
+          (cd release/Connect-Android-3.0.4 && zip -9 ../Connect-Android-3.0.4.zip ./*)
+
+      - name: Upload one final APK ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-3.0.4
+          path: release/Connect-Android-3.0.4.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/connect-release.jks"
