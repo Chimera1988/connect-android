@@ -7,6 +7,7 @@ import {readProfileLibrary,writeProfileLibrary,removeProfileLibraryItem,profileP
 import {resolveCachedProfileFile,retireCachedProfileFile,purgeCachedProfileFile,prefetchProfileFile,mediaCacheEpoch,cacheLeaseValid} from '../lib/media-cache';
 import {readNativeCatalog} from '../lib/native-catalog';
 import { ConnectMusicLibrary } from './ConnectMusicSystem';
+import ConnectGalleryViewer from './ConnectGalleryViewer';
 
 export type ProfileMediaKind = 'photos' | 'videos' | 'music';
 
@@ -92,7 +93,6 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [preview, setPreview] = useState<MediaItem | null>(null);
-  const swipeStart=useRef<{x:number;y:number}|null>(null);
   const previewSequence=useRef(0);
   const closePreview=useCallback(()=>{previewSequence.current++;setPreview(null);},[]);
   const openPreview=useCallback(async(item:MediaItem)=>{
@@ -269,22 +269,31 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
       </>}
       <p className="connect-profile-media-hint">{isOwner ? 'Медиа доступны другим участникам Connect при просмотре твоего профиля. Максимум 100 МБ на файл.' : 'Медиа этого пользователя доступны для просмотра и прослушивания только участникам Connect.'}</p>
     </div>
-    {preview && <div className="connect-profile-photo-overlay" role="dialog" aria-modal="true" aria-label={kind==='photos'?'Просмотр фотографий':'Просмотр видео'}
-      onClick={()=>closePreview()}
-      onTouchStart={e=>{const touch=e.touches[0];if(touch)swipeStart.current={x:touch.clientX,y:touch.clientY};}}
-      onTouchEnd={e=>{const touch=e.changedTouches[0];const start=swipeStart.current;swipeStart.current=null;
-        if(touch && start){const dx=touch.clientX-start.x;const dy=touch.clientY-start.y;
-          if(Math.abs(dx)>55 && Math.abs(dx)>Math.abs(dy)*1.25)navigatePreview(dx>0?-1:1);
-        }
-      }}>
-      <button type="button" className="connect-profile-photo-close" onClick={()=>closePreview()}>Закрыть</button>
-      <span className="connect-gallery-count">{items.findIndex(item=>item.path===preview.path)+1} / {items.length}</span>
-      {items.length>1 && <><button type="button" className="connect-gallery-nav connect-gallery-prev" onClick={e=>{e.stopPropagation();navigatePreview(-1);}} aria-label="Предыдущий файл">‹</button>
-        <button type="button" className="connect-gallery-nav connect-gallery-next" onClick={e=>{e.stopPropagation();navigatePreview(1);}} aria-label="Следующий файл">›</button></>}
-      {kind==='videos' ? <video key={preview.path} src={preview.url} playsInline controls preload="metadata" onClick={e=>e.stopPropagation()} aria-label={preview.name}/>
-        : <img key={preview.path} src={preview.url} alt={preview.name} onClick={e=>e.stopPropagation()}/>}
-      <span className="connect-gallery-name">{preview.name}</span>
-      {isOwner && kind==='photos' && <button type="button" disabled={busy || !['image/jpeg','image/png','image/webp'].includes(preview.mime)} onClick={e=>{e.stopPropagation();void makeAvatar(preview);closePreview();}}>Сделать аватаром</button>}
-    </div>}
+    {preview && <ConnectGalleryViewer
+      items={items.map(item=>({path:item.path,name:item.name,url:item.path===preview.path?preview.url:item.url,kind:kind==='videos'?'video' as const:'image' as const}))}
+      currentPath={preview.path}
+      onClose={closePreview}
+      onStep={navigatePreview}
+      onSave={async item=>{
+        try {
+          const row=items.find(candidate=>candidate.path===item.path);
+          if(!row)return;
+          const {data,error}=await client.storage.from(BUCKET).download(row.path);
+          if(error||!data)throw error||new Error('Файл недоступен');
+          const url=URL.createObjectURL(data),link=document.createElement('a');
+          link.href=url;link.download=row.name;document.body.appendChild(link);link.click();link.remove();
+          window.setTimeout(()=>URL.revokeObjectURL(url),60000);
+        } catch(e) {setError('Не удалось сохранить файл: '+(e instanceof Error?e.message:String(e)));}
+      }}
+      onFetch={async item=>{
+        const {data,error}=await client.storage.from(BUCKET).download(item.path);
+        if(error||!data)throw error||new Error('Файл недоступен');
+        return data;
+      }}
+      onAvatar={isOwner&&kind==='photos'&&['image/jpeg','image/png','image/webp'].includes(preview.mime)?item=>{
+        const row=items.find(candidate=>candidate.path===item.path);
+        if(row){closePreview();void makeAvatar(row);}
+      }:undefined}
+    />}
   </>;
 }

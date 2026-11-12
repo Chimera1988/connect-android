@@ -62,3 +62,808 @@
 .connect-app .connect-profile-photo-overlay button:disabled{opacity:.38;}
 .connect-app .connect-profile-photo-overlay .connect-profile-photo-close{position:absolute;top:max(18px,env(safe-area-inset-top));right:16px;}
 @media(max-width:360px){.connect-app .connect-profile-photo-grid{gap:8px}.connect-app .connect-profile-media-item-actions{gap:3px;padding:7px}.connect-app .connect-profile-media-item-actions button{padding:6px;font-size:10px}}
+/* CONNECT_PWA_GALLERY_VIDEO_NOTE_TRANSCRIPT_V1_20261112 — keep Liquid Glass unchanged outside viewers */
+.connect-media-overlay{background:rgba(0,0,0,.98)!important;z-index:100000!important}
+.connect-media-overlay .connect-media-toolbar{background:#050607;min-height:57px;z-index:2;justify-content:space-between}
+.connect-media-toolbar .connect-media-counter{font-size:17px;font-weight:700;text-align:center;color:#fff}
+.connect-media-caption{display:flex;flex-direction:column;gap:4px;padding:11px 20px max(22px,env(safe-area-inset-bottom));background:#050607;color:white;min-height:80px;z-index:2}
+.connect-media-caption strong{font-size:14px}.connect-media-caption small{font-size:12px;color:#aeb3bd}
+.connect-media-caption span{font-size:12px;color:#c7cbd5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connect-media-gallery{flex:1;min-height:0;position:relative;touch-action:pan-y}
+.connect-profile-photo-overlay{position:fixed!important;inset:0!important;z-index:110000!important;background:#000!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-direction:column!important;padding:calc(env(safe-area-inset-top) + 56px) 8px calc(env(safe-area-inset-bottom) + 86px)!important;overflow:hidden!important}
+.connect-profile-photo-overlay>img,.connect-profile-photo-overlay>video{object-fit:contain!important;max-width:100%!important;max-height:100%!important;min-height:0!important}
+.connect-profile-photo-close{position:absolute;left:12px;top:calc(env(safe-area-inset-top) + 8px);background:#212530;color:#fff;border:none;border-radius:50%;width:42px;height:42px;font-size:24px;z-index:3}
+.connect-gallery-count{position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 15px);transform:translateX(-50%);color:white;font-size:16px;font-weight:700;white-space:nowrap;z-index:3}
+.connect-gallery-download{position:absolute;right:12px;top:calc(env(safe-area-inset-top) + 8px);background:#212530;color:white;border:0;border-radius:50%;width:42px;height:42px;font-size:25px;z-index:3}
+.connect-gallery-description{position:absolute;bottom:max(22px,env(safe-area-inset-bottom));left:16px;right:16px;display:flex;flex-direction:column;gap:5px;color:white;text-align:center}
+.connect-gallery-description strong{font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.connect-gallery-description small{font-size:12px;color:#adb2bd}
+.connect-gallery-nav{position:absolute;z-index:3;top:50%;transform:translateY(-50%);background:#1a1c2388;color:white;border:0;border-radius:12px;width:32px;height:52px;font-size:30px}
+.connect-gallery-prev{left:0}.connect-gallery-next{right:0}
+.connect-video-note{width:min(258px,70vw)!important;max-width:100%!important;aspect-ratio:auto!important;border:0!important;border-radius:0!important;background:transparent!important;overflow:visible!important;cursor:default!important;display:flex!important;flex-direction:column!important;gap:7px!important}
+.connect-video-note.expanded{width:min(390px,82vw)!important;max-width:min(390px,82vw)!important}
+.connect-app .bubble.video-note-bubble .connect-video-note.expanded{width:min(390px,82vw)!important;max-width:min(390px,82vw)!important}
+.connect-app .bubble.video-note-bubble .connect-video-note-controls{justify-content:center!important;gap:8px!important;height:auto!important;min-height:38px!important}
+.connect-app .bubble.video-note-bubble .connect-video-note-controls>.connect-video-note-sound{transform:none!important;position:static!important}
+.bubble:has(.connect-video-note.expanded){max-width:min(95vw,430px)!important;width:min(95vw,430px)!important}
+.connect-video-note-media{position:relative;display:block;aspect-ratio:1;width:100%;overflow:hidden;border-radius:50%;background:#151a25}
+.connect-video-note-screen{position:absolute;inset:0;width:100%;height:100%;padding:0;border:none;border-radius:50%;overflow:hidden;background:transparent;cursor:pointer}
+.connect-video-note-screen video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.connect-video-note-progress{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transform:rotate(-90deg)}
+.connect-video-note-progress-track{stroke:#ffffff50}
+.connect-video-note-progress-fill{stroke:var(--accent2,#3c91ff);stroke-linecap:round;transition:stroke-dashoffset .12s linear}
+.connect-video-note-length{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:2;background:#0008;border-radius:10px;color:#fff;padding:3px 8px;font-size:12px;pointer-events:none}
+.connect-video-note-controls{display:flex;align-items:center;justify-content:center;gap:8px;min-height:28px}
+.connect-video-note-sound,.connect-video-note-expand,.connect-video-note-speed{position:static!important;width:auto!important;height:auto!important;min-height:27px;padding:3px 9px;background:#28303c!important;border:0;border-radius:13px;color:#fff;font-size:12px}
+
+
+
+
+
+/* CONNECT_PWA_GALLERY_CIRCLES_TRANSCRIPT_FIX_V2_20261112
+   One clean, true viewport gallery for chats and profile libraries. */
+.connect-full-gallery {
+  position:fixed;inset:0;width:100vw;height:100dvh;z-index:2147483000;
+  display:flex;flex-direction:column;background:#000;color:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;
+  overflow:hidden;isolation:isolate;
+}
+.connect-full-gallery *{box-sizing:border-box}
+.connect-full-gallery-header {
+  position:relative;z-index:5;display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;
+  align-items:center;column-gap:9px;flex:none;
+  padding:calc(env(safe-area-inset-top) + 9px) 15px 11px;
+  background:#000;min-height:calc(env(safe-area-inset-top) + 65px);
+}
+.connect-full-gallery-counter{font-size:16px;line-height:1.2;letter-spacing:.2px;font-weight:650;text-align:center;white-space:nowrap;color:#fff}
+.connect-full-gallery-icon{
+  appearance:none;display:grid;place-items:center;width:44px;height:44px;
+  background:transparent!important;color:#fff!important;border:0!important;outline:0;
+  padding:8px;margin:0;box-shadow:none!important;border-radius:0!important;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.connect-full-gallery-icon:focus-visible,.connect-full-gallery-menu button:focus-visible{outline:2px solid var(--accent,#66adf7);outline-offset:0}
+.connect-full-gallery-icon:disabled{opacity:.45}
+.connect-full-gallery-stage{position:relative;flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 0 env(safe-area-inset-bottom)}
+.connect-full-gallery-stage img,.connect-full-gallery-stage video{
+  display:block;max-width:100%;max-height:100%;width:auto;height:auto;
+  object-fit:contain;touch-action:pan-y;-webkit-user-select:none;user-select:none;
+}
+.connect-full-gallery-menu{
+  position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 62px);width:min(304px,calc(100vw - 28px));
+  padding:7px;background:rgba(32,34,40,.97);border:1px solid rgba(255,255,255,.11);
+  border-radius:21px;box-shadow:0 16px 44px rgba(0,0,0,.55);z-index:9;
+  -webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);
+}
+.connect-full-gallery-menu-item{
+  display:flex;align-items:center;gap:15px;width:100%;min-height:52px;
+  padding:10px 13px;border:0!important;border-radius:11px!important;
+  background:transparent!important;color:#fff!important;font-size:16px;font-weight:450;
+  text-align:left;box-shadow:none!important;
+}
+.connect-full-gallery-menu-item:active{background:rgba(255,255,255,.11)!important}
+.connect-full-gallery-menu-item svg{flex:none;width:23px;height:23px}
+.connect-full-gallery-status{
+  position:absolute;bottom:max(18px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
+  max-width:90vw;padding:9px 13px;border-radius:12px;background:#292e36e8;color:#fff;
+  font-size:12px;text-align:center;box-shadow:0 10px 28px #0006;
+}
+/* Voice remains one compact player with the transcript glyph directly above the send time. */
+.connect-app .voice-note-bubble .voice-player{overflow:visible!important}
+.connect-app .voice-note-bubble .voice-content{min-width:0;flex:1}
+.connect-app .voice-note-bubble .voice-bottom{display:flex;align-items:flex-end;flex-wrap:wrap;gap:4px 5px}
+
+
+
+
+
+
+/* Restore the original small round video note, then expand only when tapped. */
+.connect-app .bubble.video-note-bubble,
+.connect-app .bubble.video-note-bubble .attachment-preview,
+.connect-app .bubble.video-note-bubble .bubble-body{overflow:visible!important}
+.connect-app .bubble.video-note-bubble .attachment-preview{aspect-ratio:auto!important;height:auto!important;width:100%!important;max-width:100%!important;overflow:visible!important}
+.connect-app .bubble.video-note-bubble{width:min(260px,75vw)!important;max-width:min(260px,75vw)!important;min-width:0!important;padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important}
+.connect-app .bubble.video-note-bubble:has(.connect-video-note.expanded){
+  width:min(572px,calc(100vw - 26px))!important;
+  max-width:min(572px,calc(100vw - 26px))!important;
+  min-width:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note{
+  display:flex!important;flex-direction:column!important;gap:3px!important;
+  width:100%!important;max-width:100%!important;height:auto!important;
+  padding:0!important;margin:0!important;aspect-ratio:auto!important;
+  border:0!important;border-radius:0!important;background:transparent!important;
+  box-shadow:none!important;overflow:visible!important;isolation:isolate;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note.expanded{
+  width:min(572px,calc(100vw - 26px))!important;
+  max-width:min(572px,calc(100vw - 26px))!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-media{
+  position:relative!important;display:block!important;width:100%!important;height:auto!important;
+  aspect-ratio:1!important;margin:0!important;padding:0!important;
+  overflow:hidden!important;border-radius:50%!important;background:#111b25!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-media>.connect-video-note-screen{
+  display:block!important;position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+  padding:0!important;z-index:1!important;overflow:hidden!important;
+  border:0!important;border-radius:50%!important;background:transparent!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-media>.connect-video-note-screen>video{
+  position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+  object-fit:cover!important;border-radius:50%!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-progress{
+  position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+  pointer-events:none!important;z-index:3!important;transform:rotate(-90deg)!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-progress-track{stroke:rgba(255,255,255,.23)!important;stroke-width:.7px!important}
+.connect-app .bubble.video-note-bubble .connect-video-note-progress-fill{stroke:var(--accent2)!important;stroke-width:.9px!important;opacity:.8!important}
+.connect-app .bubble.video-note-bubble .connect-video-note-close{
+  position:absolute!important;z-index:9!important;right:10%!important;top:9%!important;
+  width:38px!important;height:38px!important;padding:6px!important;
+  display:grid!important;place-items:center!important;
+  background:transparent!important;border:0!important;border-radius:0!important;
+  color:#fff!important;filter:drop-shadow(0 1px 4px rgba(0,0,0,.9));
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-footer{
+  display:flex!important;flex-direction:column!important;align-items:flex-end!important;
+  width:100%!important;min-height:0!important;margin:0!important;padding:0 5px 1px!important;
+  color:var(--text)!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-actions{
+  display:flex!important;gap:6px!important;justify-content:flex-end!important;align-items:center!important;
+  width:auto!important;min-height:26px!important;padding:0!important;margin:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-actions>.connect-video-note-sound{
+  position:static!important;inset:auto!important;transform:none!important;
+  display:grid!important;place-items:center!important;
+  flex:none!important;width:29px!important;height:26px!important;min-height:0!important;
+  padding:3px!important;margin:0!important;border:0!important;border-radius:0!important;
+  background:transparent!important;color:var(--text)!important;box-shadow:none!important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-video-note-time{
+  display:inline-flex;align-items:center;gap:3px;font-size:10.5px;opacity:.75;line-height:1.25;white-space:nowrap;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-time .delivery-checks svg{height:12px;width:15px}
+/* Legacy video-note panel & speed buttons from the previous patch are intentionally unused. */
+@media(max-width:360px){
+  .connect-app .bubble.video-note-bubble{width:min(234px,73vw)!important;max-width:min(234px,73vw)!important}
+  .connect-app .bubble.video-note-bubble:has(.connect-video-note.expanded){width:calc(100vw - 24px)!important;max-width:calc(100vw - 24px)!important}
+}
+
+/* CONNECT_PWA_MEDIA_UX_FIX_V3_20261112 */
+/* Voice notes: transcript button like the reference, above time, without playback-speed chip. */
+.connect-app .voice-note-bubble .voice-player{
+  overflow:visible!important;
+}
+.connect-app .voice-note-bubble .voice-content{
+  min-width:0!important;
+  flex:1 1 auto!important;
+}
+.connect-app .voice-note-bubble .voice-bottom{
+  display:flex!important;
+  align-items:flex-end!important;
+  gap:6px 8px!important;
+  flex-wrap:nowrap!important;
+}
+
+
+
+
+
+
+/* Voice speed button is removed in JSX; never hide .voice-speed because the
+   audio-file "Save" action still uses that same class. */
+
+/* Video circles: keep the current inline placement, but prevent overflow and use the same control language. */
+.connect-app .bubble.video-note-bubble,
+.connect-app .bubble.video-note-bubble .attachment-preview,
+.connect-app .bubble.video-note-bubble .bubble-body{
+  overflow:visible!important;
+}
+.connect-app .bubble.video-note-bubble{
+  width:min(260px,75vw)!important;
+  max-width:min(260px,75vw)!important;
+}
+.connect-app .bubble.video-note-bubble:has(.connect-video-note.expanded){
+  width:min(430px,calc(100vw - 38px))!important;
+  max-width:min(430px,calc(100vw - 38px))!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note{
+  position:relative!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:flex-end!important;
+  gap:5px!important;
+  width:100%!important;
+  max-width:100%!important;
+  overflow:visible!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note.expanded{
+  width:min(430px,calc(100vw - 38px))!important;
+  max-width:min(430px,calc(100vw - 38px))!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-media{
+  position:relative!important;
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  aspect-ratio:1!important;
+  margin:0 auto!important;
+  border-radius:50%!important;
+  overflow:hidden!important;
+  background:#111b25!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note.expanded .connect-video-note-media{
+  width:min(430px,calc(100vw - 38px))!important;
+  max-width:min(430px,calc(100vw - 38px))!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-media > .connect-video-note-screen,
+.connect-app .bubble.video-note-bubble .connect-video-note-media > .connect-video-note-screen > video{
+  border-radius:50%!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-close{
+  position:absolute!important;
+  top:-12px!important;
+  right:0!important;
+  transform:translate(10%,-10%)!important;
+  z-index:12!important;
+  width:36px!important;
+  height:36px!important;
+  padding:0!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  border-radius:12px!important;
+  border:1px solid rgba(255,255,255,.16)!important;
+  background:rgba(19,27,39,.34)!important;
+  color:#fff!important;
+  box-shadow:inset 0 0 .5px rgba(255,255,255,.18)!important;
+  -webkit-backdrop-filter:blur(16px)!important;
+  backdrop-filter:blur(16px)!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-footer{
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:flex-end!important;
+  width:100%!important;
+  padding:0 4px 1px!important;
+  margin:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-actions{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:flex-end!important;
+  gap:8px!important;
+  margin:0!important;
+  padding:0!important;
+}.connect-app .bubble.video-note-bubble .connect-video-note-actions > .connect-video-note-sound{
+  appearance:none!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  min-width:36px!important;
+  height:34px!important;
+  padding:0 9px!important;
+  border-radius:12px!important;
+  border:1px solid rgba(255,255,255,.16)!important;
+  background:rgba(19,27,39,.24)!important;
+  color:#fff!important;
+  box-shadow:inset 0 0 .5px rgba(255,255,255,.18)!important;
+  -webkit-backdrop-filter:blur(16px)!important;
+  backdrop-filter:blur(16px)!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-actions > .connect-video-note-sound{
+  width:36px!important;
+  padding:0!important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-video-note-time{
+  display:inline-flex!important;
+  align-items:center!important;
+  gap:4px!important;
+  margin-top:2px!important;
+  font-size:10.5px!important;
+  line-height:1.2!important;
+  white-space:nowrap!important;
+}
+.connect-app .bubble.video-note-bubble .connect-video-note-length{
+  bottom:10px!important;
+}
+
+
+
+/* Force the media circle itself to stay exactly square, without grey letterboxing. */
+.connect-app .bubble.video-note-bubble .connect-video-note-media>.connect-video-note-screen>video{
+  display:block!important;
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  object-fit:cover!important;
+}
+
+@media (max-width: 420px) {
+  .connect-app .bubble.video-note-bubble:has(.connect-video-note.expanded),
+  .connect-app .bubble.video-note-bubble .connect-video-note.expanded,
+  .connect-app .bubble.video-note-bubble .connect-video-note.expanded .connect-video-note-media{
+    width:calc(100vw - 34px)!important;
+    max-width:calc(100vw - 34px)!important;
+  }
+}
+
+/* CONNECT_PWA_VOICE_VIDEO_GEOMETRY_FIX4_20261112
+   Voice: the arrow-T is in the SAME upper row as the waveform, as in the reference.
+   Video: a single, self-contained circular frame for poster, video and progress. */
+.connect-app .bubble.sent.voice-note-bubble,
+.connect-app .bubble.received.voice-note-bubble {
+  width:min(360px,calc(100vw - 36px))!important;
+  max-width:min(360px,calc(100vw - 36px))!important;
+  min-width:0!important;
+}
+.connect-app .bubble.voice-note-bubble .voice-player {
+  box-sizing:border-box!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  min-height:70px!important;
+  padding:8px 10px!important;
+  gap:10px!important;
+  border-radius:20px!important;
+  align-items:center!important;
+}
+.connect-app .bubble.voice-note-bubble .voice-play {
+  flex:0 0 50px!important;
+  width:50px!important;
+  height:50px!important;
+  min-width:50px!important;
+  min-height:50px!important;
+  padding:0!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-content {
+  min-width:0!important;
+  flex:1 1 auto!important;
+  display:flex!important;
+  flex-direction:column!important;
+  gap:3px!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top {
+  display:flex!important;
+  align-items:center!important;
+  gap:7px!important;
+  width:100%!important;
+  min-width:0!important;
+  height:36px!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top .voice-wave {
+  display:flex!important;
+  align-items:center!important;
+  flex:1 1 0!important;
+  width:auto!important;
+  min-width:0!important;
+  max-width:100%!important;
+  overflow:hidden!important;
+  height:32px!important;
+  margin:0!important;
+}
+
+
+
+
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-bottom {
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  flex-wrap:nowrap!important;
+  gap:6px!important;
+  width:100%!important;
+  min-height:16px!important;
+  padding:0!important;
+  opacity:.88;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-bottom .voice-message-meta {
+  margin-left:auto!important;
+  font-size:10.5px!important;
+  line-height:1.15!important;
+  white-space:nowrap!important;
+}
+
+@media(max-width:360px){
+  .connect-app .bubble.voice-note-bubble .voice-player {gap:7px!important;padding:7px 8px!important;}
+  .connect-app .bubble.voice-note-bubble .voice-play {flex-basis:44px!important;width:44px!important;height:44px!important;min-height:44px!important;min-width:44px!important;}
+}
+
+/* No legacy .connect-video-note or .connect-video-note-screen classes in the FIX4 player. */
+.connect-app .bubble.sent.media-only.video-note-bubble,
+.connect-app .bubble.received.media-only.video-note-bubble {
+  box-sizing:border-box!important;
+  width:min(254px,70vw)!important;
+  max-width:min(254px,70vw)!important;
+  min-width:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+}
+.connect-app .bubble.sent.media-only.video-note-bubble:has(.connect-v4-video-note.is-expanded),
+.connect-app .bubble.received.media-only.video-note-bubble:has(.connect-v4-video-note.is-expanded) {
+  width:min(520px,calc(100vw - 44px))!important;
+  max-width:min(520px,calc(100vw - 44px))!important;
+}
+.connect-app .bubble.video-note-bubble .bubble-body,
+.connect-app .bubble.video-note-bubble .attachment-preview {
+  display:block!important;
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  height:auto!important;
+  padding:0!important;
+  margin:0!important;
+  overflow:visible!important;
+  background:transparent!important;
+  border:0!important;
+  box-shadow:none!important;
+  aspect-ratio:auto!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-video-note {
+  box-sizing:border-box!important;
+  position:relative!important;
+  display:flex!important;
+  flex-direction:column!important;
+  gap:4px!important;
+  width:100%!important;
+  max-width:100%!important;
+  padding:0!important;
+  margin:0!important;
+  background:transparent!important;
+  border:0!important;
+  border-radius:0!important;
+  overflow:visible!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-header {
+  display:flex!important;
+  justify-content:flex-end!important;
+  align-items:center!important;
+  width:100%!important;
+  height:31px!important;
+  min-height:31px!important;
+  padding:0 3px 0 0!important;
+  margin:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-circle {
+  box-sizing:border-box!important;
+  position:relative!important;
+  display:block!important;
+  isolation:isolate!important;
+  width:100%!important;
+  max-width:100%!important;
+  height:auto!important;
+  aspect-ratio:1 / 1!important;
+  overflow:hidden!important;
+  border-radius:50%!important;
+  background:#111b25!important;
+  border:0!important;
+  padding:0!important;
+  margin:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-video {
+  box-sizing:border-box!important;
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  max-width:none!important;
+  max-height:none!important;
+  display:block!important;
+  padding:0!important;
+  margin:0!important;
+  object-fit:cover!important;
+  object-position:50% 50%!important;
+  border:0!important;
+  border-radius:0!important;
+  transform:none!important;
+  background:transparent!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-hit {
+  position:absolute!important;
+  z-index:2!important;
+  inset:0!important;
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  padding:0!important;
+  margin:0!important;
+  border:0!important;
+  border-radius:50%!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  cursor:pointer!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-progress {
+  position:absolute!important;
+  z-index:3!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  display:block!important;
+  pointer-events:none!important;
+  overflow:visible!important;
+  transform:rotate(-90deg)!important;
+  transform-origin:50% 50%!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-track {
+  stroke:rgba(255,255,255,.32)!important;
+  stroke-width:.8px!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-progress-fill {
+  stroke:var(--accent2,var(--accent))!important;
+  stroke-width:1px!important;
+  opacity:.85!important;
+  stroke-linecap:round!important;
+  transition:stroke-dashoffset .17s linear!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-length {
+  position:absolute!important;
+  z-index:4!important;
+  bottom:10px!important;
+  left:50%!important;
+  transform:translateX(-50%)!important;
+  border-radius:10px!important;
+  padding:3px 7px!important;
+  font-size:11px!important;
+  color:#fff!important;
+  background:rgba(0,0,0,.65)!important;
+  white-space:nowrap!important;
+  pointer-events:none!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-footer {
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:flex-end!important;
+  justify-content:flex-end!important;
+  gap:3px!important;
+  width:100%!important;
+  margin:0!important;
+  padding:0 3px!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-actions {
+  display:flex!important;
+  flex-direction:row!important;
+  justify-content:flex-end!important;
+  align-items:center!important;
+  gap:6px!important;
+  width:auto!important;
+  margin:0!important;
+  padding:0!important;
+}.connect-app .bubble.video-note-bubble .connect-v4-note-close,
+.connect-app .bubble.video-note-bubble .connect-v4-note-sound{
+  box-sizing:border-box!important;
+  appearance:none!important;
+  display:inline-flex!important;
+  justify-content:center!important;
+  align-items:center!important;
+  gap:1px!important;
+  width:34px!important;
+  min-width:34px!important;
+  height:31px!important;
+  min-height:31px!important;
+  margin:0!important;
+  padding:0 4px!important;
+  border:1px solid rgba(255,255,255,.14)!important;
+  border-radius:10px!important;
+  background:rgba(25,39,57,.24)!important;
+  color:var(--text,#fff)!important;
+  box-shadow:none!important;
+  -webkit-backdrop-filter:blur(12px)!important;
+  backdrop-filter:blur(12px)!important;
+  opacity:1!important;
+  transform:none!important;
+}
+
+
+
+
+.connect-app .bubble.video-note-bubble .connect-v4-note-sound>svg {
+  width:17px!important;
+  height:17px!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-time {
+  display:inline-flex!important;
+  align-items:center!important;
+  gap:3px!important;
+  font-size:10.5px!important;
+  line-height:1.15!important;
+  opacity:.77!important;
+  white-space:nowrap!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v4-note-time .delivery-checks svg {
+  width:15px!important;
+  height:12px!important;
+}
+
+
+
+/* CONNECT_PWA_COMPACT_AUDIO_NO_TRANSCRIPTION_20261112
+   242px audio bubbles, slightly narrower than the 254px video-note frame.
+   Both kinds use the same measured 72px player; audio filename is one line. */
+.connect-app .bubble.sent.voice-note-bubble,
+.connect-app .bubble.received.voice-note-bubble,
+.connect-app .bubble.sent.voice-note-bubble:has(.connect-audio-download),
+.connect-app .bubble.received.voice-note-bubble:has(.connect-audio-download){
+  box-sizing:border-box!important;
+  width:min(242px,calc(100vw - 42px))!important;
+  min-width:0!important;
+  max-width:min(242px,calc(100vw - 42px))!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+}
+.connect-app .bubble.voice-note-bubble .bubble-body,
+.connect-app .bubble.voice-note-bubble .attachment-preview,
+.connect-app .bubble.voice-note-bubble .connect-audio-download{
+  display:block!important;
+  box-sizing:border-box!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  margin:0!important;
+  padding:0!important;
+  gap:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  border:0!important;
+}
+.connect-app .bubble.voice-note-bubble .voice-player,
+.connect-app .bubble.voice-note-bubble .connect-audio-download .voice-player{
+  box-sizing:border-box!important;
+  display:flex!important;
+  align-items:center!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  height:72px!important;
+  min-height:72px!important;
+  max-height:72px!important;
+  padding:7px 9px!important;
+  gap:8px!important;
+  border-radius:18px!important;
+  overflow:visible!important;
+}
+.connect-app .bubble.voice-note-bubble .voice-play,
+.connect-app .bubble.voice-note-bubble .connect-audio-download .voice-play{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  flex:0 0 43px!important;
+  width:43px!important;
+  min-width:43px!important;
+  height:43px!important;
+  min-height:43px!important;
+  padding:0!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-content{
+  box-sizing:border-box!important;
+  flex:1 1 0!important;
+  min-width:0!important;
+  max-width:100%!important;
+  display:flex!important;
+  flex-direction:column!important;
+  justify-content:center!important;
+  gap:2px!important;
+  padding:0!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top{
+  display:flex!important;
+  align-items:center!important;
+  width:100%!important;
+  min-width:0!important;
+  height:32px!important;
+  min-height:32px!important;
+  max-height:32px!important;
+  gap:0!important;
+  overflow:hidden!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top .voice-wave,
+.connect-app .bubble.voice-note-bubble .connect-audio-download .voice-wave{
+  flex:1 1 0!important;
+  display:flex!important;
+  align-items:center!important;
+  height:25px!important;
+  min-height:0!important;
+  width:100%!important;
+  min-width:0!important;
+  overflow:hidden!important;
+  gap:1px!important;
+  margin:0!important;
+}
+.connect-app .bubble.voice-note-bubble .voice-bar{
+  min-width:1px!important;
+  max-width:4px!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top.has-file{
+  flex-direction:column!important;
+  align-items:stretch!important;
+  justify-content:center!important;
+  gap:1px!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top.has-file .voice-file-name{
+  box-sizing:border-box!important;
+  display:block!important;
+  flex:0 0 auto!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  height:12px!important;
+  line-height:12px!important;
+  font-size:10px!important;
+  font-weight:550!important;
+  margin:0!important;
+  padding:0!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-top.has-file .voice-wave{
+  height:18px!important;
+  max-height:18px!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-bottom,
+.connect-app .bubble.voice-note-bubble .connect-audio-download .connect-voice-v4-bottom{
+  box-sizing:border-box!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  flex-wrap:nowrap!important;
+  width:100%!important;
+  min-width:0!important;
+  min-height:19px!important;
+  max-height:19px!important;
+  gap:3px!important;
+  padding:0!important;
+  margin:0!important;
+  font-size:10px!important;
+  line-height:1.15!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-bottom .voice-message-meta{
+  display:inline-flex!important;
+  align-items:center!important;
+  margin-left:auto!important;
+  font-size:10px!important;
+  line-height:1.1!important;
+  white-space:nowrap!important;
+}
+.connect-app .bubble.voice-note-bubble .connect-voice-v4-bottom .voice-save{
+  appearance:none!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  min-width:0!important;
+  min-height:18px!important;
+  max-height:18px!important;
+  padding:1px 5px!important;
+  font-size:9px!important;
+  font-weight:600!important;
+  line-height:1!important;
+  white-space:nowrap!important;
+  border:0!important;
+  border-radius:7px!important;
+  background:color-mix(in srgb,currentColor 15%,transparent)!important;
+  color:inherit!important;
+}
+@media(max-width:360px){
+  .connect-app .bubble.sent.voice-note-bubble,
+  .connect-app .bubble.received.voice-note-bubble,
+  .connect-app .bubble.sent.voice-note-bubble:has(.connect-audio-download),
+  .connect-app .bubble.received.voice-note-bubble:has(.connect-audio-download){
+    width:min(232px,calc(100vw - 34px))!important;
+    max-width:min(232px,calc(100vw - 34px))!important;
+  }
+}

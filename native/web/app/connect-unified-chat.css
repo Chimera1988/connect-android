@@ -1,0 +1,537 @@
+/* CONNECT_PWA_UNIFIED_CHAT_MEDIA_V1_20261112
+ * Scoped final overrides; preserve original app/media features and theme tokens.
+ * Distinct elements: forward marker, album fill, receipts, inline video sound,
+ * and video-circle controls OUTSIDE its circle but INSIDE its vertical bounds.
+ */
+
+/* One consistent receipt style for text, media, sticker and emoji messages. */
+.connect-app .bubble:not(.voice-note-bubble):not(.video-note-bubble) > .bubble-meta {
+  box-sizing:border-box!important;
+  display:inline-flex!important;
+  flex-direction:row!important;
+  align-items:center!important;
+  justify-content:flex-end!important;
+  gap:3px!important;
+  width:auto!important;
+  max-width:100%!important;
+  min-height:21px!important;
+  padding:2px 5px!important;
+  margin:0!important;
+  margin-left:auto!important;
+  font-size:10.5px!important;
+  line-height:1.15!important;
+  letter-spacing:.1px!important;
+  font-variant-numeric:tabular-nums;
+  color:inherit!important;
+  opacity:.84!important;
+  white-space:nowrap!important;
+  background:transparent!important;
+  border:0!important;
+  border-radius:9px!important;
+  box-shadow:none!important;
+  align-self:flex-end!important;
+}
+.connect-app .bubble:not(.video-note-bubble) .bubble-meta .delivery-checks {
+  margin-left:3px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  opacity:1!important;
+}
+.connect-app .bubble:not(.video-note-bubble) .bubble-meta .delivery-checks svg,
+.connect-app .bubble.voice-note-bubble .voice-message-meta .delivery-checks svg {
+  width:16px!important;height:13px!important;
+}
+.connect-app .bubble .delivery-checks.is-read {color:var(--accent2,#86d9ff)!important;}
+
+.connect-app .message-row .bubble.voice-note-bubble .connect-voice-v4-bottom .voice-message-meta {
+  display:inline-flex!important;
+  align-items:center!important;
+  gap:3px!important;
+  font-size:10.5px!important;
+  line-height:1.15!important;
+  opacity:.84!important;
+  font-variant-numeric:tabular-nums;
+}
+
+/* Uniform thin glass outlines for normal messages; stickers stay frameless. */
+.connect-app .bubble.sent:not(.media-only):not(.sticker-bubble):not(.emoji-only):not(.voice-note-bubble),
+.connect-app .bubble.received:not(.media-only):not(.sticker-bubble):not(.emoji-only):not(.voice-note-bubble) {
+  border:1px solid var(--glass-stroke-hi,rgba(210,225,245,.21))!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.065)!important;
+}
+.connect-app .message-row .bubble.sent.media-only.connect-unified-media:not(.video-note-bubble),
+.connect-app .message-row .bubble.received.media-only.connect-unified-media:not(.video-note-bubble) {
+  box-sizing:border-box!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:stretch!important;
+  width:fit-content!important;
+  max-width:min(300px,calc(100vw - 66px))!important;
+  min-width:0!important;
+  padding:3px!important;
+  margin:0!important;
+  gap:0!important;
+  background:color-mix(in srgb,var(--panel,#1d2838) 18%,transparent)!important;
+  border:1px solid var(--glass-stroke-hi,rgba(210,225,245,.25))!important;
+  border-radius:19px!important;
+  overflow:hidden!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.075)!important;
+  color:var(--text)!important;
+}
+.connect-app .bubble.connect-unified-media:has(.connect-album-grid) {
+  width:min(300px,calc(100vw - 66px))!important;
+  max-width:min(300px,calc(100vw - 66px))!important;
+}
+.connect-app .bubble.connect-unified-media:has(.connect-album-grid) > .bubble-body {
+  width:100%!important;
+}
+.connect-app .bubble.connect-unified-media > .bubble-body {
+  box-sizing:border-box!important;
+  display:block!important;
+  min-width:0!important;
+  max-width:100%!important;
+  padding:0!important;
+  margin:0!important;
+  overflow:hidden!important;
+  background:transparent!important;
+  border:0!important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.voice-note-bubble) > .bubble-meta {
+  width:100%!important;
+  min-height:23px!important;
+  padding:3px 7px 1px!important;
+  background:transparent!important;
+  border:0!important;
+  color:var(--text)!important;
+  align-self:stretch!important;
+}
+.connect-app .bubble.connect-unified-media .attachment-preview,
+.connect-app .bubble.connect-unified-media .connect-album-grid {
+  max-width:100%!important;
+  overflow:hidden!important;
+  border-radius:14px!important;
+}
+
+/* SVG forwarding arrow, compact one-line '↪ от username' without a separate tag. */
+.connect-app .connect-forward-compact {
+  box-sizing:border-box;
+  display:flex;
+  align-items:center;
+  gap:5px;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+  padding:3px 5px 6px;
+  margin:0;
+  color:inherit;
+  opacity:.79;
+  font-size:12px;
+  font-weight:570;
+  line-height:1.25;
+  white-space:nowrap;
+}
+.connect-app .connect-forward-compact svg {
+  width:16px;height:16px;flex:0 0 16px;
+}
+.connect-app .connect-forward-compact span {
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.connect-app .bubble.connect-unified-media .connect-forward-compact {padding:5px 7px 7px;}
+
+/* Odd item count (3,5,7...): final album tile occupies both columns. */
+.connect-app .bubble .connect-album-grid {
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  gap:3px!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+}
+.connect-app .bubble .connect-album-grid > .connect-media-thumb:last-child:nth-child(odd) {
+  grid-column:1 / -1!important;
+  width:100%!important;
+  min-width:0!important;
+  justify-self:stretch!important;
+}
+.connect-app .bubble .connect-album-grid > .connect-media-thumb:last-child:nth-child(odd) img,
+.connect-app .bubble .connect-album-grid > .connect-media-thumb:last-child:nth-child(odd) video {
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  object-fit:cover!important;
+  object-position:center!important;
+}
+
+/* Sticker and emoji receipt sits at the lower-right of their frameless layout. */
+.connect-app .bubble.sent.sticker-bubble,
+.connect-app .bubble.received.sticker-bubble,
+.connect-app .bubble.sent.emoji-only,
+.connect-app .bubble.received.emoji-only {
+  display:flex!important;
+  flex-direction:column!important;
+  position:relative!important;
+  align-items:flex-end!important;
+  overflow:visible!important;
+  gap:0!important;
+}
+.connect-app .bubble.sticker-bubble:not(.voice-note-bubble):not(.video-note-bubble) > .bubble-meta,
+.connect-app .bubble.emoji-only:not(.voice-note-bubble):not(.video-note-bubble) > .bubble-meta {
+  min-height:21px!important;
+  width:max-content!important;
+  margin-top:-11px!important;
+  margin-left:auto!important;
+  padding:3px 6px!important;
+  position:relative!important;
+  z-index:2!important;
+  background:color-mix(in srgb,var(--panel,#152438) 88%,transparent)!important;
+  border:1px solid rgba(225,238,250,.10)!important;
+  border-radius:10px!important;
+  color:var(--text)!important;
+  opacity:.9!important;
+  -webkit-backdrop-filter:blur(8px);
+  backdrop-filter:blur(8px);
+}
+
+/* Standard video: mute in the OTHER lower corner, receipts inside outer frame. */
+.connect-app .bubble.connect-unified-media .connect-inline-video-sound,
+.connect-app .bubble.connect-unified-media .attachment-preview .connect-inline-video-sound {
+  left:8px!important;
+  right:auto!important;
+  bottom:8px!important;
+  top:auto!important;
+}
+
+/* Video circles: circle, control rails and metadata fit the SAME vertical height.
+ * Close: outer top-right corner. Sound: outer bottom-left corner.
+ * Timestamp+checks: outer bottom-right corner. All remain OUTSIDE circular mask.
+ */
+.connect-app .bubble.sent.media-only.video-note-bubble,
+.connect-app .bubble.received.media-only.video-note-bubble {
+  box-sizing:border-box!important;
+  width:min(300px,calc(100vw - 36px))!important;
+  max-width:min(300px,calc(100vw - 36px))!important;
+  min-width:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+  gap:0!important;
+}
+.connect-app .bubble.sent.media-only.video-note-bubble:has(.connect-v5-video-note.is-expanded),
+.connect-app .bubble.received.media-only.video-note-bubble:has(.connect-v5-video-note.is-expanded) {
+  width:min(520px,calc(100vw - 30px))!important;
+  max-width:min(520px,calc(100vw - 30px))!important;
+}
+.connect-app .bubble.video-note-bubble .bubble-body,
+.connect-app .bubble.video-note-bubble .attachment-preview {
+  display:block!important;
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  height:auto!important;
+  padding:0!important;
+  margin:0!important;
+  overflow:visible!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-video-note {
+  box-sizing:border-box!important;
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  padding:0!important;
+  margin:0!important;
+  overflow:visible!important;
+  background:transparent!important;
+  border:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage {
+  box-sizing:border-box;
+  position:relative;
+  display:flex;
+  justify-content:center;
+  align-items:stretch;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  padding:0;
+  margin:0;
+  overflow:visible;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle {
+  box-sizing:border-box!important;
+  position:relative!important;
+  display:block!important;
+  width:calc(100% - 44px)!important;
+  flex:0 0 calc(100% - 44px)!important;
+  height:auto!important;
+  aspect-ratio:1/1!important;
+  max-width:none!important;
+  max-height:none!important;
+  border:1px solid var(--glass-stroke-hi,rgba(220,235,255,.23))!important;
+  border-radius:50%!important;
+  overflow:hidden!important;
+  background:#111b25!important;
+  padding:0!important;
+  margin:0!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle > .connect-v4-note-video {
+  position:absolute!important;inset:0!important;
+  width:100%!important;height:100%!important;
+  max-width:none!important;max-height:none!important;
+  aspect-ratio:1!important;
+  object-fit:cover!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle .connect-v4-note-progress {
+  position:absolute!important;inset:0!important;
+  width:100%!important;height:100%!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-close,
+.connect-app .bubble.video-note-bubble .connect-v5-note-sound {
+  box-sizing:border-box!important;
+  position:absolute!important;
+  z-index:8!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:32px!important;height:32px!important;
+  min-width:32px!important;min-height:32px!important;
+  padding:0!important;margin:0!important;
+  border:1px solid var(--glass-stroke-hi,rgba(210,225,245,.22))!important;
+  border-radius:10px!important;
+  background:color-mix(in srgb,var(--panel,#162536) 86%,transparent)!important;
+  color:var(--text,#fff)!important;
+  opacity:1!important;
+  box-shadow:none!important;
+  -webkit-backdrop-filter:blur(12px);
+  backdrop-filter:blur(12px);
+  transform:none!important;
+  cursor:pointer!important;
+  touch-action:manipulation;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-close {
+  top:0!important;right:0!important;bottom:auto!important;left:auto!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-sound {
+  bottom:0!important;left:0!important;top:auto!important;right:auto!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-sound svg {
+  width:17px!important;height:17px!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-time {
+  box-sizing:border-box!important;
+  position:absolute!important;
+  z-index:7!important;
+  right:0!important;
+  bottom:0!important;
+  top:auto!important;
+  left:auto!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:flex-end!important;
+  gap:3px!important;
+  width:max-content!important;
+  min-width:0!important;
+  max-width:110px!important;
+  padding:4px 3px!important;
+  margin:0!important;
+  border:0!important;
+  border-radius:9px!important;
+  background:color-mix(in srgb,var(--panel,#152435) 75%,transparent)!important;
+  color:var(--text,#fff)!important;
+  opacity:.92!important;
+  font-size:10px!important;
+  line-height:1.1!important;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-time .delivery-checks svg {
+  width:15px!important;height:12px!important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-note-time .delivery-checks {
+  margin-left:2px!important;
+}
+@media(max-width:380px) {
+  .connect-app .bubble.sent.media-only.video-note-bubble,
+  .connect-app .bubble.received.media-only.video-note-bubble {
+    width:min(284px,calc(100vw - 30px))!important;
+    max-width:min(284px,calc(100vw - 30px))!important;
+  }
+}
+
+/* CONNECT_PWA_VIDEO_NOTE_SAFE_BOUNDS_V1_20261112
+ * Video-note controls must live INSIDE the square crop around the circle.
+ * Nothing may leave chat bounds. Applies to collapsed and expanded states.
+ */
+.connect-app .bubble.sent.media-only.video-note-bubble,
+.connect-app .bubble.received.media-only.video-note-bubble {
+  width: min(300px, calc(100vw - 36px)) !important;
+  max-width: min(300px, calc(100vw - 36px)) !important;
+  overflow: visible !important;
+}
+
+.connect-app .bubble.sent.media-only.video-note-bubble:has(.connect-v5-video-note.is-expanded),
+.connect-app .bubble.received.media-only.video-note-bubble:has(.connect-v5-video-note.is-expanded) {
+  width: min(520px, calc(100vw - 30px)) !important;
+  max-width: min(520px, calc(100vw - 30px)) !important;
+}
+
+.connect-app .bubble.video-note-bubble .bubble-body,
+.connect-app .bubble.video-note-bubble .attachment-preview,
+.connect-app .bubble.video-note-bubble .connect-v5-video-note {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage {
+  box-sizing: border-box !important;
+  position: relative !important;
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  aspect-ratio: 1 / 1 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  isolation: isolate !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle {
+  box-sizing: border-box !important;
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  flex: none !important;
+  aspect-ratio: 1 / 1 !important;
+  margin: 0 !important;
+  border: 1px solid var(--glass-stroke-hi, rgba(220,235,255,.23)) !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  background: #111b25 !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle > .connect-v4-note-video,
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle .connect-v4-note-progress,
+.connect-app .bubble.video-note-bubble .connect-v5-note-stage > .connect-v4-note-circle .connect-v4-note-hit {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-close,
+.connect-app .bubble.video-note-bubble .connect-v5-note-sound,
+.connect-app .bubble.video-note-bubble .connect-v5-note-time {
+  position: absolute !important;
+  z-index: 8 !important;
+  transform: none !important;
+}
+
+/* The controls live inside the square crop, outside the circular mask. */
+.connect-app .bubble.video-note-bubble .connect-v5-note-close {
+  top: 8px !important;
+  right: 8px !important;
+  left: auto !important;
+  bottom: auto !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-sound {
+  left: 8px !important;
+  bottom: 8px !important;
+  right: auto !important;
+  top: auto !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-time {
+  right: 8px !important;
+  bottom: 8px !important;
+  left: auto !important;
+  top: auto !important;
+  max-width: calc(100% - 56px) !important;
+  padding: 5px 8px !important;
+  border-radius: 12px !important;
+  background: rgba(12, 18, 29, .76) !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-close,
+.connect-app .bubble.video-note-bubble .connect-v5-note-sound {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  border-radius: 12px !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v5-note-time .delivery-checks {
+  margin-left: 2px !important;
+}
+
+.connect-app .bubble.video-note-bubble .connect-v4-note-length {
+  bottom: 10px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 7 !important;
+}
+
+@media (max-width: 380px) {
+  .connect-app .bubble.sent.media-only.video-note-bubble,
+  .connect-app .bubble.received.media-only.video-note-bubble {
+    width: min(284px, calc(100vw - 30px)) !important;
+    max-width: min(284px, calc(100vw - 30px)) !important;
+  }
+}
+
+/* CONNECT_PWA_RECEIPTS_STICKER_VISIBILITY_V1_20261112
+ * Soft, legible delivery/read checks on bright sent bubbles (all seven themes).
+ * Preserve delivery/read semantics; change presentation only.
+ */
+.connect-app .message-row.outgoing .bubble.sent:not(.media-only):not(.sticker-bubble):not(.emoji-only):not(.video-note-bubble) .delivery-checks {
+  color: #dce8f7 !important;
+  opacity: 1 !important;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.24)) !important;
+}
+.connect-app .message-row.outgoing .bubble.sent:not(.media-only):not(.sticker-bubble):not(.emoji-only):not(.video-note-bubble) .delivery-checks.is-read {
+  color: color-mix(in srgb, #fff 88%, var(--accent2, #86d9ff) 12%) !important;
+}
+.connect-app .message-row.outgoing .bubble.sent:not(.media-only):not(.sticker-bubble):not(.emoji-only):not(.video-note-bubble) .delivery-checks svg {
+  stroke-width: 2.1px !important;
+}
+/* The bubble's subtle meta opacity must not fade the icon as well. */
+.connect-app .message-row.outgoing .bubble.sent:not(.sticker-bubble):not(.emoji-only):not(.media-only):not(.video-note-bubble) > .bubble-meta,
+.connect-app .message-row.outgoing .bubble.sent.voice-note-bubble .voice-message-meta {
+  opacity: .98 !important;
+}
+/* Sticker/emoji timestamps have their own dark/light glass chips: softer thematic read color. */
+.connect-app .message-row.outgoing .bubble.sent.sticker-bubble .delivery-checks.is-read,
+.connect-app .message-row.outgoing .bubble.sent.emoji-only .delivery-checks.is-read {
+  color: color-mix(in srgb, var(--text, #f8f9fd) 75%, var(--accent2, #86d9ff) 25%) !important;
+  opacity: 1 !important;
+}
+/* The sticker stays frameless. Its timestamp chip follows BELOW the image,
+ * never over its pixels; no negative offset and no absolute positioning. */
+.connect-app .message-row .bubble.sticker-bubble:not(.video-note-bubble) > .bubble-meta {
+  box-sizing: border-box !important;
+  position: relative !important;
+  inset: auto !important;
+  margin: 6px 0 0 auto !important;
+  padding: 4px 7px !important;
+  align-self: flex-end !important;
+  flex: 0 0 auto !important;
+  translate: none !important;
+  transform: none !important;
+  z-index: 1 !important;
+}
+.connect-app .message-row .bubble.sticker-bubble:not(.video-note-bubble) > .bubble-body {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}

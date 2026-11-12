@@ -1,0 +1,189 @@
+/* CONNECT_PWA_MEDIA_FRAME_OVERLAY_V1_20261112
+   Focused update: ONLY regular photos, ordinary videos, and albums in chats.
+   Circular video notes, audio, voice messages, stickers, emoji, and calls are untouched.
+   The stroke hugs the media itself; time/read receipts overlay the lower-right edge.
+*/
+
+/* Do not create an outer frame or a separate footer under media. */
+.connect-app .message-row .bubble.sent.media-only.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble),
+.connect-app .message-row .bubble.received.media-only.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) {
+  box-sizing: border-box !important;
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  width: fit-content !important;
+  min-width: 0 !important;
+  max-width: min(300px, calc(100vw - 66px)) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+/* An album keeps two columns and the previously implemented odd-tile stretch. */
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):has(.connect-album-grid) {
+  width: min(300px, calc(100vw - 66px)) !important;
+  max-width: min(300px, calc(100vw - 66px)) !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble) > .bubble-body {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+/* One 1px border on the actual image/video/album, never around a blank footer. */
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) .attachment-preview.connect-adaptive-photo,
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) .attachment-preview.connect-adaptive-video,
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) .connect-album-grid {
+  box-sizing: border-box !important;
+  border: 1px solid color-mix(in srgb, var(--text, #e5edf8) 29%, transparent) !important;
+  border-radius: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) .connect-album-grid {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+/* Keep the original image fit, video playback, controls, album cells and aspect ratios. */
+
+/* The dark, compact receipt pill belongs INSIDE the media at bottom right. */
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) > .bubble-meta {
+  box-sizing: border-box !important;
+  position: absolute !important;
+  z-index: 20 !important;
+  inset: auto 7px 7px auto !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex: none !important;
+  align-self: auto !important;
+  width: max-content !important;
+  max-width: calc(100% - 14px) !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 4px 7px !important;
+  gap: 3px !important;
+  border: 1px solid rgba(229, 240, 255, .15) !important;
+  border-radius: 10px !important;
+  color: #f4f7fd !important;
+  background: rgba(12, 18, 29, .76) !important;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .16) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 1 !important;
+  font-size: 10.5px !important;
+  font-variant-numeric: tabular-nums !important;
+  line-height: 1.15 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+  pointer-events: none !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) > .bubble-meta .delivery-checks {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex: 0 0 auto !important;
+  margin-left: 2px !important;
+  color: #c8daed !important;
+  opacity: 1 !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) > .bubble-meta .delivery-checks.is-read {
+  color: var(--accent2, #88d8fc) !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) > .bubble-meta svg {
+  width: 15px !important;
+  height: 12px !important;
+}
+
+/* CONNECT_PWA_FORWARDED_MEDIA_CHIP_V1_20261112
+ * Media preview sizing is identical for forwarded and ordinary media.
+ * The forwarding label is removed from intrinsic width calculations.
+ * Only forwarded images, regular videos, and albums are affected.
+ */
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble):has(> .bubble-body > .connect-forward-compact) > .bubble-body {
+  box-sizing: border-box !important;
+  position: relative !important;
+  padding-top: 33px !important;
+  margin: 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+/* Single photos and regular videos keep their original responsive width.
+   A long sender name must not expand the image or its containing bubble. */
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):has(> .bubble-body > .connect-forward-compact):has(.connect-adaptive-photo) > .bubble-body,
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):has(> .bubble-body > .connect-forward-compact):has(.connect-adaptive-video) > .bubble-body {
+  width: fit-content !important;
+  max-width: 100% !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):has(> .bubble-body > .connect-forward-compact):has(.connect-album-grid) > .bubble-body {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Match the existing time/check pill, but keep the forward label ABOVE
+   the image, not on top of it. The image maintains its existing thin border. */
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble):not(.sticker-bubble) > .bubble-body > .connect-forward-compact {
+  box-sizing: border-box !important;
+  position: absolute !important;
+  z-index: 10 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: max-content !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 24px !important;
+  margin: 0 !important;
+  padding: 4px 8px !important;
+  gap: 5px !important;
+  border: 1px solid rgba(229,240,255,.15) !important;
+  border-radius: 10px !important;
+  background: rgba(12,18,29,.76) !important;
+  color: #f4f7fd !important;
+  box-shadow: 0 1px 5px rgba(0,0,0,.16) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 1 !important;
+  font-size: 11px !important;
+  font-weight: 550 !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble) > .bubble-body > .connect-forward-compact svg {
+  display: block !important;
+  flex: 0 0 15px !important;
+  width: 15px !important;
+  height: 15px !important;
+  color: inherit !important;
+}
+.connect-app .message-row .bubble.connect-unified-media:not(.video-note-bubble) > .bubble-body > .connect-forward-compact span {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}

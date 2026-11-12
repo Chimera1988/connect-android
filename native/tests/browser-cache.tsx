@@ -101,13 +101,13 @@ await test('profile UI displays cached catalog while server list is unavailable'
  for(let i=0;i<20&&!container.querySelector('.connect-profile-photo-grid');i++)await delay();
  assert(!!container.querySelector('.connect-profile-photo-grid'),'cached list hidden behind network');assert(!container.textContent?.includes('Загружаем медиатеку'),'eternal spinner');
  (container.querySelector('.connect-profile-photo-thumb') as HTMLButtonElement).click();
- for(let i=0;i<25&&!container.querySelector('.connect-profile-photo-overlay img');i++)await delay();
- assert(container.querySelector('.connect-profile-photo-overlay img')?.getAttribute('src')?.startsWith('blob:'),'gallery did not use local bytes');
- (container.querySelector('.connect-profile-photo-close') as HTMLButtonElement).click();await delay();await clearCachedMedia('temporary');
+ for(let i=0;i<25&&!document.querySelector('.connect-full-gallery-stage img');i++)await delay();
+ assert(document.querySelector('.connect-full-gallery-stage img')?.getAttribute('src')?.startsWith('blob:'),'gallery did not use local bytes');
+ (document.querySelector('.connect-full-gallery-icon[aria-label="Закрыть просмотр"]') as HTMLButtonElement).click();await delay();await clearCachedMedia('temporary');
  (container.querySelector('.connect-profile-photo-thumb') as HTMLButtonElement).click();
  for(let i=0;i<25&&!gallerySigns;i++)await delay();
- for(let i=0;i<25&&!container.querySelector('.connect-profile-photo-overlay img');i++)await delay();
- assert(gallerySigns===1&&container.querySelector('.connect-profile-photo-overlay img')?.getAttribute('src')?.includes('gallery-refreshed'),'gallery reused a revoked blob URL after clearing');
+ for(let i=0;i<25&&!document.querySelector('.connect-full-gallery-stage img');i++)await delay();
+ assert(gallerySigns===1&&document.querySelector('.connect-full-gallery-stage img')?.getAttribute('src')?.includes('gallery-refreshed'),'gallery reused a revoked blob URL after clearing');
  root.unmount();container.remove();
 });
 await test('ordinary media clear preserves system avatars and drops temporary bytes',async()=>{
