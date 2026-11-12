@@ -409,6 +409,10 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
         setUploadProgress(`Отправка: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
       });
       created.push(path);
+      if(preview.thumbnail){
+        try{await uploadFile('connect-attachments',path+'__thumb.webp',preview.thumbnail);created.push(path+'__thumb.webp');}
+         catch{/* Original photo remains available. */}
+      }
       if(preview.poster){
         try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}
         catch{/* A poster is optional; retain the original video. */}
@@ -471,6 +475,10 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             setAlbumProgress(`Загружаем ${i+1} из ${files.length}: ${total?Math.min(100,Math.round(sent/total*100)):0}%`);
           });
           created.push(path);
+          if(preview.thumbnail){
+            try{await uploadFile('connect-attachments',path+'__thumb.webp',preview.thumbnail);created.push(path+'__thumb.webp');}
+             catch{/* Original photo remains available. */}
+          }
           if(preview.poster){
             try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}
             catch{/* Optional thumbnail. */}
@@ -657,6 +665,10 @@ export default function ConnectNativeChat({conversation,peer,ownerId,profiles,av
             }finally{await FileSystem.deleteAsync(uri,{idempotent:true}).catch(()=>{});}
           }
           copiedPaths.push(path);
+          if(/__img_\d{1,5}x\d{1,5}$/.test(source)){
+             try{const thumb=await bucket.copy(source+'__thumb.webp',path+'__thumb.webp');if(!thumb.error)copiedPaths.push(path+'__thumb.webp');}
+             catch{/* Old photo: no optional preview. */}
+          }
           if(/__vid_\d{1,5}x\d{1,5}$/.test(source)){
             try{
               const poster=await bucket.copy(source+'__poster.jpg',path+'__poster.jpg');

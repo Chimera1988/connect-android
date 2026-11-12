@@ -40,10 +40,10 @@ export async function warmProfileLibraries(client:SupabaseClient,viewer:string,o
   for(const kind of kinds){if(!valid())break;
    try{
     const lease=await readNativeCatalog<{items:ProfileLibraryRow[]}>(viewer,key(owner,kind));if(!valid())break;
-    const result=await client.storage.from('connect-profile-media').list(owner+'/'+kind,{limit:100,sortBy:{column:'created_at',order:'desc'}});
+    const result=await client.storage.from('connect-profile-media').list(owner+'/'+kind,{limit:300,sortBy:{column:'created_at',order:'desc'}});
     if(!valid())break;
     if(result.error){if(['401','403'].includes(String((result.error as any).statusCode))){await writeNativeCatalog(viewer,key(owner,kind),{items:[]},lease.epoch);for(const row of lease.value?.items||[])await purgeCachedProfileFile(viewer,row.path);}continue;}
-    const rows=(result.data||[]).filter(x=>x.id&&x.name).map(x=>({path:owner+'/'+kind+'/'+x.name,createdAt:x.created_at||'',version:x.updated_at||x.created_at||'',size:Number(x.metadata?.size)||0}));
+    const rows=(result.data||[]).filter(x=>x.id&&x.name&&!/__(?:thumb\.webp|poster\.jpg)$/.test(x.name)).slice(0,100).map(x=>({path:owner+'/'+kind+'/'+x.name,createdAt:x.created_at||'',version:x.updated_at||x.created_at||'',size:Number(x.metadata?.size)||0}));
     await writeNativeCatalog(viewer,key(owner,kind),{items:rows},lease.epoch);
     if(rows.length<100){const listed=new Set(rows.map(x=>x.path));for(const old of lease.value?.items||[])if(!listed.has(old.path)&&valid())await removeProfileLibraryItem(viewer,owner,kind,old.path);}
     if(!valid()||!allowProfilePrefetch())continue;

@@ -4,17 +4,29 @@ import {ImageManipulator,SaveFormat} from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import type {LocalUpload} from './nativeMediaUtils';
 
-export type ChatMediaPreview={suffix:string;poster?:LocalUpload};
+export type ChatMediaPreview={suffix:string;poster?:LocalUpload;thumbnail?:LocalUpload};
 const dimension=(value:number)=>Math.max(1,Math.min(99999,Math.round(value)));
 const suffix=(kind:'img'|'vid',width:number,height:number)=>width>0&&height>0?`__${kind}_${dimension(width)}x${dimension(height)}`:'';
 
 /** Match PWA attachment keys; metadata/thumbnail failures never discard the selected original. */
 export async function prepareChatMediaPreview(file:LocalUpload,kind:string):Promise<ChatMediaPreview>{
   if(kind==='image'){
-    return new Promise(resolve=>{
-      const timer=setTimeout(()=>resolve({suffix:''}),5000);
-      Image.getSize(file.uri,(width,height)=>{clearTimeout(timer);resolve({suffix:suffix('img',width,height)});},()=>{clearTimeout(timer);resolve({suffix:''});});
+    const dimensions=await new Promise<{width:number;height:number}|null>(resolve=>{
+      const timer=setTimeout(()=>resolve(null),5000);
+      Image.getSize(file.uri,(width,height)=>{clearTimeout(timer);resolve({width,height});},()=>{clearTimeout(timer);resolve(null);});
     });
+    const mediaSuffix=dimensions?suffix('img',dimensions.width,dimensions.height):'';
+    if(!mediaSuffix||file.mime==='image/gif')return {suffix:mediaSuffix};
+    try{
+      const context=ImageManipulator.manipulate(file.uri,{maxWidth:480,maxHeight:480});
+      try{
+        const image=await context.renderAsync();
+        try{
+          const saved=await image.saveAsync({format:SaveFormat.WEBP,compress:.78});
+          return {suffix:mediaSuffix,thumbnail:{uri:saved.uri,name:'thumbnail.webp',mime:'image/webp'}};
+        }finally{image.release();}
+      }finally{context.release();}
+    }catch{return {suffix:mediaSuffix};}
   }
   if(kind!=='video')return {suffix:''};
   const player=createVideoPlayer(file.uri);
@@ -61,4 +73,5 @@ export async function prepareChatMediaPreview(file:LocalUpload,kind:string):Prom
 
 export async function discardChatMediaPreview(preview:ChatMediaPreview){
   if(preview.poster)await FileSystem.deleteAsync(preview.poster.uri,{idempotent:true}).catch(()=>{});
+  if(preview.thumbnail)await FileSystem.deleteAsync(preview.thumbnail.uri,{idempotent:true}).catch(()=>{});
 }

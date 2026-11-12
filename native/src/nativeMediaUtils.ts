@@ -78,10 +78,10 @@ export async function signedObject(bucket: string, path: string) {
 }
 export async function listMedia(ownerId: string, kind: MediaKind): Promise<ListedMedia[]> {
   const result = await db.storage.from('connect-profile-media').list(`${ownerId}/${kind}`,{
-    limit: 100, sortBy: {column: 'created_at', order: 'desc'},
+    limit: 300, sortBy: {column: 'created_at', order: 'desc'},
   });
   if (result.error) throw result.error;
-  const rows = (result.data || []).filter(x=>x.id && !x.name.startsWith('.'));
+  const rows = (result.data || []).filter(x=>x.id && !x.name.startsWith('.') && !/__(?:thumb\.webp|poster\.jpg)$/.test(x.name)).slice(0,100);
   const urls = await Promise.all(rows.map(async row => {
     const path = `${ownerId}/${kind}/${row.name}`;
     const url = await signedObject('connect-profile-media',path);

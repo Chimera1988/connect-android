@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import * as tus from 'tus-js-client';
+import {createProfileThumbnail,profileThumbnailPath} from '../lib/profile-thumbnails';
 import {readProfileLibrary,writeProfileLibrary,removeProfileLibraryItem,profilePrefetchSelection,allowProfilePrefetch,type ProfileLibraryRow} from '../lib/profile-media-index';
-import {resolveCachedProfileFile,retireCachedProfileFile,purgeCachedProfileFile,prefetchProfileFile,mediaCacheEpoch,cacheLeaseValid} from '../lib/media-cache';
+import {resolveCachedProfileFile,retireCachedProfileFile,purgeCachedProfileFile,prefetchProfileFile,prefetchCachedMedia,mediaCacheEpoch,cacheLeaseValid} from '../lib/media-cache';
 import {readNativeCatalog} from '../lib/native-catalog';
 import { ConnectMusicLibrary } from './ConnectMusicSystem';
 import ConnectGalleryViewer from './ConnectGalleryViewer';
 
 export type ProfileMediaKind = 'photos' | 'videos' | 'music';
 
-type MediaItem = { path: string; name: string; mime: string; url: string; createdAt: string };
+type MediaItem = { path: string; name: string; mime: string; url: string; createdAt: string; previewUrl?: string };
 type Props = {
   client: SupabaseClient;
   userId: string;
@@ -127,26 +128,26 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
     const generation=++fetchGeneration.current,epoch=mediaCacheEpoch();
     const valid=()=>generation===fetchGeneration.current&&cacheLeaseValid(viewerId,epoch);
     setError('');
-    const makeItem=(entry:ProfileLibraryRow,url:string):MediaItem=>{
-      const name=decodeName(entry.path.split('/').pop()||'');return {path:entry.path,name,mime:MIME[extension(name)]||'application/octet-stream',url,createdAt:entry.createdAt};
+    const makeItem=(entry:ProfileLibraryRow,url:string,previewUrl=""):MediaItem=>{
+      const name=decodeName(entry.path.split('/').pop()||'');return {path:entry.path,name,mime:MIME[extension(name)]||'application/octet-stream',url,createdAt:entry.createdAt,previewUrl};
     };
     const catalog=await readNativeCatalog<{items:ProfileLibraryRow[]}>(viewerId,'profile:'+userId+':'+kind).catch(()=>null);
     const previous=catalog?.value?.items||null;
     if(!valid())return;
-    if(previous){const local=await Promise.all(previous.map(async row=>makeItem(row,await resolveCachedProfileFile(viewerId,row.path,row.version)||'')));if(!valid())return;setItems(local);setLoading(false);}
+    if(previous){const local=await Promise.all(previous.map(async row=>makeItem(row,await resolveCachedProfileFile(viewerId,row.path,row.version)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(row.path,kind)||row.path)||'')));if(!valid())return;setItems(local);setLoading(false);}
     try{
-      const result=await client.storage.from(BUCKET).list(userId+'/'+kind,{limit:100,sortBy:{column:'created_at',order:'desc'}});
+      const result=await client.storage.from(BUCKET).list(userId+'/'+kind,{limit:300,sortBy:{column:'created_at',order:'desc'}});
       if(!valid())return;
       if(result.error){
         if(['401','403'].includes(String((result.error as any).statusCode))){setItems([]);closePreview();for(const old of previous||[])await purgeCachedProfileFile(viewerId,old.path);await writeProfileLibrary(viewerId,userId,kind,[],catalog?.epoch);}
         throw result.error;
       }
-      const rows:ProfileLibraryRow[]=(result.data||[]).filter(x=>x.id&&x.name).map(x=>({path:userId+'/'+kind+'/'+x.name,createdAt:x.created_at||'',version:x.updated_at||x.created_at||'',size:Number(x.metadata?.size)||0}));
+      const rows:ProfileLibraryRow[]=(result.data||[]).filter(x=>x.id&&x.name&&!/__(?:thumb\.webp|poster\.jpg)$/.test(x.name)).slice(0,100).map(x=>({path:userId+'/'+kind+'/'+x.name,createdAt:x.created_at||'',version:x.updated_at||x.created_at||'',size:Number(x.metadata?.size)||0}));
       const locals=new Map<string,string>();
       for(const row of rows){const local=await resolveCachedProfileFile(viewerId,row.path,row.version);if(local)locals.set(row.path,local);}
       if(!valid())return;
       // Show the catalog before any URL signing. Cached entries are immediately usable.
-      setItems(rows.map(x=>makeItem(x,locals.get(x.path)||'')));setLoading(false);
+      setItems(await Promise.all(rows.map(async x=>makeItem(x,locals.get(x.path)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(x.path,kind)||x.path)||''))));setLoading(false);
       await writeProfileLibrary(viewerId,userId,kind,rows,catalog?.epoch);
       if(previous&&rows.length<100){const current=new Set(rows.map(x=>x.path));for(const old of previous)if(!current.has(old.path))await removeProfileLibraryItem(viewerId,userId,kind,old.path);}
       const missing=rows.filter(x=>!locals.has(x.path));
@@ -154,9 +155,14 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
       if(missing.length){const batch=await client.storage.from(BUCKET).createSignedUrls(missing.map(x=>x.path),3600);if(!valid())return;
         if(batch.error)throw batch.error;
         for(const row of batch.data||[])if(row.path&&row.signedUrl)signed.set(row.path,playbackUrl(row.signedUrl));
+        const previewPaths=rows.map(x=>profileThumbnailPath(x.path,kind)).filter((x):x is string=>!!x);
+        if(previewPaths.length)try{
+          const previews=await client.storage.from(BUCKET).createSignedUrls(previewPaths,3600);
+          for(const row of previews.data||[])if(row.path&&row.signedUrl)signed.set(row.path,playbackUrl(row.signedUrl));
+        }catch{/* Optional previews never block opening the profile. */}
       }
-      if(!valid())return;setItems(rows.map(x=>makeItem(x,locals.get(x.path)||signed.get(x.path)||'')));
-      if(allowProfilePrefetch()){const {cap,items}=profilePrefetchSelection(kind,rows);for(const row of items){if(!valid()||!allowProfilePrefetch())break;const url=signed.get(row.path);if(url)await prefetchProfileFile(url,viewerId,kind,cap.bytes,epoch);}}
+      if(!valid())return;setItems(await Promise.all(rows.map(async x=>makeItem(x,locals.get(x.path)||signed.get(x.path)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(x.path,kind)||x.path)||signed.get(profileThumbnailPath(x.path,kind)||'')||''))));
+      if(allowProfilePrefetch()){const {cap,items}=profilePrefetchSelection(kind,rows);for(const row of items){if(!valid()||!allowProfilePrefetch())break;const url=signed.get(row.path);if(url)await prefetchProfileFile(url,viewerId,kind,cap.bytes,epoch);const thumb=profileThumbnailPath(row.path,kind);if(thumb&&signed.get(thumb))void prefetchCachedMedia(signed.get(thumb)!,viewerId);}}
     }catch(err){if(valid()){setLoading(false);setError((previous?'Показана локальная медиатека. Не удалось обновить: ':'Не удалось открыть медиатеку: ')+(err instanceof Error?err.message:String(err)));}}
   },[client,userId,viewerId,kind]);
   useEffect(()=>{
@@ -205,6 +211,19 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
             request.start();
           });
         }
+        if(kind!=='music'){
+          try{
+            const thumbPath=profileThumbnailPath(path,kind);
+            const blob=thumbPath?await createProfileThumbnail(file,kind):null;
+            if(thumbPath&&blob){
+              const type=kind==='photos'?'image/webp':'image/jpeg';
+              const result=await client.storage.from(BUCKET).upload(thumbPath,blob,{contentType:type,upsert:false});
+              if(!result.error){
+                void prefetchCachedMedia(playbackUrl((await client.storage.from(BUCKET).createSignedUrl(thumbPath,3600)).data?.signedUrl||''),viewerId);
+              }
+            }
+          }catch{/* A preview is optional: never roll back an uploaded original. */}
+        }
         completed++;
       }
       setNotice(completed === 1 ? 'Файл добавлен.' : `Загружено файлов: ${completed}.`);
@@ -219,10 +238,14 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
     if (!isOwner || busy || !window.confirm(`Удалить «${item.name}» из своей медиатеки?`)) return;
     setBusy(true); setError('');
     try {
-      const { error: removeError } = await client.storage.from(BUCKET).remove([item.path]);
+      const previewPath=profileThumbnailPath(item.path,kind);
+      const bucket=client.storage.from(BUCKET);
+      const { error: removeError } = await bucket.remove([item.path]);
+      if(!removeError&&previewPath)void bucket.remove([previewPath]).catch(()=>{});
       if (removeError) throw removeError;
       fetchGeneration.current++;setItems(old=>old.filter(x=>x.path!==item.path));
       await removeProfileLibraryItem(viewerId,userId,kind,item.path);
+       if(previewPath)await purgeCachedProfileFile(viewerId,previewPath,true);
       if (preview?.path === item.path) closePreview();
       setNotice('Файл удалён.');
     } catch (e) { setError('Не удалось удалить: ' + (e instanceof Error ? e.message : String(e))); }
@@ -257,12 +280,12 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
       {notice && <div className="connect-profile-media-info" role="status">{notice}</div>}
       {loading ? <div className="connect-profile-media-empty">Загружаем медиатеку…</div> : items.length === 0 ? <div className="connect-profile-media-empty">{isOwner ? <>Здесь пока пусто. Нажми «Добавить», чтобы загрузить {kind === 'photos' ? 'фотографии' : kind === 'videos' ? 'видео' : 'музыку'}.</> : 'Пользователь ещё ничего не добавил.'}</div> : <>
         {kind === 'photos' && <div className="connect-profile-photo-grid">{items.map(item => <article key={item.path} className="connect-profile-media-item">
-          <button type="button" className="connect-profile-photo-thumb" onClick={() => {void openPreview(item);}} aria-label={`Открыть ${item.name}`}><img loading="lazy" src={item.url||undefined} alt={item.name}/></button>
+          <button type="button" className="connect-profile-photo-thumb" onClick={() => {void openPreview(item);}} aria-label={`Открыть ${item.name}`}><img loading="lazy" src={item.previewUrl||item.url||undefined} alt={item.name} onError={e=>{if(item.url&&e.currentTarget.src!==item.url)e.currentTarget.src=item.url;}}/></button>
           <div className="connect-profile-media-item-caption" title={item.name}>{item.name}</div>
           {isOwner && <div className="connect-profile-media-item-actions"><button type="button" disabled={busy || !['image/jpeg','image/png','image/webp'].includes(item.mime)} onClick={() => void makeAvatar(item)}>На аватар</button><button type="button" disabled={busy} onClick={() => void remove(item)}>Удалить</button></div>}
         </article>)}</div>}
         {kind === 'videos' && <div className="connect-profile-video-list">{items.map(item => <article key={item.path} className="connect-profile-media-item">
-          <button type="button" className="connect-profile-video-thumb" onClick={()=>{void openPreview(item);}} aria-label={`Просмотреть ${item.name}`}><video src={item.url||undefined} preload="metadata" playsInline muted tabIndex={-1}/><span aria-hidden="true">▶</span></button>
+          <button type="button" className="connect-profile-video-thumb" onClick={()=>{void openPreview(item);}} aria-label={`Просмотреть ${item.name}`}>{item.previewUrl&&<img loading="lazy" src={item.previewUrl} alt="" onError={e=>{e.currentTarget.style.visibility="hidden";}}/>}<span aria-hidden="true">▶</span></button>
           <div className="connect-profile-media-item-info"><strong title={item.name}>{item.name}</strong>{isOwner && <button type="button" disabled={busy} onClick={() => void remove(item)}>Удалить</button>}</div>
         </article>)}</div>}
         {kind === 'music' && <ConnectMusicLibrary client={client} ownerId={userId} items={items} isOwner={isOwner} busy={busy} onRemove={song => { const item=items.find(x=>x.path===song.path); if(item) void remove(item); }}/>}

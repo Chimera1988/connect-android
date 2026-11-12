@@ -9,7 +9,7 @@ import CacheSettings from '../components/ConnectCacheSettings';
 import {warmOwnProfileLibraries,warmPeerProfileLibraries} from '../lib/profile-media-index';
 import {readNativeCatalog,writeNativeCatalog} from '../lib/native-catalog';
 import {seedInboxHistory,releaseHistoryMemory,chatNetworkDue,chatNetworkVerified} from '../lib/chat-history-cache';
-import {mediaIdentity, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';
+import {mediaIdentity, mediaCacheOwner, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';
 import { resolveCachedStorageFile,prefetchCachedMedia } from '../lib/media-cache';
 import { readChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
 import {compareChatMessages,chatTimeKey} from '../lib/chat-order';
@@ -586,6 +586,21 @@ async function connectVideoFilePreview(file: File): Promise<ConnectVideoPreview 
   });
 }
 
+/** Share one stable IndexedDB-backed JPEG poster across videos, albums and video notes. */
+async function cachedChatPoster(path:string):Promise<string|null>{
+  if(!supabase||!path)return null;
+  const viewer=mediaCacheOwner();
+  if(viewer){
+    const local=await resolveCachedStorageFile(viewer,'connect-attachments',path+'__poster.jpg').catch(()=>null);
+    if(local)return local;
+  }
+  const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
+  if(error||!data?.signedUrl)return null;
+  const signed=mediaUrl(data.signedUrl);
+  if(viewer)void prefetchCachedMedia(signed,viewer);
+  return signed;
+}
+
 function VideoThumbnail({src,path}:{src:string;path?:string}) {
   const [poster,setPoster]=useState<string|null>(null);
   const [uploadedPoster,setUploadedPoster]=useState<string|null>(null);
@@ -600,10 +615,8 @@ function VideoThumbnail({src,path}:{src:string;path?:string}) {
     if (!path || !/__vid_\d{1,5}x\d{1,5}$/.test(path) || !supabase) {setPosterChecked(true);return;}
     if(!near)return;
     let cancelled = false;
-    void supabase.storage.from('connect-attachments').createSignedUrl(path + '__poster.jpg', 3600)
-      .then(({data,error}) => {
-        if (!cancelled) {if(!error&&data?.signedUrl)setUploadedPoster(mediaUrl(data.signedUrl));setPosterChecked(true);}
-      }).catch(() => {if(!cancelled)setPosterChecked(true);});
+    void cachedChatPoster(path).then(url=>{if(!cancelled){setUploadedPoster(url);setPosterChecked(true);}})
+      .catch(()=>{if(!cancelled)setPosterChecked(true);});
     return () => {cancelled = true;};
   }, [path,near]);
   function capture(video:HTMLVideoElement){
@@ -679,10 +692,7 @@ function ConnectInlineAutoplayVideo({src,path,onOpen}:{src:string;path:string;on
     setPoster(null);setError(false);
     if(!supabase || !/__vid_\d{1,5}x\d{1,5}$/.test(path))return;
     let cancelled=false;
-    void supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600)
-      .then(({data,error:requestError})=>{
-        if(!cancelled&&!requestError&&data?.signedUrl)setPoster(mediaUrl(data.signedUrl));
-      }).catch(()=>{});
+    void cachedChatPoster(path).then(url=>{if(!cancelled)setPoster(url);}).catch(()=>{});
     return()=>{cancelled=true;};
   },[path]);
 
@@ -719,8 +729,7 @@ function VideoNoteBubble({src,name,path,sentAt,mine,delivered,read}:{src:string;
   useEffect(()=>{
     let alive=true;
     setPoster(undefined);
-    if(supabase)void supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600)
-      .then(({data,error})=>{if(alive&&!error&&data?.signedUrl)setPoster(mediaUrl(data.signedUrl));}).catch(()=>{});
+    if(supabase)void cachedChatPoster(path).then(url=>{if(alive)setPoster(url||undefined);}).catch(()=>{});
     return()=>{alive=false;};
   },[path]);
   const ref=useRef<HTMLVideoElement|null>(null);
@@ -940,6 +949,18 @@ export default function Home() {
   const olderHistoryAnchor=useRef<{id:string;top:number}|null>(null);
   const [photoPreviews,setPhotoPreviews]=useState<Record<string,string|null>>({});
   const photoPreviewRequests=useRef(new Set<string>());
+  const photoPreviewAttempts=useRef(new Map<string,number>());
+  const photoPreviewRetryTimers=useRef(new Map<string,number>());
+  const [photoPreviewRetry,setPhotoPreviewRetry]=useState(0);
+  function retryPhotoPreview(path:string){
+    photoPreviewRequests.current.delete(path);
+    if((photoPreviewAttempts.current.get(path)||0)>=3||photoPreviewRetryTimers.current.has(path))return;
+    const timer=window.setTimeout(()=>{
+      photoPreviewRetryTimers.current.delete(path);
+      setPhotoPreviewRetry(value=>value+1);
+    },10000);
+    photoPreviewRetryTimers.current.set(path,timer);
+  }
   const activePreviewUser=useRef('');
   activePreviewUser.current=user?.id||'';
   const messagesById=useMemo(()=>new Map(messages.map(m=>[m.id,m])),[messages]);
@@ -966,7 +987,10 @@ export default function Home() {
     if(preview===undefined)return undefined; // Do not download a 10MB original while locating its thumb.
     return preview||attachmentUrls[path];
   }
-  const failedPhotoPreview=(path:string)=>setPhotoPreviews(prev=>({...prev,[path]:null}));
+  const failedPhotoPreview=(path:string)=>{
+    setPhotoPreviews(prev=>({...prev,[path]:null}));
+    retryPhotoPreview(path);
+  };
 
   const [mediaViewer, setMediaViewer] = useState<{url:string;path:string;name:string;kind:'image'|'video'} | null>(null);
   const mediaTouchStart = useRef<{x:number;y:number}|null>(null);
@@ -1979,45 +2003,60 @@ export default function Home() {
       }
       let count = 0;
       for (const m of items) {
-        const original = forwardedMessage(m.body);
-        const senderName = original.from || profiles.find(p => p.id === m.sender_id)?.display_name || (m.sender_id === user.id ? ownProfile?.display_name : null) || 'Пользователь';
-        let path: string | null = null;
-        if (m.attachment_path) {
-          // The DB constraint requires every attachment path to start with
-          // the destination conversation ID and the forwarding user's ID.
-          // Keep image dimensions when forwarding, without changing the DB schema.
-          const mediaSuffix = (m.attachment_kind === 'image' || m.attachment_kind === 'video')
-            ? (m.attachment_path.match(/__(?:img|vid)_\d{1,5}x\d{1,5}$/)?.[0] || '') : '';
-          path = `${chat.id}/${user.id}/${crypto.randomUUID()}${mediaSuffix}`;
-          const bucket = supabase.storage.from('connect-attachments');
-          const copied = await bucket.copy(m.attachment_path, path);
-          if (copied.error) {
-            // Some Storage policies allow signed downloads and uploads but not copy.
-            // Use that path for small attachments; large files need server-side copy permission.
-            if (!m.attachment_size || m.attachment_size > 6 * 1024 * 1024) throw new Error('Не удалось скопировать вложение: ' + copied.error.message);
-            const downloaded = await bucket.download(m.attachment_path);
-            if (downloaded.error || !downloaded.data) throw new Error('Не удалось прочитать вложение: ' + (downloaded.error?.message || 'Ошибка'));
-            const uploaded = await bucket.upload(path, downloaded.data, {contentType:m.attachment_type || 'application/octet-stream', upsert:false});
-            if (uploaded.error) throw new Error('Не удалось загрузить вложение: ' + uploaded.error.message);
+        const original=forwardedMessage(m.body);
+        const senderName=original.from||profiles.find(p=>p.id===m.sender_id)?.display_name||(m.sender_id===user.id?ownProfile?.display_name:null)||'Пользователь';
+        const copiedPaths:string[]=[];
+        const bucket=supabase.storage.from('connect-attachments');
+        const copyMedia=async(source:string,size?:number|null,mime?:string|null):Promise<string>=>{
+          const suffix=source.match(/__(?:img|vid)_\d{1,5}x\d{1,5}$/)?.[0]||'';
+          const destination=`${chat!.id}/${user.id}/${crypto.randomUUID()}${suffix}`;
+          const copied=await bucket.copy(source,destination);
+          if(copied.error){
+            if(!size||size>6*1024*1024)throw new Error('Не удалось скопировать вложение: '+copied.error.message);
+            const downloaded=await bucket.download(source);
+            if(downloaded.error||!downloaded.data||downloaded.data.size>6*1024*1024)throw new Error('Не удалось прочитать вложение');
+            const uploaded=await bucket.upload(destination,downloaded.data,{contentType:mime||downloaded.data.type||'application/octet-stream',upsert:false});
+            if(uploaded.error)throw uploaded.error;
           }
-          if (m.attachment_kind === 'video' && /__vid_\d{1,5}x\d{1,5}$/.test(m.attachment_path)) {
-            // Optional source poster: do not fail forwarding if unavailable.
-            try { await bucket.copy(m.attachment_path + '__poster.jpg', path + '__poster.jpg'); } catch { /* optional */ }
+          copiedPaths.push(destination);
+          const sibling=supportsPhotoPreview(source)?'__thumb.webp':/__vid_\d{1,5}x\d{1,5}$/.test(source)?'__poster.jpg':null;
+          if(sibling){
+            try{
+              const result=await bucket.copy(source+sibling,destination+sibling);
+              if(!result.error)copiedPaths.push(destination+sibling);
+              else {
+                // Storage COPY can be restricted even though signed downloads are allowed.
+                const fallback=await bucket.download(source+sibling);
+                if(!fallback.error&&fallback.data&&fallback.data.size<=1024*1024){
+                  const upload=await bucket.upload(destination+sibling,fallback.data,{contentType:sibling.endsWith('webp')?'image/webp':'image/jpeg',upsert:false});
+                  if(!upload.error)copiedPaths.push(destination+sibling);
+                }
+              }
+            }catch{/* Preview is optional; original is authoritative. */}
           }
-        }
-        const {error} = await supabase.from('messages').insert({
-          conversation_id:chat.id, sender_id:user.id,
-          body:forwardBody(senderName, original.text),
-          attachment_path:path, attachment_name:path ? m.attachment_name : null,
-          attachment_type:path ? m.attachment_type : null,
-          attachment_size:path ? m.attachment_size : null,
-          attachment_kind:path ? m.attachment_kind : null,
-        });
-        if (error) {
-          if (path) await supabase.storage.from('connect-attachments').remove([path]);
+          return destination;
+        };
+        try{
+          const path=m.attachment_path?await copyMedia(m.attachment_path,m.attachment_size,m.attachment_type):null;
+          const album=parseAlbum(original.text);
+          let body=original.text;
+          if(album.length){
+            const copied:AlbumItem[]=[];
+            for(const media of album)copied.push({...media,path:await copyMedia(media.path)});
+            body=ALBUM_PREFIX+JSON.stringify(copied)+']]';
+          }
+          const {error}=await supabase.from('messages').insert({
+            conversation_id:chat.id,sender_id:user.id,body:forwardBody(senderName,body),
+            attachment_path:path,attachment_name:path?m.attachment_name:null,
+            attachment_type:path?m.attachment_type:null,attachment_size:path?m.attachment_size:null,
+            attachment_kind:path?m.attachment_kind:null,
+          });
+          if(error)throw error;
+          count++;
+        }catch(error){
+          if(copiedPaths.length)await bucket.remove(copiedPaths).catch(()=>{});
           throw error;
         }
-        count++;
       }
       setForwardIds([]); setSelectedIds([]); setSelectionMode(false);
       enterChat(chat.id); setNotice('Переслано: ' + count);
@@ -2157,16 +2196,34 @@ export default function Home() {
     const paths=[...new Set(messages.filter(m=>m.conversation_id===activeChat).flatMap(m=>[
       ...(m.attachment_kind==='image'&&m.attachment_path?[m.attachment_path]:[]),
       ...parseAlbum(m.body).filter(x=>x.kind==='image').map(x=>x.path)
-    ]).filter(supportsPhotoPreview))].filter(path=>!photoPreviewRequests.current.has(path));
+    ]).filter(supportsPhotoPreview))].filter(path=>
+      !photoPreviewRequests.current.has(path)&&!photoPreviewRetryTimers.current.has(path)&&
+      (photoPreviewAttempts.current.get(path)||0)<3);
     if(!paths.length)return;
-    paths.forEach(path=>photoPreviewRequests.current.add(path));
+    paths.forEach(path=>{
+      photoPreviewRequests.current.add(path);
+      photoPreviewAttempts.current.set(path,(photoPreviewAttempts.current.get(path)||0)+1);
+    });
     void Promise.all(paths.map(async path=>{
-      try{const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(photoPreviewPath(path),3600);
-        return {path,url:!error&&data?.signedUrl?mediaUrl(data.signedUrl):null};
+      try{
+        const local=await resolveCachedStorageFile(owner,'connect-attachments',photoPreviewPath(path));
+        if(local)return {path,url:local};
+        const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(photoPreviewPath(path),3600);
+        if(error||!data?.signedUrl)return {path,url:null};
+        const signed=mediaUrl(data.signedUrl);void prefetchCachedMedia(signed,owner);
+        return {path,url:signed};
       }catch{return {path,url:null};}
-    })).then(items=>{if(activePreviewUser.current===owner)setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});});
-  },[messages,activeChat,user?.id]);
-  useEffect(()=>{photoPreviewRequests.current.clear();setPhotoPreviews({});},[user?.id]);
+    })).then(items=>{if(activePreviewUser.current===owner){setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});for(const item of items)if(!item.url)retryPhotoPreview(item.path);}});
+  },[messages,activeChat,user?.id,photoPreviewRetry]);
+  useEffect(()=>{
+    photoPreviewRequests.current.clear();photoPreviewAttempts.current.clear();
+    for(const timer of photoPreviewRetryTimers.current.values())window.clearTimeout(timer);
+    photoPreviewRetryTimers.current.clear();setPhotoPreviews({});
+  },[user?.id]);
+  useEffect(()=>{
+    const online=()=>{photoPreviewRequests.current.clear();photoPreviewAttempts.current.clear();setPhotoPreviewRetry(v=>v+1);};
+    window.addEventListener('online',online);return()=>window.removeEventListener('online',online);
+  },[]);
 
   // Prefetch only small preview images and avatars. Never bulk-download
   // large original videos or audio on slow/mobile connections.
