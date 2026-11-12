@@ -1,0 +1,495 @@
+name: Connect — Cache and Thumbnail Parity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-media-parity-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  synchronize-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout the current repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Guard exact repository and clean baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REPOSITORY" in
+            Chimera1988/connect-messenger|Chimera1988/connect-android) ;;
+            *) echo 'Wrong Connect repository' >&2; exit 1;;
+          esac
+          git status --short
+
+      - name: Apply guarded source updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_SOURCE'
+          from pathlib import Path
+          import os, re
+          
+          repo = os.environ.get('GITHUB_REPOSITORY','').lower()
+          android = repo.endswith('/connect-android')
+          pwa = repo.endswith('/connect-messenger')
+          if not (android or pwa):
+              raise RuntimeError('Run only in Chimera1988/connect-messenger or Chimera1988/connect-android')
+          base = Path('native/web') if android else Path('.')
+          changed=[]
+          
+          def read(path):
+              p=Path(path)
+              if not p.exists(): raise RuntimeError('Missing required source: '+str(p))
+              return p.read_text(encoding='utf8')
+          
+          def write(path,content):
+              p=Path(path); previous=p.read_text(encoding='utf8') if p.exists() else None
+              if content==previous: return
+              p.parent.mkdir(parents=True,exist_ok=True)
+              p.write_text(content,encoding='utf8')
+              changed.append(str(p))
+          
+          def one(src,old,new,description):
+              n=src.count(old)
+              if n!=1: raise RuntimeError(f'{description}: expected exactly one match, found {n}')
+              return src.replace(old,new,1)
+          
+          def sub_one(src,pattern,new,description,flags=0):
+              changed,n=re.subn(pattern,lambda m:new,src,count=1,flags=flags)
+              if n!=1: raise RuntimeError(f'{description}: expected exactly one regex match, found {n}')
+              return changed
+          
+          # Shared chat poster path: same IndexedDB key as the uploaded JPEG, not an expiring signed URL.
+          page=str(base/'app/page.tsx')
+          s=read(page)
+          if pwa:
+              s=one(s,"import {mediaIdentity, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';",
+                "import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';",'poster: PWA import')
+              cache='lib/media-cache.ts'; c=read(cache)
+              c=one(c,"let owner = '';","let owner = '';\n/** IDB entries and signed URLs are scoped to the current viewer. */\nexport function mediaCacheOwner(){return owner;}",'poster: cache owner')
+              write(cache,c)
+          else:
+              s=one(s,"import {mediaIdentity, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';",
+                "import {mediaIdentity, mediaCacheOwner, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';",'poster: Android web owner import')
+          poster_function = '''/** Share one stable IndexedDB-backed JPEG poster across videos, albums and video notes. */
+          async function cachedChatPoster(path:string):Promise<string|null>{
+            if(!supabase||!path)return null;
+            const viewer=mediaCacheOwner();
+            const identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
+            if(viewer){
+              const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+              if(local.startsWith('blob:'))return local;
+            }
+            const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
+            if(error||!data?.signedUrl)return null;
+            const signed=mediaUrl(data.signedUrl);
+            if(viewer)void prefetchCachedMedia(signed,viewer);
+            return signed;
+          }
+          
+          '''
+          if android:
+              # The Android web shell already provides a user-isolated resolver.
+              poster_function=poster_function.replace("const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);\n    if(local.startsWith('blob:'))return local;",
+                  "const local=await resolveCachedStorageFile(viewer,'connect-attachments',path+'__poster.jpg').catch(()=>null);\n    if(local)return local;")
+              poster_function=poster_function.replace("  const identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';\n",'')
+          s=one(s,'function VideoThumbnail({src,path}:{src:string;path?:string}) {',poster_function+'function VideoThumbnail({src,path}:{src:string;path?:string}) {','poster helper placement')
+          s=one(s,"    void supabase.storage.from('connect-attachments').createSignedUrl(path + '__poster.jpg', 3600)\n      .then(({data,error}) => {\n        if (!cancelled) {if(!error&&data?.signedUrl)setUploadedPoster(mediaUrl(data.signedUrl));setPosterChecked(true);}\n      }).catch(() => {if(!cancelled)setPosterChecked(true);});",
+                 "    void cachedChatPoster(path).then(url=>{if(!cancelled){setUploadedPoster(url);setPosterChecked(true);}})\n      .catch(()=>{if(!cancelled)setPosterChecked(true);});",'poster: album frame')
+          s=one(s,"    void supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600)\n      .then(({data,error:requestError})=>{\n        if(!cancelled&&!requestError&&data?.signedUrl)setPoster(mediaUrl(data.signedUrl));\n      }).catch(()=>{});",
+                 "    void cachedChatPoster(path).then(url=>{if(!cancelled)setPoster(url);}).catch(()=>{});",'poster: inline video')
+          s=one(s,"    if(supabase)void supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600)\n      .then(({data,error})=>{if(alive&&!error&&data?.signedUrl)setPoster(mediaUrl(data.signedUrl));}).catch(()=>{});",
+                 "    if(supabase)void cachedChatPoster(path).then(url=>{if(alive)setPoster(url||undefined);}).catch(()=>{});",'poster: video note')
+          
+          # Retry a missing/expired WebP thumb twice after a delay, then show its original.
+          s=one(s,'  const photoPreviewRequests=useRef(new Set<string>());', '''  const photoPreviewRequests=useRef(new Set<string>());
+            const photoPreviewAttempts=useRef(new Map<string,number>());
+            const photoPreviewRetryTimers=useRef(new Map<string,number>());
+            const [photoPreviewRetry,setPhotoPreviewRetry]=useState(0);
+            function retryPhotoPreview(path:string){
+              photoPreviewRequests.current.delete(path);
+              if((photoPreviewAttempts.current.get(path)||0)>=3||photoPreviewRetryTimers.current.has(path))return;
+              const timer=window.setTimeout(()=>{
+                photoPreviewRetryTimers.current.delete(path);
+                setPhotoPreviewRetry(value=>value+1);
+              },10000);
+              photoPreviewRetryTimers.current.set(path,timer);
+            }''','thumbnail retries: refs')
+          s=one(s,'  const failedPhotoPreview=(path:string)=>setPhotoPreviews(prev=>({...prev,[path]:null}));',
+          '''  const failedPhotoPreview=(path:string)=>{
+              setPhotoPreviews(prev=>({...prev,[path]:null}));
+              retryPhotoPreview(path);
+            };''','thumbnail retry on img error')
+          s=one(s,')).filter(supportsPhotoPreview))].filter(path=>!photoPreviewRequests.current.has(path));',
+          ''')).filter(supportsPhotoPreview))].filter(path=>
+                !photoPreviewRequests.current.has(path)&&!photoPreviewRetryTimers.current.has(path)&&
+                (photoPreviewAttempts.current.get(path)||0)<3);''','thumbnail requests bounded')
+          s=one(s,'    paths.forEach(path=>photoPreviewRequests.current.add(path));',
+          '''    paths.forEach(path=>{
+                photoPreviewRequests.current.add(path);
+                photoPreviewAttempts.current.set(path,(photoPreviewAttempts.current.get(path)||0)+1);
+              });''','thumbnail attempts')
+          if pwa:
+              old='''        const previewPath=photoPreviewPath(path),identity='/storage/v1/object/sign/connect-attachments/'+previewPath;
+                  const local=await resolveCachedMedia(identity,owner);
+                  if(local.startsWith('blob:'))return {path,url:local};
+                  const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(previewPath,3600);
+                  return {path,url:!error&&data?.signedUrl?mediaUrl(data.signedUrl):null};'''
+              new='''        const previewPath=photoPreviewPath(path),identity='/storage/v1/object/sign/connect-attachments/'+previewPath;
+                  const local=await resolveCachedMedia(identity,owner);
+                  if(local.startsWith('blob:'))return {path,url:local};
+                  const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(previewPath,3600);
+                  if(error||!data?.signedUrl)return {path,url:null};
+                  const signed=mediaUrl(data.signedUrl);
+                  void prefetchCachedMedia(signed,owner);
+                  return {path,url:signed};'''
+          else:
+              old='''      try{const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(photoPreviewPath(path),3600);
+                  return {path,url:!error&&data?.signedUrl?mediaUrl(data.signedUrl):null};'''
+              new='''      try{
+                  const local=await resolveCachedStorageFile(owner,'connect-attachments',photoPreviewPath(path));
+                  if(local)return {path,url:local};
+                  const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(photoPreviewPath(path),3600);
+                  if(error||!data?.signedUrl)return {path,url:null};
+                  const signed=mediaUrl(data.signedUrl);void prefetchCachedMedia(signed,owner);
+                  return {path,url:signed};'''
+          s=one(s,old,new,'thumbnail cached/signed lookup')
+          s=one(s,
+          "    })).then(items=>{if(activePreviewUser.current===owner)setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});});",
+          "    })).then(items=>{if(activePreviewUser.current===owner){setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});for(const item of items)if(!item.url)retryPhotoPreview(item.path);}});",
+            'thumbnail signed failure recovery')
+          s=one(s,'  },[messages,activeChat,user?.id]);\n  useEffect(()=>{photoPreviewRequests.current.clear();setPhotoPreviews({});},[user?.id]);',
+          '''  },[messages,activeChat,user?.id,photoPreviewRetry]);
+            useEffect(()=>{
+              photoPreviewRequests.current.clear();photoPreviewAttempts.current.clear();
+              for(const timer of photoPreviewRetryTimers.current.values())window.clearTimeout(timer);
+              photoPreviewRetryTimers.current.clear();setPhotoPreviews({});
+            },[user?.id]);
+            useEffect(()=>{
+              const online=()=>{photoPreviewRequests.current.clear();photoPreviewAttempts.current.clear();setPhotoPreviewRetry(v=>v+1);};
+              window.addEventListener('online',online);return()=>window.removeEventListener('online',online);
+            },[]);''','thumbnail retries reset/online')
+          
+          # Forwarded albums and sidecars must use the destination conversation's storage path.
+          if True:
+              start=s.index('  async function forwardTo(contact:Profile) {')
+              end=s.index('  async function eraseMessage(',start)
+              block=s[start:end]
+              start_loop=block.index('      for (const m of items) {')
+              end_loop=block.index('        count++;\n      }',start_loop)+len('        count++;\n      }')
+              loop='''      for (const m of items) {
+                  const original=forwardedMessage(m.body);
+                  const senderName=original.from||profiles.find(p=>p.id===m.sender_id)?.display_name||(m.sender_id===user.id?ownProfile?.display_name:null)||'Пользователь';
+                  const copiedPaths:string[]=[];
+                  const bucket=supabase.storage.from('connect-attachments');
+                  const copyMedia=async(source:string,size?:number|null,mime?:string|null):Promise<string>=>{
+                    const suffix=source.match(/__(?:img|vid)_\\d{1,5}x\\d{1,5}$/)?.[0]||'';
+                    const destination=`${chat!.id}/${user.id}/${crypto.randomUUID()}${suffix}`;
+                    const copied=await bucket.copy(source,destination);
+                    if(copied.error){
+                      if(!size||size>6*1024*1024)throw new Error('Не удалось скопировать вложение: '+copied.error.message);
+                      const downloaded=await bucket.download(source);
+                      if(downloaded.error||!downloaded.data||downloaded.data.size>6*1024*1024)throw new Error('Не удалось прочитать вложение');
+                      const uploaded=await bucket.upload(destination,downloaded.data,{contentType:mime||downloaded.data.type||'application/octet-stream',upsert:false});
+                      if(uploaded.error)throw uploaded.error;
+                    }
+                    copiedPaths.push(destination);
+                    const sibling=supportsPhotoPreview(source)?'__thumb.webp':/__vid_\\d{1,5}x\\d{1,5}$/.test(source)?'__poster.jpg':null;
+                    if(sibling){
+                      try{
+                        const result=await bucket.copy(source+sibling,destination+sibling);
+                        if(!result.error)copiedPaths.push(destination+sibling);
+                        else {
+                          // Storage COPY can be restricted even though signed downloads are allowed.
+                          const fallback=await bucket.download(source+sibling);
+                          if(!fallback.error&&fallback.data&&fallback.data.size<=1024*1024){
+                            const upload=await bucket.upload(destination+sibling,fallback.data,{contentType:sibling.endsWith('webp')?'image/webp':'image/jpeg',upsert:false});
+                            if(!upload.error)copiedPaths.push(destination+sibling);
+                          }
+                        }
+                      }catch{/* Preview is optional; original is authoritative. */}
+                    }
+                    return destination;
+                  };
+                  try{
+                    const path=m.attachment_path?await copyMedia(m.attachment_path,m.attachment_size,m.attachment_type):null;
+                    const album=parseAlbum(original.text);
+                    let body=original.text;
+                    if(album.length){
+                      const copied:AlbumItem[]=[];
+                      for(const media of album)copied.push({...media,path:await copyMedia(media.path)});
+                      body=ALBUM_PREFIX+JSON.stringify(copied)+']]';
+                    }
+                    const {error}=await supabase.from('messages').insert({
+                      conversation_id:chat.id,sender_id:user.id,body:forwardBody(senderName,body),
+                      attachment_path:path,attachment_name:path?m.attachment_name:null,
+                      attachment_type:path?m.attachment_type:null,attachment_size:path?m.attachment_size:null,
+                      attachment_kind:path?m.attachment_kind:null,
+                    });
+                    if(error)throw error;
+                    count++;
+                  }catch(error){
+                    if(copiedPaths.length)await bucket.remove(copiedPaths).catch(()=>{});
+                    throw error;
+                  }
+                }'''
+              block=block[:start_loop]+loop+block[end_loop:]
+              s=s[:start]+block+s[end:]
+          write(page,s)
+          
+          # Profile miniatures: a separate persistent, lightweight WebP/JPEG beside the original.
+          profile_path=str(base/'lib/profile-thumbnails.ts')
+          if Path(profile_path).exists():raise RuntimeError('Unexpected existing profile-thumbnails module; review required')
+          thumb_module='''import {makePhotoPreview} from './chat-thumbnails';
+          export type ProfileThumbnailKind='photos'|'videos'|'music';
+          export function profileThumbnailPath(path:string,kind:ProfileThumbnailKind):string|null{
+            return kind==='photos'?path+'__thumb.webp':kind==='videos'?path+'__poster.jpg':null;
+          }
+          /** Originals remain unchanged; GIF has no still thumbnail to preserve animation. */
+          export async function createProfileThumbnail(file:File,kind:ProfileThumbnailKind):Promise<Blob|null>{
+            if(kind==='photos')return makePhotoPreview(file);
+            if(kind!=='videos'||(!file.type.startsWith('video/')&&!/\\.(?:mp4|mov|webm)$/i.test(file.name)))return null;
+            const src=URL.createObjectURL(file);
+            return new Promise(resolve=>{
+              const video=document.createElement('video');
+              video.muted=true;video.playsInline=true;video.preload='auto';
+              let finished=false;
+              const finish=(blob:Blob|null)=>{
+                if(finished)return;finished=true;window.clearTimeout(timer);
+                video.pause();video.removeAttribute('src');video.load();URL.revokeObjectURL(src);resolve(blob);
+              };
+              const timer=window.setTimeout(()=>finish(null),6000);
+              const capture=()=>{
+                if(finished||!video.videoWidth||!video.videoHeight||video.readyState<2)return;
+                try{
+                  const scale=Math.min(1,480/video.videoWidth,480/video.videoHeight);
+                  const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
+                  canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
+                  const ctx=canvas.getContext('2d');if(!ctx){finish(null);return;}
+                  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+                  canvas.toBlob(blob=>finish(blob?.size?blob:null),'image/jpeg',.78);
+                }catch{finish(null);}
+              };
+              video.onloadedmetadata=()=>{
+                try{
+                  const target=Number.isFinite(video.duration)&&video.duration>.3?Math.min(1.2,Math.max(.3,video.duration*.12),video.duration*.8):0;
+                  if(target)video.currentTime=target;else if(video.readyState>=2)capture();
+                }catch{capture();}
+              };
+              video.onseeked=capture;video.onloadeddata=capture;video.onerror=()=>finish(null);
+              video.src=src;video.load();
+            });
+          }
+          '''
+          write(profile_path,thumb_module)
+          profile=str(base/'components/ConnectProfileMedia.tsx')
+          p=read(profile)
+          p=one(p,"import * as tus from 'tus-js-client';", "import * as tus from 'tus-js-client';\nimport {createProfileThumbnail,profileThumbnailPath} from '../lib/profile-thumbnails';",'profile import')
+          p=one(p,"type MediaItem = { path: string; name: string; mime: string; url: string; createdAt: string };",
+            "type MediaItem = { path: string; name: string; mime: string; url: string; createdAt: string; previewUrl?: string };",'profile item type')
+          # Server listing: never present __thumb.webp/__poster.jpg as user-created media.
+          p=p.replace('.filter(row=>row.id&&row.name).map(row=>({',".filter(row=>row.id&&row.name&&!/__(?:thumb\\.webp|poster\\.jpg)$/.test(row.name)).slice(0,100).map(row=>({")
+          p=p.replace('.filter(x=>x.id&&x.name).map(x=>({',".filter(x=>x.id&&x.name&&!/__(?:thumb\\.webp|poster\\.jpg)$/.test(x.name)).slice(0,100).map(x=>({")
+          if pwa:
+              p=one(p,'const makeItem=(entry:ProfileLibraryRow,url:string):MediaItem=>{',
+                    'const makeItem=(entry:ProfileLibraryRow,url:string,previewUrl=""):MediaItem=>{','profile item maker')
+              p=one(p,'url,createdAt:entry.createdAt};','url,createdAt:entry.createdAt,previewUrl};','profile item fields')
+              p=one(p,'makeItem(entry,await resolveCachedProfileFile(viewerId,entry.path)||\'\')',
+                  "makeItem(entry,await resolveCachedProfileFile(viewerId,entry.path)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(entry.path,kind)||entry.path)||'')",'profile prior thumb')
+              p=one(p,'for(const entry of batch.data||[])if(entry.path&&entry.signedUrl)signed.set(entry.path,playbackUrl(entry.signedUrl));',
+                '''for(const entry of batch.data||[])if(entry.path&&entry.signedUrl)signed.set(entry.path,playbackUrl(entry.signedUrl));
+                  // Optional previews are signed separately so missing legacy sidecars cannot break originals.
+                  const previewPaths=rows.map(x=>profileThumbnailPath(x.path,kind)).filter((x):x is string=>!!x);
+                  if(previewPaths.length)try{
+                    const previews=await client.storage.from(BUCKET).createSignedUrls(previewPaths,3600);
+                    for(const entry of previews.data||[])if(entry.path&&entry.signedUrl)signed.set(entry.path,playbackUrl(entry.signedUrl));
+                  }catch{/* Old media without preview stays usable. */}''','profile optional preview signing')
+              p=one(p,'makeItem(entry,await resolveCachedProfileFile(viewerId,entry.path)||signed.get(entry.path)||\'\')',
+                "makeItem(entry,await resolveCachedProfileFile(viewerId,entry.path)||signed.get(entry.path)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(entry.path,kind)||entry.path)||signed.get(profileThumbnailPath(entry.path,kind)||'')||'')",'profile signed thumbnail')
+              p=one(p,'if(url)void prefetchProfileFile(url,viewerId,kind);',
+                "if(url)void prefetchProfileFile(url,viewerId,kind);\n          const thumbnail=profileThumbnailPath(entry.path,kind);\n          if(thumbnail&&signed.get(thumbnail))void prefetchCachedMedia(signed.get(thumbnail)!,viewerId);",'profile thumbnail warmup')
+              p=one(p,"import { resolveCachedProfileFile, prefetchProfileFile, cacheUploadedProfileFile, retireCachedProfileFile } from '../lib/media-cache';",
+                  "import { resolveCachedProfileFile, prefetchProfileFile, prefetchCachedMedia, cacheUploadedProfileFile, retireCachedProfileFile } from '../lib/media-cache';",'profile cache import')
+          else:
+              p=one(p,'const makeItem=(entry:ProfileLibraryRow,url:string):MediaItem=>{',
+                    'const makeItem=(entry:ProfileLibraryRow,url:string,previewUrl=""):MediaItem=>{','profile item maker')
+              p=one(p,'url,createdAt:entry.createdAt};','url,createdAt:entry.createdAt,previewUrl};','profile item fields')
+              p=one(p,"makeItem(row,await resolveCachedProfileFile(viewerId,row.path,row.version)||'')",
+                "makeItem(row,await resolveCachedProfileFile(viewerId,row.path,row.version)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(row.path,kind)||row.path)||'')",'Android web prior thumb')
+              p=one(p,"setItems(rows.map(x=>makeItem(x,locals.get(x.path)||'')));",
+                "setItems(await Promise.all(rows.map(async x=>makeItem(x,locals.get(x.path)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(x.path,kind)||x.path)||''))));",'Android web profile local index')
+              p=one(p,'for(const row of batch.data||[])if(row.path&&row.signedUrl)signed.set(row.path,playbackUrl(row.signedUrl));',
+                '''for(const row of batch.data||[])if(row.path&&row.signedUrl)signed.set(row.path,playbackUrl(row.signedUrl));
+                  const previewPaths=rows.map(x=>profileThumbnailPath(x.path,kind)).filter((x):x is string=>!!x);
+                  if(previewPaths.length)try{
+                    const previews=await client.storage.from(BUCKET).createSignedUrls(previewPaths,3600);
+                    for(const row of previews.data||[])if(row.path&&row.signedUrl)signed.set(row.path,playbackUrl(row.signedUrl));
+                  }catch{/* Optional previews never block opening the profile. */}''','Android web optional preview signing')
+              p=one(p,"setItems(rows.map(x=>makeItem(x,locals.get(x.path)||signed.get(x.path)||'')));",
+                "setItems(await Promise.all(rows.map(async x=>makeItem(x,locals.get(x.path)||signed.get(x.path)||'',await resolveCachedProfileFile(viewerId,profileThumbnailPath(x.path,kind)||x.path)||signed.get(profileThumbnailPath(x.path,kind)||'')||''))));",'Android web final items')
+              p=one(p,"import {resolveCachedProfileFile,retireCachedProfileFile,purgeCachedProfileFile,prefetchProfileFile,mediaCacheEpoch,cacheLeaseValid} from '../lib/media-cache';",
+                "import {resolveCachedProfileFile,retireCachedProfileFile,purgeCachedProfileFile,prefetchProfileFile,prefetchCachedMedia,mediaCacheEpoch,cacheLeaseValid} from '../lib/media-cache';",'Android web cache import')
+              p=one(p,'if(url)await prefetchProfileFile(url,viewerId,kind,cap.bytes,epoch);',
+                "if(url)await prefetchProfileFile(url,viewerId,kind,cap.bytes,epoch);const thumb=profileThumbnailPath(row.path,kind);if(thumb&&signed.get(thumb))void prefetchCachedMedia(signed.get(thumb)!,viewerId);",'Android web thumb warmup')
+          # Upload previews in same bucket, without making the original send contingent on thumbnail processing.
+          marker='''        completed++;
+                }
+                setNotice(completed === 1'''
+          block='''        if(kind!=='music'){
+                    try{
+                      const thumbPath=profileThumbnailPath(path,kind);
+                      const blob=thumbPath?await createProfileThumbnail(file,kind):null;
+                      if(thumbPath&&blob){
+                        const type=kind==='photos'?'image/webp':'image/jpeg';
+                        const result=await client.storage.from(BUCKET).upload(thumbPath,blob,{contentType:type,upsert:false});
+                        if(!result.error){
+                          '''+('await cacheUploadedProfileFile(viewerId,thumbPath,new File([blob],thumbPath.split(\'/\').pop()||\'preview\',{type}));' if pwa else 'void prefetchCachedMedia(playbackUrl((await client.storage.from(BUCKET).createSignedUrl(thumbPath,3600)).data?.signedUrl||\'\'),viewerId);')+'''
+                        }
+                      }
+                    }catch{/* A preview is optional: never roll back an uploaded original. */}
+                  }
+                  completed++;
+                }
+                setNotice(completed === 1'''
+          p=one(p,marker,block,'profile thumbnail uploads')
+          # Server and local cache must retire previews on deletion.
+          p=one(p,'const { error: removeError } = await client.storage.from(BUCKET).remove([item.path]);',
+                  'const previewPath=profileThumbnailPath(item.path,kind);\n      const bucket=client.storage.from(BUCKET);\n      const { error: removeError } = await bucket.remove([item.path]);\n      if(!removeError&&previewPath)void bucket.remove([previewPath]).catch(()=>{});','profile delete storage preview')
+          if pwa:
+              p=one(p,'await retireCachedProfileFile(viewerId,item.path);',
+                    'await retireCachedProfileFile(viewerId,item.path);\n       if(previewPath)await retireCachedProfileFile(viewerId,previewPath);','profile delete cached thumb')
+          else:
+              p=one(p,'await removeProfileLibraryItem(viewerId,userId,kind,item.path);',
+                    'await removeProfileLibraryItem(viewerId,userId,kind,item.path);\n       if(previewPath)await purgeCachedProfileFile(viewerId,previewPath,true);','Android web delete cached thumb')
+          # Avoid rendering full originals in the profile grid. Gallery viewer still opens the original.
+          if pwa:
+              p=one(p,'src={item.url} alt={item.name}',
+                    'src={item.previewUrl||item.url} alt={item.name} onError={e=>{if(item.url&&e.currentTarget.src!==item.url)e.currentTarget.src=item.url;}}','profile photo grid image')
+              p=one(p,'{item.url && <video src={item.url} preload="none" playsInline muted tabIndex={-1}/>}<span aria-hidden="true">▶</span>',
+                    '{item.previewUrl&&<img loading="lazy" src={item.previewUrl} alt="" onError={e=>{e.currentTarget.style.visibility="hidden";}}/>}<span aria-hidden="true">▶</span>','profile video poster grid')
+          else:
+              p=one(p,'src={item.url||undefined} alt={item.name}',
+                    'src={item.previewUrl||item.url||undefined} alt={item.name} onError={e=>{if(item.url&&e.currentTarget.src!==item.url)e.currentTarget.src=item.url;}}','Android web photo grid image')
+              p=one(p,'<video src={item.url||undefined} preload="metadata" playsInline muted tabIndex={-1}/><span aria-hidden="true">▶</span>',
+                    '{item.previewUrl&&<img loading="lazy" src={item.previewUrl} alt="" onError={e=>{e.currentTarget.style.visibility="hidden";}}/>}<span aria-hidden="true">▶</span>','Android web video poster grid')
+          p=one(p,'limit:100,sortBy:', 'limit:300,sortBy:', 'profile list covers originals and sidecars')
+          write(profile,p)
+          css=str(base/'app/profile-media.css');style=read(css)
+          style+='''\n/* Lightweight profile video posters; never eagerly decode the full video in the list. */
+          .connect-app .connect-profile-video-thumb img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;}
+          '''
+          write(css,style)
+          
+          # The same album/profile sidecars must not appear as separate items during background index warmup.
+          index=str(base/'lib/profile-media-index.ts'); i=read(index)
+          if pwa:
+              i=one(i,'.filter(row=>row.id&&row.name).map(row=>({',
+                  ".filter(row=>row.id&&row.name&&!/__(?:thumb\\.webp|poster\\.jpg)$/.test(row.name)).slice(0,100).map(row=>({",'own profile catalog excludes previews')
+              i=one(i,'.filter(x=>x.id&&x.name).map(x=>({',
+                  ".filter(x=>x.id&&x.name&&!/__(?:thumb\\.webp|poster\\.jpg)$/.test(x.name)).slice(0,100).map(x=>({",'peer profile catalog excludes previews')
+          else:
+              i=one(i,'.filter(x=>x.id&&x.name).map(x=>({',
+                  ".filter(x=>x.id&&x.name&&!/__(?:thumb\\.webp|poster\\.jpg)$/.test(x.name)).slice(0,100).map(x=>({",'Android web profile index excludes previews')
+          i=i.replace('limit:100,sortBy:', 'limit:300,sortBy:')
+          i=i.replace('limit: 100,sortBy:', 'limit: 300,sortBy:')
+          write(index,i)
+          
+          # Android native attachment uploader: generate WebP 480px beside the original, even in albums.
+          if android:
+              native='native/src/nativeMediaPreview.ts'; n=read(native)
+              n=one(n,'export type ChatMediaPreview={suffix:string;poster?:LocalUpload};',
+                    'export type ChatMediaPreview={suffix:string;poster?:LocalUpload;thumbnail?:LocalUpload};','native preview type')
+              n=one(n,"    return new Promise(resolve=>{\n      const timer=setTimeout(()=>resolve({suffix:''}),5000);\n      Image.getSize(file.uri,(width,height)=>{clearTimeout(timer);resolve({suffix:suffix('img',width,height)});},()=>{clearTimeout(timer);resolve({suffix:''});});\n    });",
+          '''    const dimensions=await new Promise<{width:number;height:number}|null>(resolve=>{
+                const timer=setTimeout(()=>resolve(null),5000);
+                Image.getSize(file.uri,(width,height)=>{clearTimeout(timer);resolve({width,height});},()=>{clearTimeout(timer);resolve(null);});
+              });
+              const mediaSuffix=dimensions?suffix('img',dimensions.width,dimensions.height):'';
+              if(!mediaSuffix||file.mime==='image/gif')return {suffix:mediaSuffix};
+              try{
+                const context=ImageManipulator.manipulate(file.uri,{maxWidth:480,maxHeight:480});
+                try{
+                  const image=await context.renderAsync();
+                  try{
+                    const saved=await image.saveAsync({format:SaveFormat.WEBP,compress:.78});
+                    return {suffix:mediaSuffix,thumbnail:{uri:saved.uri,name:'thumbnail.webp',mime:'image/webp'}};
+                  }finally{image.release();}
+                }finally{context.release();}
+              }catch{return {suffix:mediaSuffix};}''','native photo WebP creator')
+              n=one(n,'  if(preview.poster)await FileSystem.deleteAsync(preview.poster.uri,{idempotent:true}).catch(()=>{});',
+                    "  if(preview.poster)await FileSystem.deleteAsync(preview.poster.uri,{idempotent:true}).catch(()=>{});\n  if(preview.thumbnail)await FileSystem.deleteAsync(preview.thumbnail.uri,{idempotent:true}).catch(()=>{});",'native cleanup thumbnail')
+              write(native,n)
+              nativechat='native/src/ConnectNativeChat.tsx'; n=read(nativechat)
+              n=one(n,"      if(preview.poster){\n        try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}",
+                 "      if(preview.thumbnail){\n        try{await uploadFile('connect-attachments',path+'__thumb.webp',preview.thumbnail);created.push(path+'__thumb.webp');}\n         catch{/* Original photo remains available. */}\n      }\n      if(preview.poster){\n        try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}", 'native single-message thumbnail')
+              n=one(n,"          if(preview.poster){\n            try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}",
+                 "          if(preview.thumbnail){\n            try{await uploadFile('connect-attachments',path+'__thumb.webp',preview.thumbnail);created.push(path+'__thumb.webp');}\n             catch{/* Original photo remains available. */}\n          }\n          if(preview.poster){\n            try{await uploadFile('connect-attachments',path+'__poster.jpg',preview.poster);created.push(path+'__poster.jpg');}", 'native album thumbnail')
+              n=one(n,"          if(/__vid_\\d{1,5}x\\d{1,5}$/.test(source)){",
+                 "          if(/__img_\\d{1,5}x\\d{1,5}$/.test(source)){\n             try{const thumb=await bucket.copy(source+'__thumb.webp',path+'__thumb.webp');if(!thumb.error)copiedPaths.push(path+'__thumb.webp');}\n             catch{/* Old photo: no optional preview. */}\n          }\n          if(/__vid_\\d{1,5}x\\d{1,5}$/.test(source)){",'native forwarding thumb')
+              write(nativechat,n)
+              nativeutils='native/src/nativeMediaUtils.ts'; n=read(nativeutils)
+              n=one(n,"const rows = (result.data || []).filter(x=>x.id && !x.name.startsWith('.'));",
+                 "const rows = (result.data || []).filter(x=>x.id && !x.name.startsWith('.') && !/__(?:thumb\\.webp|poster\\.jpg)$/.test(x.name)).slice(0,100);",'native profile list excludes previews')
+              n=one(n,'limit: 100, sortBy:', 'limit: 300, sortBy:', 'native profile pagination capacity')
+              write(nativeutils,n)
+          
+          print('Validated and patched: '+', '.join(changed))
+          PY_SOURCE
+
+      - name: Setup Node for source verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            native/package-lock.json
+
+      - name: Check PWA TypeScript and production build
+        if: github.repository == 'Chimera1988/connect-messenger'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Check embedded Android UI and native source types — no APK build
+        if: github.repository == 'Chimera1988/connect-android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd native
+          npm ci
+          npm run typecheck:web
+          npm run typecheck
+          npm run build:web
+
+      - name: Commit source only after successful verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [ "$GITHUB_REPOSITORY" = 'Chimera1988/connect-messenger' ]; then
+            git add -- app/page.tsx app/profile-media.css lib/media-cache.ts lib/profile-media-index.ts lib/profile-thumbnails.ts components/ConnectProfileMedia.tsx
+          else
+            git add -- native/web/app/page.tsx native/web/app/profile-media.css native/web/lib/profile-media-index.ts native/web/lib/profile-thumbnails.ts native/web/components/ConnectProfileMedia.tsx native/src/nativeMediaPreview.ts native/src/ConnectNativeChat.tsx native/src/nativeMediaUtils.ts
+          fi
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fix media thumbnail/cache parity across Connect clients [skip ci]'
+          git push origin HEAD:"${GITHUB_REF_NAME}"
