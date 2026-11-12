@@ -1,1 +1,243 @@
+# Connect Android 3.0.2 (20): fix white adaptive icon and build verified APK.
+# Upload as .github/workflows/connect-android-build.yml in Chimera1988/connect-android.
+# Uses the original icon already in the repository; does not touch PWA.
+name: Connect Android 3.0.2 - adaptive icon and APK
 
+'on':
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-android-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-icon-302-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Chimera1988/connect-android' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: 'https://tpwkmoxxzjfdsqsomhhr.supabase.co'
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa'
+      EXPO_PUBLIC_CONNECT_URL: 'https://connect-chat.duckdns.org'
+      CONNECT_PREVIOUS_CERT_SHA256: 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Pillow for exact icon resource editing
+        run: python -m pip install --disable-pip-version-check 'Pillow==11.3.0'
+      - name: Restore the original dark adaptive Connect icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYICON'
+          from pathlib import Path
+          from PIL import Image
+          import hashlib, io, json, re
+
+          root = Path('native')
+          assets = root / 'plugins/launcher-icons'
+          fg_path = assets / 'drawable-nodpi/ic_launcher_foreground.png'
+          bg_path = assets / 'drawable-nodpi/ic_launcher_background.png'
+          legacy_path = assets / 'mipmap-xxxhdpi/ic_launcher.png'
+
+          # Use the ACTUAL Connect artwork already checked into GitHub, not a new logo.
+          def git_sha(path):
+              data = path.read_bytes()
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + bytes([0]) + data).hexdigest()
+
+          assert git_sha(fg_path) == '680cfce9c120d02870fd38c2a6cf72745e2c8692', 'Unexpected Connect foreground; stop instead of overwriting a new design'
+          assert git_sha(legacy_path) == '84a3baccada9e3ae2e41e04c402b621c5312f963', 'Unexpected original Connect icon'
+          foreground = Image.open(fg_path).convert('RGBA')
+          assert foreground.size == (432, 432), 'Unexpected foreground dimensions'
+          assert foreground.getchannel('A').getbbox() == (95, 101, 339, 324), 'Adaptive foreground was modified'
+          assert foreground.crop((90, 270, 345, 330)).getchannel('A').getbbox(), 'Missing original Connect wordmark'
+
+          # The wordmark was already present in the foreground, but the old light
+          # background made the white lettering invisible on the phone's launcher.
+          # Use a permanent dark background; no changes to the bubble artwork.
+          background = Image.new('RGBA', (432, 432), (13, 13, 16, 255))
+          background.save(bg_path, 'PNG', optimize=True)
+          preview = Image.alpha_composite(background, foreground)
+          preview_path = Path('/tmp/Connect-adaptive-icon-preview.png')
+          preview.save(preview_path, 'PNG', optimize=True)
+
+          # Android 13+ themed/monochrome icons can recolor the mark. The goal is to
+          # retain the same dark Connect identity on both light and dark launchers.
+          for filename in ('ic_launcher.xml', 'ic_launcher_round.xml'):
+              xml_path = assets / 'mipmap-anydpi-v26' / filename
+              xml = xml_path.read_text()
+              assert '<adaptive-icon' in xml and 'ic_launcher_background' in xml and 'ic_launcher_foreground' in xml
+              xml = re.sub(r'\s*<monochrome\b[^>]*/>', '', xml)
+              assert '<monochrome' not in xml
+              xml_path.write_text(xml)
+
+          app_path = root / 'app.json'
+          app = json.loads(app_path.read_text())
+          expo = app['expo']
+          assert expo['android']['package'] == 'com.connect.messenger'
+          assert (expo['version'], expo['android']['versionCode']) in [('3.0.1', 19), ('3.0.2', 20)], 'Unexpected base version: stop'
+          expo['version'] = '3.0.2'
+          expo['android']['versionCode'] = 20
+          expo['android']['adaptiveIcon'].pop('monochromeImage', None)
+          app_path.write_text(json.dumps(app, ensure_ascii=False, indent=2) + '\n')
+
+          package_path = root / 'package.json'
+          package = json.loads(package_path.read_text())
+          assert package['version'] in ('3.0.1', '3.0.2')
+          package['version'] = '3.0.2'
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n')
+
+          lock_path = root / 'package-lock.json'
+          lock = json.loads(lock_path.read_text())
+          assert lock['version'] in ('3.0.1', '3.0.2')
+          lock['version'] = '3.0.2'
+          lock['packages']['']['version'] = '3.0.2'
+          lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2) + '\n')
+
+          verify_path = root / 'scripts/verify-apk.py'
+          verify = verify_path.read_text()
+          replacements = [
+              ("versionCode='19'", "versionCode='20'"),
+              ("versionName='3.0.1'", "versionName='3.0.2'"),
+              ("'version': '3.0.1', 'versionCode': 19", "'version': '3.0.2', 'versionCode': 20"),
+              ("'previousArtifactVersion': '3.0.0 (18)'", "'previousArtifactVersion': '3.0.1 (19)'"),
+              ("'previousArtifactApkSha256': '01c3072e92db381ff2b9cea1f2f1f9f9132719e385e98536f07e42318c71eec4'", "'previousArtifactApkSha256': '89a20772daf9acbeaabd4a60b0aead6effd62df27c0a3baeb6f1013388a4b650'"),
+          ]
+          for old, new in replacements:
+              if old in verify:
+                  verify = verify.replace(old, new)
+              elif new not in verify:
+                  raise SystemExit('Unexpected APK verification code: ' + old)
+          verify_path.write_text(verify)
+
+          test_path = root / 'tests/release-config.test.cjs'
+          test = test_path.read_text()
+          if 'expo.android.versionCode, 19' in test:
+              test = test.replace('expo.android.versionCode, 19', 'expo.android.versionCode, 20')
+          elif 'expo.android.versionCode, 20' not in test:
+              raise SystemExit('Unexpected release version test')
+          test_path.write_text(test)
+
+          print('Connect 3.0.2 (20): original adaptive foreground + dark background + visible Connect lettering')
+          print('Changed only Android icon resources, version metadata, and release verification')
+          PYICON
+          git diff --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: native/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK
+        run: sdkmanager --channel=3 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+      - name: Verify Android sources, sounds, tests, and embedded PWA
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const a=require('./app.json').expo;if(a.android.package!=='com.connect.messenger'||a.version!=='3.0.2'||a.android.versionCode!==20)throw Error('Unexpected Android version')"
+          npm ci --no-audit --no-fund
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm run build:web
+          npm run typecheck
+          npm run typecheck:web
+          npm test -- --test-isolation=none
+          CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)" npm run test:browser
+      - name: Restore release signing key if configured
+        shell: bash
+        env:
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CONNECT_RELEASE_KEYSTORE_BASE64" ]]; then
+            umask 077
+            printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/connect-release.jks"
+            echo "CONNECT_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/connect-release.jks" >> "$GITHUB_ENV"
+          else
+            echo 'Using Expo Android debug fallback; APK signature MUST match 3.0.1 (verified below).'
+          fi
+      - name: Build release APK and check generated adaptive icon
+        working-directory: native
+        shell: bash
+        env:
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install
+          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          ! grep -q '<monochrome' android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          cmp plugins/launcher-icons/drawable-nodpi/ic_launcher_background.png android/app/src/main/res/drawable-nodpi/ic_launcher_background.png
+          cmp plugins/launcher-icons/drawable-nodpi/ic_launcher_foreground.png android/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a -Pkotlin.incremental=false --no-daemon --max-workers=2
+      - name: Verify version, APK contents and signing certificate
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../release/connect-302
+          cp android/app/build/outputs/apk/release/app-release.apk ../release/connect-302/Connect.apk
+          python scripts/verify-apk.py ../release/connect-302/Connect.apk ../release/connect-302
+          python - <<'PYCHECK'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('../release/connect-302/APK-VERIFICATION.json').read_text())
+          assert (report['version'], report['versionCode']) == ('3.0.2', 20)
+          assert report['matchesPreviousArtifactCertificate'] is True, 'Signature differs from installed Connect 3.0.1; cannot install over it'
+          print('APK version and signing certificate verified for upgrade over Connect 3.0.1')
+          PYCHECK
+          cp /tmp/Connect-adaptive-icon-preview.png ../release/connect-302/ICON-PREVIEW.png
+      - name: Commit verified icon-only source update to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- \
+            native/plugins/launcher-icons/drawable-nodpi/ic_launcher_background.png \
+            native/plugins/launcher-icons/mipmap-anydpi-v26/ic_launcher.xml \
+            native/plugins/launcher-icons/mipmap-anydpi-v26/ic_launcher_round.xml \
+            native/app.json native/package.json native/package-lock.json \
+            native/scripts/verify-apk.py native/tests/release-config.test.cjs
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Connect Android 3.0.2: restore dark adaptive icon and wordmark [skip ci]'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+          git rev-parse HEAD > release/connect-302/SOURCE-COMMIT.txt
+      - name: Package and upload final Connect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release/connect-302
+          zip -9 ../Connect-Android-3.0.2.zip ./*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-3.0.2-APK
+          path: release/Connect-Android-3.0.2.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/connect-release.jks"
