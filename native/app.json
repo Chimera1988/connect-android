@@ -3,12 +3,12 @@
     "name": "Connect",
     "slug": "connect-native-v2",
     "scheme": "connect",
-    "version": "3.0.1",
+    "version": "3.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.connect.messenger",
-      "versionCode": 19,
+      "versionCode": 20,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -22,8 +22,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./plugins/launcher-icons/drawable-nodpi/ic_launcher_foreground.png",
-        "backgroundImage": "./plugins/launcher-icons/drawable-nodpi/ic_launcher_background.png",
-        "monochromeImage": "./plugins/launcher-icons/drawable-nodpi/ic_launcher_monochrome.png"
+        "backgroundImage": "./plugins/launcher-icons/drawable-nodpi/ic_launcher_background.png"
       }
     },
     "plugins": [
