@@ -1,0 +1,247 @@
+name: Connect Android 3.0.5 — verified release APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-android-3.0.5-release.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-305-release
+  cancel-in-progress: false
+
+jobs:
+  release-apk:
+    if: github.repository == 'Chimera1988/connect-android' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: 'https://tpwkmoxxzjfdsqsomhhr.supabase.co'
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa'
+      EXPO_PUBLIC_CONNECT_URL: 'https://connect-chat.duckdns.org'
+      # Verified from the successful 3.0.4 (22) build, run 43285977814.
+      # Refuse any APK that cannot update this certificate in place.
+      CONNECT_PREVIOUS_CERT_SHA256: 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c'
+
+    steps:
+      - name: Checkout current Android sources — never restore an old PWA snapshot
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Prepare version 3.0.5 (23) and guard latest media features
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+
+          base=Path('native')
+          app=base/'app.json'
+          cfg=json.loads(app.read_text(encoding='utf8'))
+          expo=cfg['expo']
+          assert expo['name']=='Connect' and expo['android']['package']=='com.connect.messenger'
+          assert expo['android']['versionCode'] in (22,23)
+          assert expo['version'] in ('3.0.4','3.0.5')
+          assert (expo['version'],expo['android']['versionCode']) in (('3.0.4',22),('3.0.5',23))
+          assert next(p[1]['android']['minSdkVersion'] for p in expo['plugins'] if isinstance(p,list) and p[0]=='expo-build-properties')==29
+          expo['version']='3.0.5';expo['android']['versionCode']=23
+          app.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+
+          pkg=base/'package.json';lock=base/'package-lock.json'
+          package=json.loads(pkg.read_text(encoding='utf8'))
+          pinned=json.loads(lock.read_text(encoding='utf8'))
+          assert package['name']==pinned['name']==pinned['packages']['']['name']=='connect-native-v2'
+          assert package['version'] in ('3.0.4','3.0.5')
+          assert pinned['version']==pinned['packages']['']['version']==package['version']
+          package['version']=pinned['version']=pinned['packages']['']['version']='3.0.5'
+          pkg.write_text(json.dumps(package,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+          lock.write_text(json.dumps(pinned,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+
+          test=base/'tests/release-config.test.cjs'
+          source=test.read_text(encoding='utf8')
+          if 'assert.equal(expo.android.versionCode, 22);' in source:
+              source=source.replace('assert.equal(expo.android.versionCode, 22);',
+                                    'assert.equal(expo.android.versionCode, 23);',1)
+          assert 'assert.equal(expo.android.versionCode, 23);' in source
+          test.write_text(source,encoding='utf8')
+
+          verifier=base/'scripts/verify-apk.py'
+          source=verifier.read_text(encoding='utf8')
+          replacements={
+            '''"versionCode='22'" in badging and "versionName='3.0.4'" in badging''':
+              '''"versionCode='23'" in badging and "versionName='3.0.5'" in badging''',
+            "'version': '3.0.4', 'versionCode': 22": "'version': '3.0.5', 'versionCode': 23",
+            "'previousArtifactVersion': '3.0.1 (19)'": "'previousArtifactVersion': '3.0.4 (22)'",
+            "'previousArtifactApkSha256': '89a20772daf9acbeaabd4a60b0aead6effd62df27c0a3baeb6f1013388a4b650'":
+              "'previousArtifactApkSha256': '835f076c896d48205b286beed5d9c77b164d18a0bab9fa0f1cae9bb00a7843f4'",
+          }
+          for before,after in replacements.items():
+              assert before in source or after in source, 'Unexpected verifier layout: '+before
+              source=source.replace(before,after)
+          assert "'version': '3.0.5', 'versionCode': 23" in source
+          verifier.write_text(source,encoding='utf8')
+
+          web=base/'web'
+          # These sources were introduced by the completed media parity workflow.
+          for path,mark in [
+              ('app/page.tsx','cachedChatPoster'),
+              ('lib/profile-thumbnails.ts','profileThumbnailPath'),
+              ('lib/chat-thumbnails.ts','photoPreviewPath'),
+              ('components/ConnectProfileMedia.tsx','previewUrl'),
+          ]:
+              source=(web/path).read_text(encoding='utf8')
+              assert mark in source, 'Latest PWA media fix missing: '+path+' / '+mark
+          native=(base/'src/nativeMediaPreview.ts').read_text(encoding='utf8')
+          assert 'thumbnail?:LocalUpload' in native, 'Native WebP thumbnail fix missing'
+          chat=(base/'src/ConnectNativeChat.tsx').read_text(encoding='utf8')
+          assert "path+'__thumb.webp'" in chat, 'Native upload of WebP previews missing'
+          print('Verified current PWA/Android media parity; preparing 3.0.5 (23).')
+          PY
+          git diff --check
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install verified Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --channel=3 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+
+      - name: Build embedded current PWA, typecheck native and run regressions
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm run build:web
+          npm run typecheck:web
+          npm run typecheck
+          npm test -- --test-isolation=none
+          CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)" npm run test:browser
+          test -s src/generated/pwa.ts
+          test -s web/dist/index.html
+
+      - name: Prepare existing release certificate if configured
+        shell: bash
+        env:
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CONNECT_RELEASE_KEYSTORE_BASE64" ]]; then
+            umask 077
+            printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/connect-release.jks"
+            echo "CONNECT_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/connect-release.jks" >> "$GITHUB_ENV"
+          else
+            echo '::notice::Using the existing Android project signing fallback; fingerprint verification is mandatory.'
+          fi
+
+      - name: Generate native Android project from current source
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          import json
+          app=json.loads(Path('app.json').read_text())['expo']
+          assert app['version']=='3.0.5' and app['android']['versionCode']==23
+          tree=ET.parse('android/app/src/main/AndroidManifest.xml')
+          ns='{http://schemas.android.com/apk/res/android}'
+          application=tree.getroot().find('application')
+          assert application is not None
+          assert application.get(ns+'icon')=='@mipmap/connect_launcher_v303'
+          assert application.get(ns+'roundIcon')=='@mipmap/connect_launcher_v303_round'
+          print('Native icons and Android 10+ package retained')
+          PY
+
+      - name: Compile Android 3.0.5 signed release APK
+        working-directory: native/android
+        shell: bash
+        env:
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a -Pkotlin.incremental=false --no-daemon --max-workers=2
+
+      - name: Verify signed APK, installed-app update compatibility and PWA assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest='release/Connect-Android-3.0.5'
+          mkdir -p "$dest"
+          cp native/android/app/build/outputs/apk/release/app-release.apk "$dest/Connect.apk"
+          python3 native/scripts/verify-apk.py "$dest/Connect.apk" "$dest"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,zipfile
+          root=Path('release/Connect-Android-3.0.5')
+          report=json.loads((root/'APK-VERIFICATION.json').read_text())
+          assert (report['applicationId'],report['version'],report['versionCode'],report['minSdk'])==('com.connect.messenger','3.0.5',23,29)
+          assert report['compatibleWithPreviousCertificate'] is True
+          assert report['matchesPreviousArtifactCertificate'] is True
+          html=Path('native/web/dist/index.html').read_text(encoding='utf8')
+          for token in ['connect-unified-media','connect-media-thumb','connect-full-gallery']:
+              assert token in html, 'Required Connect UI missing: '+token
+          assert 'ConnectTranscript' not in html
+          with zipfile.ZipFile(root/'Connect.apk') as z:
+              assert z.testzip() is None
+          print('Verified: release 3.0.5 (23), original package, matching 3.0.4 signer, required media UI')
+          PY
+
+      - name: Persist verified source version to main and prepare release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- native/app.json native/package.json native/package-lock.json native/scripts/verify-apk.py native/tests/release-config.test.cjs
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Connect Android 3.0.5: verified release configuration [skip ci]'
+            git push origin HEAD:main
+          fi
+          dest='release/Connect-Android-3.0.5'
+          git rev-parse HEAD > "$dest/SOURCE-COMMIT.txt"
+          printf '3.0.5 (23) — media cache/thumbnail parity\nBuilt from the latest verified Connect Android native/web sources.\nNo historical PWA snapshot was fetched.\nPackage: com.connect.messenger\nMinimum Android: 10 (SDK 29)\nSignature is checked against the successfully installed 3.0.4 signing certificate.\n' > "$dest/RELEASE-NOTES.txt"
+
+      - name: Upload ready-to-install APK ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-3.0.5
+          path: release/Connect-Android-3.0.5/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/connect-release.jks"
