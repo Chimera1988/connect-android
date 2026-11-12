@@ -468,8 +468,11 @@ jobs:
           cd native
           npm ci
           npm run typecheck:web
-          npm run typecheck
+          # src/App.tsx imports src/generated/pwa.ts, created by build:web.
+          # Generate the embedded PWA before checking native TypeScript.
           npm run build:web
+          test -s src/generated/pwa.ts
+          npm run typecheck
 
       - name: Commit source only after successful verification
         shell: bash
