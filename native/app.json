@@ -3,12 +3,12 @@
     "name": "Connect",
     "slug": "connect-native-v2",
     "scheme": "connect",
-    "version": "3.0.2",
+    "version": "3.0.3",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.connect.messenger",
-      "versionCode": 20,
+      "versionCode": 21,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -21,9 +21,10 @@
       ],
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./plugins/launcher-icons/drawable-nodpi/ic_launcher_foreground.png",
-        "backgroundImage": "./plugins/launcher-icons/drawable-nodpi/ic_launcher_background.png"
-      }
+        "foregroundImage": "./plugins/launcher-icons/drawable-nodpi/connect_launcher_v303_fg.png",
+        "backgroundImage": "./plugins/launcher-icons/drawable-nodpi/connect_launcher_v303_bg.png"
+      },
+      "icon": "./assets/connect-launcher-v303.png"
     },
     "plugins": [
       "expo-secure-store",
@@ -89,7 +90,7 @@
       "./plugins/withConnectHistory",
       "./plugins/withConnectLauncherIcons"
     ],
-    "icon": "./assets/connect-icon.png",
+    "icon": "./assets/connect-launcher-v303.png",
     "androidStatusBar": {
       "backgroundColor": "#090e14",
       "barStyle": "light-content"

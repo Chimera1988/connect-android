@@ -12,6 +12,6 @@ function copy(platform){
 }
 module.exports=function(config){
  config=withDangerousMod(config,['android',async mod=>{copy(mod.modRequest.platformProjectRoot);return mod;}]);
- return withAndroidManifest(config,mod=>{const app=mod.modResults.manifest.application[0];app.$['android:icon']='@mipmap/ic_launcher';app.$['android:roundIcon']='@mipmap/ic_launcher_round';return mod;});
+ return withAndroidManifest(config,mod=>{const app=mod.modResults.manifest.application[0];app.$['android:icon']='@mipmap/connect_launcher_v303';app.$['android:roundIcon']='@mipmap/connect_launcher_v303_round';return mod;});
 };
 module.exports.copy=copy;
