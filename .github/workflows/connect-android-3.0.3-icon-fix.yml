@@ -1,0 +1,339 @@
+# Connect Android 3.0.3 — launcher icon repair (black + Connect wordmark)
+# Run on main in Chimera1988/connect-android; does not change the PWA.
+name: Connect Android 3.0.3 - actual APK launcher icon repair
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-android-3.0.3-icon-fix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-icon303-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Chimera1988/connect-android' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: 'https://tpwkmoxxzjfdsqsomhhr.supabase.co'
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa'
+      EXPO_PUBLIC_CONNECT_URL: 'https://connect-chat.duckdns.org'
+      CONNECT_PREVIOUS_CERT_SHA256: ${{ vars.CONNECT_PREVIOUS_CERT_SHA256 || 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image processing tools
+        run: python -m pip install --disable-pip-version-check 'Pillow==11.3.0'
+      - name: Replace all Android launcher icon entry points with unique branded resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'CONNECT_ICON_303'
+          from pathlib import Path
+          from PIL import Image
+          import json, subprocess
+
+          root = Path('native')
+          app_path = root/'app.json'
+          app = json.loads(app_path.read_text(encoding='utf-8'))
+          expo = app['expo']
+          android = expo['android']
+          current=(expo['version'], android['versionCode'], android['package'])
+          assert current in [('3.0.2',20,'com.connect.messenger'), ('3.0.3',21,'com.connect.messenger')], f'Unexpected source version: {current}'
+
+          src=root/'plugins/launcher-icons'
+          base=src/'mipmap-xxxhdpi/ic_launcher.png'
+          original_fg=src/'drawable-nodpi/ic_launcher_foreground.png'
+          assert base.is_file() and original_fg.is_file(), 'Original Connect assets unavailable'
+          assert subprocess.check_output(['git','hash-object',str(base)],text=True).strip()=='84a3baccada9e3ae2e41e04c402b621c5312f963', 'Unknown Connect legacy icon - stop'
+          assert subprocess.check_output(['git','hash-object',str(original_fg)],text=True).strip()=='680cfce9c120d02870fd38c2a6cf72745e2c8692', 'Unknown Connect wordmark - stop'
+          old=Image.open(base).convert('RGBA')
+          fg=Image.open(original_fg).convert('RGBA')
+          assert old.size==(192,192) and fg.size==(432,432), 'Unexpected brand artwork size'
+          assert fg.getchannel('A').getbbox() == (95,101,339,324), 'Wrong foreground image'
+
+          # Unique resource names force Android/MIUI and the APK file manager to use
+          # the NEW app icon, not stale 'ic_launcher' assets left in generated projects.
+          name='connect_launcher_v303'
+          res=src
+          bg_rgb=(13,13,16)
+          new_bg=Image.new('RGBA',(432,432),(*bg_rgb,255))
+          (res/'drawable-nodpi').mkdir(parents=True,exist_ok=True)
+          new_bg_path=res/'drawable-nodpi'/f'{name}_bg.png'
+          new_bg.save(new_bg_path,optimize=True)
+
+          # Android's adaptive safe-circle radius is 66/108 of the icon's diameter.
+          # Scale the ORIGINAL silver wordmark so the whole title survives circular masks.
+          new_fg=Image.new('RGBA',(432,432),(0,0,0,0))
+          bbox=fg.getchannel('A').getbbox()
+          logo=fg.crop(bbox)
+          scale=.77
+          w=max(1,round(logo.width*scale)); h=max(1,round(logo.height*scale))
+          logo=logo.resize((w,h),Image.Resampling.LANCZOS)
+          x=(432-w)//2; y=(432-h)//2
+          new_fg.alpha_composite(logo,(x,y))
+          assert ((w/2)**2+(h/2)**2)**.5 < 132, 'Adaptive wordmark would clip'
+          new_fg_path=res/'drawable-nodpi'/f'{name}_fg.png'
+          new_fg.save(new_fg_path,optimize=True)
+
+          # PNG fallbacks on *every* density, including file-manager APK previews.
+          # No launcher mode should see a white background, and the Connect wordmark
+          # remains embedded in the exact original classic artwork.
+          densities={'mdpi':48,'hdpi':72,'xhdpi':96,'xxhdpi':144,'xxxhdpi':192}
+          for density,px in densities.items():
+              folder=res/f'mipmap-{density}'
+              folder.mkdir(parents=True,exist_ok=True)
+              picture=old.resize((px,px),Image.Resampling.LANCZOS)
+              for file in (f'{name}.png',f'{name}_round.png'):
+                  picture.save(folder/file,optimize=True)
+
+          # Android 8+ adaptive icons: distinct black background + original silver logo.
+          folder=res/'mipmap-anydpi-v26'
+          folder.mkdir(parents=True,exist_ok=True)
+          xml=f'''<?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/{name}_bg" />
+              <foreground android:drawable="@drawable/{name}_fg" />
+          </adaptive-icon>
+          '''
+          for file in (f'{name}.xml',f'{name}_round.xml'):
+              (folder/file).write_text(xml,encoding='utf-8')
+
+          # Expo's own icon generator must ALSO use the actual black Connect mark.
+          # The custom native manifest overrides its generic launcher resource.
+          app_icon=root/'assets/connect-launcher-v303.png'
+          old.resize((512,512),Image.Resampling.LANCZOS).save(app_icon,optimize=True)
+          expo['icon']='./assets/connect-launcher-v303.png'
+          android['icon']='./assets/connect-launcher-v303.png'
+          android['adaptiveIcon']={
+            'foregroundImage':f'./plugins/launcher-icons/drawable-nodpi/{name}_fg.png',
+            'backgroundImage':f'./plugins/launcher-icons/drawable-nodpi/{name}_bg.png'
+          }
+          expo['version']='3.0.3'
+          android['versionCode']=21
+          app_path.write_text(json.dumps(app,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
+          plugin=root/'plugins/withConnectLauncherIcons.js'
+          text=plugin.read_text(encoding='utf-8')
+          old_refs=("app.$['android:icon']='@mipmap/ic_launcher'", "app.$['android:roundIcon']='@mipmap/ic_launcher_round'")
+          new_refs=(f"app.$['android:icon']='@mipmap/{name}'",f"app.$['android:roundIcon']='@mipmap/{name}_round'")
+          for old_ref,new_ref in zip(old_refs,new_refs):
+              if old_ref in text:
+                  text=text.replace(old_ref,new_ref,1)
+              else:
+                  assert new_ref in text, f'Manifest plugin changed unexpectedly: {old_ref}'
+          plugin.write_text(text,encoding='utf-8')
+
+          pkg=root/'package.json'
+          j=json.loads(pkg.read_text(encoding='utf-8'))
+          assert j['version'] in ('3.0.2','3.0.3')
+          j['version']='3.0.3'
+          pkg.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          lock=root/'package-lock.json'
+          j=json.loads(lock.read_text(encoding='utf-8'))
+          assert j['version'] in ('3.0.2','3.0.3')
+          j['version']=j['packages']['']['version']='3.0.3'
+          lock.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
+          # Keep the existing full APK integrity/signature test, update only release ID.
+          def replace_once(path, old, new):
+              c=path.read_text(encoding='utf-8')
+              if old in c:
+                  assert c.count(old)==1, f'Ambiguous version marker in {path}'
+                  c=c.replace(old,new,1)
+                  path.write_text(c,encoding='utf-8')
+              else:
+                  assert new in c, f'Version marker missing from {path}: {old}'
+          verify=root/'scripts/verify-apk.py'
+          for old_val,new_val in [
+              ("versionCode='20'","versionCode='21'"),
+              ("versionName='3.0.2'","versionName='3.0.3'"),
+              ("'version': '3.0.2'","'version': '3.0.3'"),
+              ("'versionCode': 20","'versionCode': 21")
+          ]:
+              replace_once(verify,old_val,new_val)
+          replace_once(root/'tests/release-config.test.cjs',
+              'assert.equal(expo.android.versionCode, 20);',
+              'assert.equal(expo.android.versionCode, 21);')
+
+          # Scope: no PWA, calls, message transport or user settings touched.
+          changed=subprocess.check_output(['git','status','--porcelain','-uall','--','native'],text=True).splitlines()
+          allowed={
+           'native/app.json','native/package.json','native/package-lock.json',
+           'native/scripts/verify-apk.py','native/tests/release-config.test.cjs',
+           'native/plugins/withConnectLauncherIcons.js','native/assets/connect-launcher-v303.png'
+          }
+          allowed.update('native/plugins/launcher-icons/drawable-nodpi/'+name+s+'.png' for s in ('_bg','_fg'))
+          allowed.update('native/plugins/launcher-icons/mipmap-anydpi-v26/'+name+s+'.xml' for s in ('','_round'))
+          for density in densities:
+              allowed.update('native/plugins/launcher-icons/mipmap-'+density+'/'+name+s+'.png' for s in ('','_round'))
+          actual={line[3:] for line in changed}
+          assert actual<=allowed, f'Unexpected change outside launcher assets: {actual-allowed}'
+          print('New versioned black Connect app icons prepared:', sorted(actual))
+          CONNECT_ICON_303
+          git diff --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK
+        run: sdkmanager --channel=3 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+      - name: Verify native source and run existing tests
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const a=require('./app.json').expo;if(a.version!=='3.0.3'||a.android.versionCode!==21||a.android.package!=='com.connect.messenger')throw Error('Wrong release ID')"
+          npm ci --no-audit --no-fund
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm run build:web
+          npm run typecheck
+          npm run typecheck:web
+          npm test -- --test-isolation=none
+          CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)" npm run test:browser
+      - name: Prepare release certificate, if configured
+        env:
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CONNECT_RELEASE_KEYSTORE_BASE64" ]]; then
+            umask 077
+            printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/connect-release.jks"
+            echo "CONNECT_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/connect-release.jks" >> "$GITHUB_ENV"
+          else
+            echo '::warning::Using the configured Android signing fallback; final signature comparison is mandatory.'
+          fi
+      - name: Generate Android project and assert BOTH icon mappings before building
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform android --no-install
+          python - <<'VERIFY_ICON_SOURCES'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          from PIL import Image
+          res=Path('android/app/src/main/res')
+          root=Path('android/app/src/main')
+          ns='{http://schemas.android.com/apk/res/android}'
+          manifest=ET.parse(root/'AndroidManifest.xml').getroot()
+          app=manifest.find('application')
+          assert app is not None, 'Missing application manifest element'
+          assert app.attrib.get(ns+'icon') == '@mipmap/connect_launcher_v303', 'Manifest still points at old icon'
+          assert app.attrib.get(ns+'roundIcon') == '@mipmap/connect_launcher_v303_round', 'Manifest still points at old round icon'
+          for suffix in ('','_round'):
+            xml=res/'mipmap-anydpi-v26'/('connect_launcher_v303'+suffix+'.xml')
+            assert xml.exists(), 'Adaptive icon resource missing'
+            parsed=ET.parse(xml).getroot()
+            assert parsed.tag=='adaptive-icon'
+            children={e.tag:e.attrib.get(ns+'drawable') for e in parsed}
+            assert children.get('background')=='@drawable/connect_launcher_v303_bg'
+            assert children.get('foreground')=='@drawable/connect_launcher_v303_fg'
+            assert 'monochrome' not in children, 'Unexpected themed icon override'
+          for density,px in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
+            for suffix in ('','_round'):
+              png=res/('mipmap-'+density)/('connect_launcher_v303'+suffix+'.png')
+              assert png.is_file(), 'Missing dark PNG fallback: '+str(png)
+              im=Image.open(png).convert('RGBA')
+              assert im.size==(px,px) and im.getpixel((px//2,px//2))[3]>0, 'Invalid legacy icon '+str(png)
+          bg=Image.open(res/'drawable-nodpi/connect_launcher_v303_bg.png').convert('RGBA')
+          assert bg.getpixel((216,216))==(13,13,16,255), 'Background is not black'
+          fg=Image.open(res/'drawable-nodpi/connect_launcher_v303_fg.png').convert('RGBA')
+          assert fg.getchannel('A').getbbox(), 'Missing silver Connect foreground'
+          print('Manifest + adaptive + legacy icon resource mappings verified in generated Android app')
+          VERIFY_ICON_SOURCES
+      - name: Compile APK, tests and release lint
+        working-directory: native/android
+        env:
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:testReleaseUnitTest :app:lintVitalRelease :app:assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a -Pkotlin.incremental=false --no-daemon --max-workers=2
+      - name: Verify the actual APK launcher resources and signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/connect-303
+          cp native/android/app/build/outputs/apk/release/app-release.apk release/connect-303/Connect.apk
+          python3 native/scripts/verify-apk.py release/connect-303/Connect.apk release/connect-303
+          python - <<'CHECK_APK_ICON'
+          from pathlib import Path
+          import json,subprocess,zipfile
+          apk=Path('release/connect-303/Connect.apk')
+          report=json.loads(Path('release/connect-303/APK-VERIFICATION.json').read_text())
+          assert report['version']=='3.0.3' and report['versionCode']==21
+          assert report['matchesPreviousArtifactCertificate'] is True, 'Different signature; cannot install over 3.0.2'
+          with zipfile.ZipFile(apk) as z:
+            files=z.namelist()
+            for name in ('connect_launcher_v303.xml','connect_launcher_v303_round.xml','connect_launcher_v303.png','connect_launcher_v303_round.png'):
+              assert any(f.rsplit('/',1)[-1]==name for f in files), 'Compiled APK missing '+name
+          aapt=Path(__import__('os').environ['ANDROID_HOME'])/'build-tools/37.0.0/aapt'
+          resources=subprocess.check_output([str(aapt),'dump','resources',str(apk)],text=True)
+          for name in ['connect_launcher_v303','connect_launcher_v303_round','connect_launcher_v303_fg','connect_launcher_v303_bg']:
+            assert name in resources, 'APK resource table has no '+name
+          print('Actual APK includes distinct black adaptive icon and fallback icons. Certificate OK.')
+          CHECK_APK_ICON
+          python - <<'PREVIEW'
+          from pathlib import Path
+          from PIL import Image
+          src=Path('native/plugins/launcher-icons/drawable-nodpi')
+          bg=Image.open(src/'connect_launcher_v303_bg.png').convert('RGBA')
+          fg=Image.open(src/'connect_launcher_v303_fg.png').convert('RGBA')
+          Image.alpha_composite(bg,fg).save('release/connect-303/ICON-PREVIEW.png')
+          Image.open('native/assets/connect-launcher-v303.png').save('release/connect-303/FALLBACK-PREVIEW.png')
+          PREVIEW
+      - name: Save verified Android-only launcher update in main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A -- native/app.json native/package.json native/package-lock.json \
+            native/scripts/verify-apk.py native/tests/release-config.test.cjs \
+            native/plugins/withConnectLauncherIcons.js \
+            native/assets/connect-launcher-v303.png \
+            native/plugins/launcher-icons/drawable-nodpi/connect_launcher_v303_bg.png \
+            native/plugins/launcher-icons/drawable-nodpi/connect_launcher_v303_fg.png \
+            native/plugins/launcher-icons/mipmap-anydpi-v26/connect_launcher_v303.xml \
+            native/plugins/launcher-icons/mipmap-anydpi-v26/connect_launcher_v303_round.xml \
+            native/plugins/launcher-icons/mipmap-*/connect_launcher_v303*.png
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Connect Android 3.0.3: use actual branded launcher icon in manifest and APK [skip ci]'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+          git rev-parse HEAD > release/connect-303/SOURCE-COMMIT.txt
+          sha256sum release/connect-303/Connect.apk > release/connect-303/SHA256.txt
+          (cd release/connect-303 && zip -9 ../Connect-Android-3.0.3.zip ./*)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-3.0.3-APK
+          path: release/Connect-Android-3.0.3.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/connect-release.jks"
