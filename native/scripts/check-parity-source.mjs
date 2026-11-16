@@ -17,7 +17,12 @@ if(pkg.dependencies.expo!=='~58.0.0'||pkg.dependencies['react-native']!=='0.88.1
 if(process.argv.includes('--tools')){
  const toml=readFileSync(resolve(root,'node_modules/react-native/gradle/libs.versions.toml'),'utf8');
  const get=key=>{const m=toml.match(new RegExp('^'+key+' = "([^"\\n]+)"','m'));if(!m)throw Error('SOURCE_DRIFT: tool '+key);return m[1];};
- const values={compileSdk:get('compileSdk'),buildTools:get('buildTools'),ndk:get('ndkVersion')};
+ const compileSdk=get('compileSdk');
+ // Gradle's API number is not the SDK Manager package ID. API 37 is published
+ // as android-37.0 (also used by the successful 3.0.5 release workflow).
+ const sdkPlatform=({'37':'platforms;android-37.0'})[compileSdk];
+ if(!sdkPlatform)throw Error('SOURCE_DRIFT: unreviewed SDK platform for API '+compileSdk);
+ const values={compileSdk,sdkPlatform,buildTools:get('buildTools'),ndk:get('ndkVersion')};
  if(JSON.stringify(values)!==JSON.stringify(manifest.androidTools))throw Error('SOURCE_DRIFT: Android build tools');
  const wrapper=readFileSync(resolve(root,'android/gradle/wrapper/gradle-wrapper.properties'),'utf8');
  if(!wrapper.includes('gradle-9.4.1-bin.zip'))throw Error('SOURCE_DRIFT: Gradle (requires reviewed Java 21)');
