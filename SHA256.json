@@ -1,0 +1,10 @@
+{
+  ".github/workflows/connect-android-parity-notifications-final.yml": "eb5c05df2db840a15b878177db09c097780118b068a229078dbce6381df43c0b",
+  "native/CI_SDK_REPAIR_REPORT.md": "c5f561d7db6c92346a50a5d0e42a7880b505d5e6d11495aee760e00ec061dfc9",
+  "native/PARITY_SOURCE_LOCK.json": "dbec1cf3c13cba0de3119ec32d33621d7de1f5151f5800fd57a43b68e24a247b",
+  "native/TEST_RESULTS.md": "6998976fb4c854dcd04c39ddf93fc5e7411a2d9009e616a626945caa96bb61ad",
+  "native/scripts/check-parity-source.mjs": "6c06a0596f32c43082abca4050aa4a9e4beaf480a41787a8ffcf3bab4041ecb8",
+  "native/tests/source-lock.test.cjs": "e099e5e72a17ff05e630884c0f567f7b81b69f7d5cb307a9b6121842d93e8a5e",
+  "Connect-Android-CI-repair.patch": "361f91ae98f8f8ccb9c9525cfda55474d7ff22bef0638881a81d35023628cfec",
+  "README-DELIVERY.txt": "efe601c97676d9d36db7b3c6fe5d8fadb36ed26ce17949faa6473147631b90a7"
+}
