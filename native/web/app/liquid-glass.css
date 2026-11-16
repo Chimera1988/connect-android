@@ -2794,3 +2794,76 @@
 .connect-app .connect-android-notification-settings .connect-android-advanced summary {cursor:pointer;color:var(--text);padding:8px 4px;font-size:13px;}
 .connect-app .connect-android-notification-settings .connect-android-advanced button {display:block;margin:9px 0;width:100%;}
 .connect-app .connect-android-notification-settings .connect-sound-diagnostics {font-size:10px;max-height:220px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;}
+
+
+/* CONNECT_ANDROID_PWA_DOCK_PARITY_20261116
+   Same screen ownership and sliding capsule as the verified PWA (14 Nov).
+   Keep all FOUR physical slots fixed even while the Calls portal mounts.
+   A transparent capsule travels; the actual navigation buttons never move.
+   Android 10 WebView uses the same click sequence as iOS PWA. */
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav {
+  display:grid !important;
+  grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+  isolation:isolate;
+  align-items:stretch;
+  justify-content:stretch;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav::before {
+  content:"" !important;
+  display:block !important;
+  width:calc((100% - 8px) / 4) !important;
+  transform:translate3d(0,0,0);
+  transition:transform .34s cubic-bezier(.2,1.12,.34,1);
+  will-change:transform;
+  pointer-events:none;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:has(> .nav-tab:nth-child(2).selected):not(:has(> .connect-calls-tab.selected))::before {
+  transform:translate3d(100%,0,0) !important;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:has(> .connect-calls-tab.selected)::before {
+  transform:translate3d(200%,0,0) !important;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:not(:has(> .connect-calls-tab.selected)):has(> .nav-tab:nth-child(3):not(.connect-calls-tab).selected)::before {
+  transform:translate3d(300%,0,0) !important;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab {
+  min-width:0;
+  position:relative;
+  z-index:1;
+  background:transparent !important;
+  border-color:transparent !important;
+  box-shadow:none !important;
+  transition:color .23s ease !important;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab.selected {
+  background:transparent !important;
+  border-color:transparent !important;
+  box-shadow:none !important;
+  color:var(--accent);
+}
+@media(prefers-reduced-motion:reduce) {
+  .connect-app[data-connect-pwa-list-parity="true"] .bottom-nav::before {
+    transition:none !important;
+    will-change:auto;
+  }
+}
+/* Unlike general .connect-notifications > div, the two sound sections must
+   stretch to the SAME horizontal edges as the surrounding settings cards. */
+.connect-app .connect-android-notification-settings .connect-android-sounds {
+  width:100% !important;
+  max-width:none !important;
+  align-items:stretch !important;
+  box-sizing:border-box;
+}
+.connect-app .connect-android-notification-settings .connect-sound-card {
+  width:100% !important;
+  max-width:none !important;
+  min-width:0;
+  margin:0 !important;
+  align-self:stretch !important;
+  box-sizing:border-box;
+}
+.connect-app .connect-android-notification-settings .connect-sound-icon-row {
+  width:100%;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}

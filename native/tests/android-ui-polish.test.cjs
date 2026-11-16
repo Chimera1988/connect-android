@@ -29,12 +29,15 @@ test('Android sound defaults really map to Connect bundled resources',()=>{
  assert.match(native,/connect_ringtone/);
  assert.match(native,/getConnectSoundChannel/);
 });
-test('Android bottom dock has four stable slots and no moving pseudo-highlight',()=>{
+test('Android bottom dock has four fixed slots and PWA sliding glass capsule',()=>{
  const css=read('web/app/liquid-glass.css');
- assert.match(css,/CONNECT_ANDROID_STATIC_DOCK_UI_20261116/);
- assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
- assert.match(css,/\.bottom-nav::before\s*\{[^}]*display:none/s);
- assert.match(css,/\.connect-calls-tab\s*\{[^}]*grid-column:3/s);
+ const parity=css.split('CONNECT_ANDROID_PWA_DOCK_PARITY_20261116')[1];
+ assert.ok(parity,'Android must use verified PWA navigation behavior');
+ assert.match(parity,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+ assert.match(parity,/\.bottom-nav::before\s*\{[^}]*display:block\s*!important/s);
+ assert.match(parity,/\.connect-calls-tab\.selected\)::before\s*\{[^}]*translate3d\(200%,/s);
+ assert.match(parity,/nth-child\(3\):not\(\.connect-calls-tab\)\.selected\)::before\s*\{[^}]*translate3d\(300%,/s);
+ assert.match(parity,/\.bottom-nav > \.nav-tab\.selected\s*\{[^}]*background:transparent\s*!important/s);
 });
 test('Android calls screen does not place a second glass curtain over chat waves',()=>{
  const css=read('web/app/liquid-glass.css');
