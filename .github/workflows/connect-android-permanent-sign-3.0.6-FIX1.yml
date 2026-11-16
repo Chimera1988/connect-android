@@ -1,0 +1,279 @@
+name: Connect Android 3.0.6 | Permanent Release Certificate FIX1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: connect-android-permanent-sign-306
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sign existing verified APK with private Connect release certificate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      EXPECTED_RELEASE_CERT: a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130
+      EXPECTED_TEST_APK_SHA256: 5ed26285414e6f3085eb32975f66b6c32cb36b5efa38178869bb4a7d793b6302
+      EXPECTED_OLD_DEBUG_CERT: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+    steps:
+      - name: Require the permanent signing material from GitHub Secrets
+        shell: bash
+        env:
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CONNECT_RELEASE_KEYSTORE_BASE64" || -z "$CONNECT_RELEASE_STORE_PASSWORD" || -z "$CONNECT_RELEASE_KEY_ALIAS" || -z "$CONNECT_RELEASE_KEY_PASSWORD" ]]; then
+            echo '::error::Configure the four CONNECT_RELEASE_* repository secrets; do not upload a .jks file to GitHub source.'
+            exit 1
+          fi
+          if [[ "$CONNECT_RELEASE_KEY_ALIAS" != connect-release ]]; then
+            echo '::error::Wrong key alias. Use the permanent Connect release key generated for this project.'
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/connect-release.jks"
+          test -s "$RUNNER_TEMP/connect-release.jks"
+          export CONNECT_RELEASE_KEYSTORE_FILE="$RUNNER_TEMP/connect-release.jks"
+          keytool -list -v -keystore "$CONNECT_RELEASE_KEYSTORE_FILE" -alias "$CONNECT_RELEASE_KEY_ALIAS" \
+            -storepass:env CONNECT_RELEASE_STORE_PASSWORD > "$RUNNER_TEMP/key-info.txt"
+          python3 - <<'PY'
+          import os,re,pathlib
+          cert=pathlib.Path(os.environ['RUNNER_TEMP'],'key-info.txt').read_text()
+          match=re.search(r'SHA256:\s*([0-9A-Fa-f:]+)',cert)
+          assert match, 'Release certificate fingerprint unavailable'
+          actual=match.group(1).replace(':','').lower()
+          assert actual==os.environ['EXPECTED_RELEASE_CERT'], 'WRONG RELEASE CERTIFICATE: refusing to sign an incompatible update'
+          assert actual!=os.environ['EXPECTED_OLD_DEBUG_CERT'], 'Refusing old Expo debug certificate'
+          print('Permanent release signing certificate verified:',actual)
+          PY
+
+      - uses: android-actions/setup-android@v4
+      - name: Install the Android SDK signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install 'build-tools;37.0.0' 'platform-tools'
+          echo "$ANDROID_HOME/build-tools/37.0.0" >> "$GITHUB_PATH"
+
+      - name: Get the last successful Connect 3.0.6 APK without changing its application code
+        uses: actions/download-artifact@v4
+        with:
+          name: Connect-Android-3.0.6-Voice-Wave-TEST-APK
+          repository: Chimera1988/connect-android
+          run-id: 43856998519
+          github-token: ${{ github.token }}
+          path: input-apk
+
+      - name: Verify original APK bytes, identity and its previous signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s input-apk/Connect-Android-3.0.6-TEST.apk
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,json,hashlib
+          apk=Path('input-apk/Connect-Android-3.0.6-TEST.apk')
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          assert digest==os.environ['EXPECTED_TEST_APK_SHA256'], 'Original APK digest mismatch'
+          meta=json.loads(Path('input-apk/APK-TEST-VERIFICATION.json').read_text())
+          assert meta['apkSha256']==digest, 'Original APK report does not match its bytes'
+          assert meta['applicationId']=='com.connect.messenger'
+          assert meta['version']=='3.0.6' and meta['versionCode']==24 and meta['minSdk']==29
+          assert meta['signerSha256']==os.environ['EXPECTED_OLD_DEBUG_CERT']
+          print('Original exact tested APK verified: SHA-256',digest)
+          PY
+          # Cryptographic validation via the Android SDK, then a binary v2 certificate
+          # check that does not rely on SDK-version-dependent apksigner output text.
+          apksigner verify --min-sdk-version 29 --verbose --print-certs input-apk/Connect-Android-3.0.6-TEST.apk > "$RUNNER_TEMP/source-apksigner.txt"
+          cat > "$RUNNER_TEMP/connect-apk-cert.py" <<'PY'
+          #!/usr/bin/env python3
+          """Extract APK Signature Scheme v2 first signer certificate fingerprint.
+          Call this after apksigner verify, which verifies the signature cryptographically.
+          Independent of SDK versions' human-readable apksigner output text.
+          """
+          import hashlib
+          import struct
+          import sys
+          from pathlib import Path
+          
+          BLOCK_MAGIC = b'APK Sig Block 42'
+          V2_BLOCK_ID = 0x7109871A
+          
+          
+          def unpack_size_prefixed(buf, offset):
+              if len(buf) < offset + 4:
+                  raise ValueError('Truncated length prefix in APK signature')
+              length = struct.unpack_from('<I', buf, offset)[0]
+              start = offset + 4
+              end = start + length
+              if end > len(buf):
+                  raise ValueError('Truncated APK signature item')
+              return buf[start:end], end
+          
+          
+          def apk_signer_fingerprint(apk):
+              binary = Path(apk).read_bytes()
+              end_of_central_directory = binary.rfind(b'PK\x05\x06')
+              if end_of_central_directory < 0 or end_of_central_directory + 22 > len(binary):
+                  raise ValueError('APK ZIP end of central directory not found')
+              comment_size = struct.unpack_from('<H', binary, end_of_central_directory + 20)[0]
+              if end_of_central_directory + 22 + comment_size != len(binary):
+                  raise ValueError('Unexpected data after ZIP end of central directory')
+              central_directory = struct.unpack_from('<I', binary, end_of_central_directory + 16)[0]
+              if central_directory < 32 or binary[central_directory - 16:central_directory] != BLOCK_MAGIC:
+                  raise ValueError('APK Signing Block missing')
+              footer_size = struct.unpack_from('<Q', binary, central_directory - 24)[0]
+              block_start = central_directory - footer_size - 8
+              if block_start < 0 or struct.unpack_from('<Q', binary, block_start)[0] != footer_size:
+                  raise ValueError('APK Signing Block size mismatch')
+              pos = block_start + 8
+              fingerprints = []
+              while pos < central_directory - 24:
+                  if pos + 12 > central_directory - 24:
+                      raise ValueError('Malformed APK signature ID/value entry')
+                  entry_length = struct.unpack_from('<Q', binary, pos)[0]
+                  if entry_length < 4 or pos + 8 + entry_length > central_directory - 24:
+                      raise ValueError('Malformed APK signature entry size')
+                  entry_id = struct.unpack_from('<I', binary, pos + 8)[0]
+                  entry = binary[pos + 12:pos + 8 + entry_length]
+                  pos += 8 + entry_length
+                  if entry_id != V2_BLOCK_ID:
+                      continue
+                  signers, offset = unpack_size_prefixed(entry, 0)
+                  if offset != len(entry):
+                      raise ValueError('Unexpected data in v2 signer sequence')
+                  signer, offset = unpack_size_prefixed(signers, 0)
+                  if offset != len(signers):
+                      raise ValueError('Multiple APK signers require explicit review')
+                  signed_data, _ = unpack_size_prefixed(signer, 0)
+                  _, offset = unpack_size_prefixed(signed_data, 0)  # content digests
+                  certificates, _ = unpack_size_prefixed(signed_data, offset)
+                  der, _ = unpack_size_prefixed(certificates, 0)
+                  if not der or der[0] != 0x30:
+                      raise ValueError('Missing or malformed X.509 signer certificate')
+                  fingerprints.append(hashlib.sha256(der).hexdigest())
+              if len(fingerprints) != 1:
+                  raise ValueError('Expected exactly one APK v2 signer certificate')
+              return fingerprints[0]
+          
+          
+          if __name__ == '__main__':
+              apk, expected = sys.argv[1:3]
+              actual = apk_signer_fingerprint(apk)
+              if actual != expected.lower().replace(':', ''):
+                  raise SystemExit('APK SIGNER MISMATCH: expected %s, got %s' % (expected, actual))
+              print('Verified APK v2 certificate SHA-256:', actual)
+          PY
+          python3 "$RUNNER_TEMP/connect-apk-cert.py" input-apk/Connect-Android-3.0.6-TEST.apk "$EXPECTED_OLD_DEBUG_CERT"
+
+      - name: Align then sign with the permanent non-debug Connect certificate
+        shell: bash
+        env:
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p output
+          zipalign -f -p 4 input-apk/Connect-Android-3.0.6-TEST.apk "$RUNNER_TEMP/connect-aligned.apk"
+          zipalign -c -p 4 "$RUNNER_TEMP/connect-aligned.apk"
+          apksigner sign \
+            --ks "$RUNNER_TEMP/connect-release.jks" --ks-type JKS \
+            --ks-key-alias "$CONNECT_RELEASE_KEY_ALIAS" \
+            --ks-pass env:CONNECT_RELEASE_STORE_PASSWORD \
+            --key-pass env:CONNECT_RELEASE_KEY_PASSWORD \
+            --min-sdk-version 29 \
+            --out output/Connect.apk "$RUNNER_TEMP/connect-aligned.apk"
+          apksigner verify --min-sdk-version 29 --verbose --print-certs output/Connect.apk > output/APK-SIGNATURE.txt
+          zipalign -c -p 4 output/Connect.apk
+
+      - name: Verify signer, app identity and unchanged packaged code/media
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,re,json,zipfile,hashlib,subprocess
+          src=Path('input-apk/Connect-Android-3.0.6-TEST.apk')
+          apk=Path('output/Connect.apk')
+          # apksigner has already verified cryptographic integrity for Android 10.
+          # Verify the exact signer through APK Signature Scheme v2 binary data.
+          subprocess.run(['python3',os.path.join(os.environ['RUNNER_TEMP'],'connect-apk-cert.py'),str(apk),os.environ['EXPECTED_RELEASE_CERT']],check=True)
+          badging=subprocess.check_output(['aapt','dump','badging',str(apk)],text=True)
+          package=next(x for x in badging.splitlines() if x.startswith('package:'))
+          assert "name='com.connect.messenger'" in package, 'Package changed'
+          assert "versionCode='24'" in package and "versionName='3.0.6'" in package, 'App version changed'
+          assert "sdkVersion:'29'" in badging, 'Android 10 minSdk changed'
+          assert 'application-debuggable' not in badging, 'A debuggable APK must not be released'
+          def payload_manifest(path):
+            result={}
+            with zipfile.ZipFile(path) as z:
+              assert z.testzip() is None, 'Damaged APK ZIP'
+              for name in z.namelist():
+                if name.upper().startswith('META-INF/'): continue  # Signer metadata only
+                if name.endswith('/'): continue
+                h=hashlib.sha256()
+                with z.open(name) as f:
+                  for chunk in iter(lambda:f.read(1048576),b''):h.update(chunk)
+                result[name]=h.hexdigest()
+            return result
+          old=payload_manifest(src)
+          new=payload_manifest(apk)
+          assert old==new, 'Application payload changed during re-signing'
+          report={
+            'applicationId':'com.connect.messenger',
+            'version':'3.0.6','versionCode':24,'minSdk':29,
+            'signerSha256':os.environ['EXPECTED_RELEASE_CERT'],
+            'originalSignerSha256':os.environ['EXPECTED_OLD_DEBUG_CERT'],
+            'originalApkSha256':os.environ['EXPECTED_TEST_APK_SHA256'],
+            'signedApkSha256':hashlib.sha256(apk.read_bytes()).hexdigest(),
+            'payloadFilesUnchanged':len(new),'payloadSha256Unchanged':True,
+            'signatureVerifiedWithAndroid10Minimum':True,
+            'inPlaceUpdateCompatibleWithOldExpoDebugApk':False,
+            'deviceInstalledAndTested':False,
+            'sourceWorkflowRun':43856998519,
+          }
+          Path('output/APK-VERIFICATION.json').write_text(json.dumps(report,indent=2)+'\n')
+          Path('output/SHA256.txt').write_text(report['signedApkSha256']+'  Connect.apk\n')
+          print('Signed release certificate:',report['signerSha256'])
+          print('Unchanged original packaged files:',report['payloadFilesUnchanged'])
+          print('Signed release APK SHA-256:',report['signedApkSha256'])
+          PY
+          cat > output/READ-ME-FIRST.txt <<'TXT'
+          Connect 3.0.6 — APK with the permanent private Connect release certificate.
+          This is the verified November 16 build, with its application payload unchanged.
+          Android signature verification passed for minimum SDK 29.
+          NO DEVICE INSTALL TEST performed: Android 10 calls, audio and notifications still require real-device testing.
+
+          IMPORTANT: THIS APK WILL NOT INSTALL OVER THE PREVIOUS EXPO-DEBUG-SIGNED CONNECT.
+          SAVE LOCAL-ONLY DATA, THEN UNINSTALL THE OLD APP BEFORE INSTALLING THIS RELEASE.
+          Your Supabase account, server messages and server media remain in place.
+          Keep your original private connect-release.jks and GitHub signing secrets forever.
+          Do not publish private signing keys or passwords in the repository or GitHub Actions artifacts.
+          TXT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Connect-Android-3.0.6-PERMANENT-RELEASE
+          path: output/
+          if-no-files-found: error
+          retention-days: 60
+
+      - name: Delete temporary signing material and aligned original
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/connect-release.jks" "$RUNNER_TEMP/key-info.txt" \
+            "$RUNNER_TEMP/source-apksigner.txt" "$RUNNER_TEMP/connect-aligned.apk"
