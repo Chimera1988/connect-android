@@ -76,3 +76,191 @@
   object-fit: cover !important;
   border-radius: 50% !important;
 }
+
+/* CONNECT_PWA_CALL_OUTPUT_CSS_20261114: within existing Liquid Glass call overlay. */
+.connect-call-outputs {margin:20px auto 0;display:flex;flex-direction:column;gap:8px;width:min(100%,310px);padding:12px;border:1px solid rgba(224,247,255,.16);border-radius:19px;background:rgba(10,22,38,.32);text-align:left;}
+.connect-call-outputs strong {font-size:12px;color:var(--text);font-weight:600;margin-bottom:3px;}
+.connect-call-outputs button {text-align:left;border:1px solid rgba(224,247,255,.13);border-radius:12px;padding:10px 12px;background:rgba(112,145,180,.16);color:var(--text);font-size:12px;min-height:39px;}
+.connect-call-outputs button:disabled {opacity:.45;}
+.connect-call-outputs small {color:var(--muted);font-size:11px;line-height:1.4;}
+
+/* CONNECT_PWA_NAV_MENUS_CALL_V1_20261114: call UI follows all seven themes. */
+.connect-app .connect-call-backdrop {
+  background: color-mix(in srgb, var(--bg) 75%, rgba(0,0,0,.75));
+}
+.connect-app .connect-call-modal {
+  color: var(--text);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--wave-primary, var(--accent)) 13%, var(--glass-surface-strong, var(--panel))),
+    color-mix(in srgb, var(--wave-secondary, var(--accent)) 9%, var(--panel)));
+  border: 1px solid var(--v4-border, var(--glass-stroke-hi, var(--border)));
+  box-shadow: 0 25px 60px rgba(0,0,0,.30), inset 0 1px 0 var(--glass-sheen,rgba(255,255,255,.10));
+}
+.connect-app .connect-call-avatar {
+  background: linear-gradient(140deg, var(--accent), color-mix(in srgb,var(--wave-primary,var(--accent)) 22%,var(--panel)));
+}
+.connect-app .connect-call-headline {
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin-bottom:20px;min-height:28px;
+}
+.connect-app .connect-call-headline .connect-call-eyebrow {margin:0;text-align:left;color:var(--wave-primary,var(--accent));}
+.connect-app .connect-call-minimize {
+  flex:0 0 auto;min-height:39px;border-radius:13px;padding:8px 12px;
+  border:1px solid var(--v4-border,var(--border));
+  background:color-mix(in srgb,var(--accent) 11%,var(--glass-surface-strong,var(--panel)));
+  color:var(--text);font-size:12px;font-weight:650;
+}
+.connect-app .connect-call-action:not(.accept):not(.hangup)>span:first-child {
+  background:color-mix(in srgb,var(--wave-primary,var(--accent)) 14%,var(--glass-surface-strong,var(--panel)));
+  border-color:var(--v4-border,var(--border));
+}
+.connect-app .connect-call-outputs {
+  background:var(--glass-surface-strong,var(--panel));
+  border-color:var(--v4-border,var(--border));
+}
+.connect-app .connect-call-outputs button {
+  background:color-mix(in srgb,var(--accent) 12%,var(--glass-surface-strong,var(--panel)));
+  border-color:var(--v4-border,var(--border));
+}
+.connect-app .connect-call-mini {
+  position:absolute;z-index:21000;
+  top:max(74px,calc(env(safe-area-inset-top) + 18px));right:12px;
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 11px;
+  align-items:center;text-align:left;padding:11px 13px;min-height:56px;
+  width:min(264px,calc(100% - 24px));border-radius:18px;
+  border:1px solid var(--v4-border,var(--border));
+  background:linear-gradient(125deg,color-mix(in srgb,var(--wave-primary,var(--accent)) 17%,var(--glass-surface-strong,var(--panel))),var(--panel));
+  color:var(--text);box-shadow:0 12px 34px rgba(0,0,0,.32);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+}
+.connect-app .connect-call-mini-name{font-size:13px;font-weight:700;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.connect-app .connect-call-mini-phase{font-size:11px;grid-column:1;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.connect-app .connect-call-mini-expand{grid-column:2;grid-row:1/3;font-size:21px;color:var(--wave-primary,var(--accent));}
+@media(max-width:370px){.connect-app .connect-call-headline{gap:4px}.connect-app .connect-call-minimize{font-size:11px;padding:7px 9px;}}
+
+/* CONNECT_PWA_CALL_SCREEN_JOURNAL_V2_20261114 — an independent themed call screen.
+   Keep the audio element and WebRTC component mounted while the UI is minimized. */
+.connect-app .connect-call-backdrop.connect-pwa-call-layout {
+  display:block;
+  padding:0;
+  background:
+    radial-gradient(ellipse 88% 51% at 5% 10%, color-mix(in srgb, var(--wave-primary, var(--accent)) 11%, transparent), transparent 77%),
+    radial-gradient(ellipse 80% 43% at 96% 92%, color-mix(in srgb, var(--wave-secondary, var(--accent)) 12%, transparent), transparent 80%),
+    var(--glass-background, var(--bg));
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+}
+.connect-app .connect-pwa-call-layout .connect-call-modal {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  width:100%;
+  max-width:none;
+  height:100%;
+  max-height:none;
+  min-height:0;
+  margin:0;
+  padding:max(18px, env(safe-area-inset-top)) clamp(14px, 4vw, 24px) max(20px, env(safe-area-inset-bottom));
+  overflow-y:auto;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+}
+.connect-app .connect-pwa-call-layout .connect-call-headline {
+  flex:0 0 auto;
+  min-height:40px;
+  margin:0;
+}
+.connect-app .connect-pwa-call-layout .connect-call-minimize {
+  font-size:13px;
+  min-height:42px;
+  padding:9px 15px;
+}
+/* Preserve the original ungrouped layout in native Android WebView. */
+.connect-app .connect-call-identity { display:contents; }
+.connect-app .connect-pwa-call-layout .connect-call-identity {
+  flex:1 1 auto;
+  min-height:205px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  padding:18px 2px 16px;
+  text-align:center;
+}
+.connect-app .connect-pwa-call-layout .connect-call-identity .connect-call-avatar {
+  width:clamp(124px, 38vw, 164px);
+  height:clamp(124px, 38vw, 164px);
+  flex:0 0 auto;
+  margin:0 auto 22px;
+  font-size:54px;
+}
+.connect-app .connect-pwa-call-layout .connect-call-identity h2 {
+  width:100%;
+  max-width:100%;
+  font-size:clamp(24px, 6.5vw, 34px);
+  line-height:1.18;
+  margin:0;
+}
+.connect-app .connect-pwa-call-layout .connect-call-identity .connect-call-info {
+  min-height:22px;
+  margin:11px 0 0;
+  font-size:clamp(14px, 3.6vw, 17px);
+}
+.connect-app .connect-pwa-call-layout .connect-call-actions {
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  align-items:start;
+  justify-items:stretch;
+  flex:0 0 auto;
+  flex-wrap:nowrap;
+  gap:7px;
+  width:100%;
+  margin-top:auto;
+  padding:10px 0 0;
+}
+.connect-app .connect-pwa-call-layout .connect-call-actions .connect-call-action {
+  min-width:0;
+  width:100%;
+  align-self:start;
+  justify-self:stretch;
+  font-size:clamp(11px, 3vw, 13px);
+  line-height:1.26;
+  text-align:center;
+  gap:9px;
+}
+.connect-app .connect-pwa-call-layout .connect-call-actions .connect-call-action > span:first-child {
+  width:clamp(55px, 16vw, 68px);
+  height:clamp(55px, 16vw, 68px);
+  border-radius:22px;
+}
+.connect-app .connect-pwa-call-layout .connect-call-actions .connect-call-action.hangup {
+  grid-column:3;
+}
+.connect-app .connect-pwa-call-layout .connect-call-note {
+  flex:0 0 auto;
+  max-width:340px;
+  margin:18px auto 0;
+  font-size:11px;
+}
+.connect-app .connect-pwa-call-layout .connect-call-outputs {
+  position:absolute;
+  z-index:6;
+  left:clamp(16px, 6vw, 40px);
+  right:clamp(16px, 6vw, 40px);
+  bottom:max(156px, 26dvh);
+  width:auto;
+  max-height:42dvh;
+  overflow-y:auto;
+  box-shadow:0 16px 36px rgba(0,0,0,.37);
+}
+@media (max-height:650px) {
+  /* Preserve the original ungrouped layout in native Android WebView. */
+.connect-app .connect-call-identity { display:contents; }
+.connect-app .connect-pwa-call-layout .connect-call-identity { min-height:155px; padding:8px 2px; }
+  .connect-app .connect-pwa-call-layout .connect-call-identity .connect-call-avatar { width:112px; height:112px; margin-bottom:13px; }
+  .connect-app .connect-pwa-call-layout .connect-call-note { margin-top:11px; }
+}

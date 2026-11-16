@@ -116,7 +116,7 @@ export async function trimCache() {
     let temporary = rows.filter(x => x.category !== 'system').reduce((n, x) => n + x.size, 0), avatars = rows.filter(x => x.category === 'system' && !x.key.includes(':core')).reduce((n, x) => n + x.size, 0);
     const limit = Math.max(0,(LIMITS[cacheLimit()] || LIMITS.auto)-await nativeHistoryBytes());
     for (const row of rows) {
-        const avatar = row.category === 'system' && !row.key.includes(':core'), expired = Date.now() - row.used > 30 * 86400000;
+        const avatar = row.category === 'system' && !row.key.includes(':core'), expired = Boolean((window as Window & {ConnectAndroid?:unknown;ConnectNative?:unknown}).ConnectAndroid||(window as Window & {ConnectAndroid?:unknown;ConnectNative?:unknown}).ConnectNative) && Date.now() - row.used > 30 * 86400000;
         if (row.category === 'system' ? !avatar || avatars <= 64 * 1024 ** 2 : temporary <= limit && !expired)
             continue;
         await run('readwrite', s => s.delete(row.key));
@@ -215,9 +215,10 @@ export function installMediaCache(user: string, refreshUrl?: (source: string) =>
                         binding.current = local;
                         el.src = local;
                     }
-                    if (alive && bindings.get(el) === binding && el instanceof HTMLImageElement && el.complete && !el.naturalWidth) {
-                        el.dispatchEvent(new Event('error'));
-                    }
+                    // CONNECT_PWA_MEDIA_CACHE_NATIVE_IMAGE_ERRORS_FIX3_20261115
+                    // A new blob: src may be complete with zero naturalWidth while
+                    // decode is pending. Wait for the browser's native error event;
+                    // synthesizing one here evicts a valid persistent cache entry.
                 });
             }
             if (el instanceof HTMLImageElement) visible.observe(el);
@@ -246,13 +247,18 @@ export function installMediaCache(user: string, refreshUrl?: (source: string) =>
             }
         })();
     };
-    const loaded = (event: Event) => { const el = event.target; if (el instanceof HTMLImageElement && el.getBoundingClientRect().bottom >= 0 && el.getBoundingClientRect().top <= innerHeight)
-        void remember(originals.get(el.src) || el.currentSrc || el.src, user); if (el instanceof HTMLMediaElement && event.type === 'play')
-        void remember(originals.get(el.src) || el.currentSrc || el.src, user); };
+    // CONNECT_PWA_MEDIA_EGRESS_FIX_20261115
+    // Audio/video can use HTTP Range requests while playing. A parallel fetch()
+    // on every play event doubles network egress, particularly for videos.
+    // Keep image caching and bounded, explicit audio/thumbnail prefetch only.
+    const loaded = (event: Event) => {
+        const el = event.target;
+        if (el instanceof HTMLImageElement && el.getBoundingClientRect().bottom >= 0 && el.getBoundingClientRect().top <= innerHeight)
+            void remember(originals.get(el.src) || el.currentSrc || el.src, user);
+    };
     const observer = new MutationObserver(scan);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     document.addEventListener('load', loaded, true);
-    document.addEventListener('play', loaded, true);
     document.addEventListener('error', failed, true);
     scan();
     void trimCache().catch(() => { });
@@ -315,4 +321,43 @@ export function mediaPlaybackUrl(url:string):string{
   if(source.hostname===base.hostname.replace(/\.supabase\.co$/,'.storage.supabase.co'))return location.origin+'/supabase-storage'+source.pathname+source.search+source.hash;
  }catch{}
  return url;
+}
+
+
+/** Save a generated video-note first frame to the existing account-scoped media cache.
+ * Only a JPEG image is written. This never persists an extra video decoder.
+ */
+export async function storeGeneratedChatPoster(viewer:string,path:string,image:Blob):Promise<string|null>{
+  if(!viewer||owner!==viewer||!path||image.type!=='image/jpeg'||!image.size||image.size>512*1024)return null;
+  const identity='connect-attachments/'+path+'__poster.jpg',key=viewer+':'+identity;
+  try{
+    const bytes=await image.arrayBuffer();
+    const database=await db();
+    await new Promise<void>((resolve,reject)=>{
+      const tx=database.transaction([STORE,'retired'],'readwrite');
+      const guard=tx.objectStore('retired').get(key);
+      guard.onsuccess=()=>{if(!guard.result)tx.objectStore(STORE).put({key,user:viewer,category:'photos',size:image.size,used:Date.now(),bytes,type:'image/jpeg'} satisfies Entry);};
+      tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+    return await resolveCachedMedia('/storage/v1/object/sign/'+identity,viewer);
+  }catch{return null;}
+}
+
+/** CONNECT_PWA_CHAT_STICKER_CACHE_V1_20261115
+ * Cache WebP by its stable authenticated Storage path, not signed URL tokens.
+ */
+export async function prefetchStickerWebp(url:string,user:string):Promise<void>{
+  const id=mediaIdentity(url);
+  if(!url||!user||!id?.startsWith('connect-stickers/'))return;
+  await remember(url,user,2*1024*1024);
+}
+
+/** CONNECT_PWA_CHAT_AUDIO_LAZY_CACHE_V1_20261115
+ * Warm a couple of small voice messages without blocking chat rendering.
+ * Persist by stable storage path, not by expiring signed URL.
+ */
+export async function prefetchChatAudio(url:string,user:string,declaredSize:number):Promise<void>{
+  const id=mediaIdentity(url);
+  if(!url||!user||!id?.startsWith('connect-attachments/')||!declaredSize||declaredSize>1024*1024)return;
+  await remember(url,user,1024*1024);
 }

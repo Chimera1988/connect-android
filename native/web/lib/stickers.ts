@@ -5,8 +5,8 @@ const moods:Sticker[]=[{id:'hello',name:'Привет'},{id:'love',name:'Люб�
 export const STICKER_PACKS:Pack[]=[
  {id:'speed',name:'Соник',emoji:'⚡',description:'Скоростные приключения и эмоции',stickers:moods},
  {id:'blocks',name:'Minecraft',emoji:'🧱',description:'Кубические приключения и эмоции',stickers:moods},
- {id:'anime-boys',name:'Аниме-парни',emoji:'🧑🏻',description:'Весёлые реакции',stickers:moods},
- {id:'anime-girls',name:'Аниме-девушки',emoji:'👩🏻',description:'Милые реакции',stickers:moods}
+ {id:'anime-boys',name:'Итачи',emoji:'🧑🏻',description:'Весёлые реакции',stickers:moods},
+ {id:'anime-girls',name:'Хината',emoji:'👩🏻',description:'Милые реакции',stickers:moods}
 ];
 const PREFIX='[[connect-sticker:';
 export function stickerBody(pack:string,id:string){return `${PREFIX}${pack}:${id}]]`;}

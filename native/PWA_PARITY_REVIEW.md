@@ -1,3 +1,5 @@
+> Исторический документ. Текущая сверка 15 ноября: [PARITY_NOTIFICATIONS_REPORT.md](PARITY_NOTIFICATIONS_REPORT.md).
+
 # Сверка Connect PWA → Android, 9 ноября 2026
 
 Эталон: `Chimera1988/connect-messenger@df71ca06e615ca5f981ae9276bd3642587f76e1a`.

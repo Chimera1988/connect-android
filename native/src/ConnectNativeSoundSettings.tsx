@@ -90,6 +90,14 @@ export async function getConnectSoundChannel(kind:SoundKind,options?:{silent?:bo
     if(!NativeModules.ConnectCallCoordinator)throw Error('Нативная система звонков недоступна');
     return NativeModules.ConnectCallCoordinator.configureSounds(pref?.uri||'',silent,vibration,channelId);
   }
+  // Android may return system/OEM patterns (zero delay or odd length) that
+  // Notifee cannot recreate. Keep that existing user channel rather than drop
+  // the push during migration or silently reset the user's vibration settings.
+  if(factory&&!await notifee.getChannel(channelId)){
+    const legacyId=`connect-native-messages-connect_soft-v5-${silent?'silent':'audible'}-${vibration?'vib':'still'}`;
+    const legacy=await notifee.getChannel(legacyId),pattern=legacy?.vibrationPattern;
+    if(pattern&&(pattern.length%2!==0||pattern.some(ms=>!Number.isFinite(ms)||ms<=0)))return legacyId;
+  }
   if(!channelWrites.has(channelId)){
     const write=(async()=>{
       if(await notifee.getChannel(channelId))return; // Never rewrite user-edited channels.
@@ -102,7 +110,7 @@ export async function getConnectSoundChannel(kind:SoundKind,options?:{silent?:bo
         const migrated=await native?.migratedMessageSound?.(legacyId);
         sound=migrated!==undefined?(migrated||undefined):old.sound==='connect_soft'?soundName:old.soundURI||old.sound;
       }
-      const inherited=old?Object.fromEntries(Object.entries({importance:old.blocked?AndroidImportance.NONE:old.importance,badge:old.badge,bypassDnd:old.bypassDnd,lights:old.lights,lightColor:old.lightColor,visibility:old.visibility,vibration:old.vibration,vibrationPattern:old.vibrationPattern,groupId:old.groupId}).filter(([,v])=>v!==undefined)):{importance:AndroidImportance.HIGH,vibration};
+      const inherited=old?Object.fromEntries(Object.entries({importance:old.blocked?AndroidImportance.NONE:old.importance,badge:old.badge,bypassDnd:old.bypassDnd,lights:old.lights,lightColor:old.lightColor,visibility:old.visibility,vibration:old.vibration,vibrationPattern:old.vibrationPattern,groupId:old.groupId}).filter(([,v])=>v!==undefined)):{importance:AndroidImportance.HIGH,vibration,vibrationPattern:vibration?[200,100,200,100]:undefined,bypassDnd:false};
       await notifee.createChannel({
         ...inherited,
         id:channelId,name:'Connect · Новые сообщения',description:'Звук входящих сообщений Connect',sound,

@@ -1,5 +1,6 @@
 'use client';
 // CONNECT_PWA_UNIFIED_CHAT_MEDIA_V1_20261112
+// CONNECT_PWA_CHAT_ACTIVITY_STATUS_V1_20261115
 // CONNECT_PWA_COMPACT_AUDIO_NO_TRANSCRIPTION_20261112
 // CONNECT_PWA_VOICE_VIDEO_GEOMETRY_FIX4_20261112
 // CONNECT_PWA_MEDIA_UX_FIX_V3_20261112
@@ -9,12 +10,19 @@ import CacheSettings from '../components/ConnectCacheSettings';
 import {warmOwnProfileLibraries,warmPeerProfileLibraries} from '../lib/profile-media-index';
 import {readNativeCatalog,writeNativeCatalog} from '../lib/native-catalog';
 import {seedInboxHistory,releaseHistoryMemory,chatNetworkDue,chatNetworkVerified} from '../lib/chat-history-cache';
-import {mediaIdentity, mediaCacheOwner, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia} from '../lib/media-cache';
-import { resolveCachedStorageFile,prefetchCachedMedia } from '../lib/media-cache';
-import { readChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
+import {resolveCachedStorageFile} from '../lib/media-cache';
+import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
+import {readChatWave, rememberChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
+import { prefetchCachedMedia, prefetchChatAudio, prefetchStickerWebp } from '../lib/media-cache'; // CONNECT_PWA_CHAT_SPEED_STICKER_VOICE_V1_20261115
+import { readChatHistory, prewarmChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
 import {compareChatMessages,chatTimeKey} from '../lib/chat-order';
 import { makePhotoPreview, photoPreviewPath, supportsPhotoPreview } from '../lib/chat-thumbnails';
+import { connectOptimizeMedia } from '../lib/connect-media-optimizer'; // CONNECT_PWA_SAFE_MEDIA_OPTIMIZATION_V1_20261115
+import { prepareStickerFile } from '../lib/sticker-webp'; // CONNECT_PWA_STICKER_WEBP_EDITOR_20261115
+import { convertStickerWebpOnServer } from '../lib/sticker-webp-transport'; // CONNECT_PWA_STICKER_BINARY_TRANSPORT_FIX4_20261115
+import { composerActivity, visiblePeerActivity, activityTtl, nativeVideoActivity } from '../lib/chat-activity'; // CONNECT_PWA_CHAT_ACTIVITY_STATUS_V1_20261115
 import ConnectNotificationSettings from '../components/ConnectNotificationSettings';
+import ConnectPushGuardian from '../components/ConnectPushGuardian'; // CONNECT_PWA_PUSH_GUARDIAN_20261114
 import ConnectHiddenMembers from '../components/ConnectHiddenMembers';
 import ConnectSplashScreen from '../components/ConnectSplashScreen';
 import ConnectProfileMedia, { type ProfileMediaKind } from '../components/ConnectProfileMedia';
@@ -168,6 +176,13 @@ function Avatar({ name, id, size = 'md', url }: { name: string; id?: string; siz
   const color = avatarColors[seed % avatarColors.length];
   return <span className={'person-avatar avatar-' + size} style={{ background: `linear-gradient(140deg,${color},#1b283d)` }} aria-hidden="true">{url ? <img src={url} alt="" loading="lazy"/> : (Array.from(name.trim())[0]?.toLocaleUpperCase('ru-RU') || '?')}</span>;
 }
+// CONNECT_PWA_ONLINE_BADGES_V1_20261114: reuse the chat header presence lease.
+// Offline/native entries render the original Avatar without an extra wrapper.
+function PresenceAvatar({ name, id, url, online }: { name:string; id?:string; url?:string; online:boolean }) {
+  if (!online) return <Avatar name={name} id={id} url={url}/>;
+  return <span className="connect-presence-avatar"><Avatar name={name} id={id} url={url}/><span className="connect-presence-dot" role="img" aria-label="В сети"/></span>;
+}
+
 function timeLabel(iso: string) { return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); }
 function listTimeLabel(iso: string) {
   const date = new Date(iso); const today = new Date();
@@ -221,68 +236,85 @@ function voiceTime(seconds: number) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
-const voiceWaveformCache = new Map<string, {bars:number[];duration:number}>();
-const VoicePlayer = memo(function VoicePlayer({ src, sentAt, mine, delivered, read, fileName, onSave }: { src:string;sentAt:string;mine:boolean;delivered:boolean;read:boolean;fileName?:string;onSave?:()=>void }) {
+const VoicePlayer = memo(function VoicePlayer({ src, path, sentAt, mine, delivered, read, fileName, onSave }: { src:string;path:string;sentAt:string;mine:boolean;delivered:boolean;read:boolean;fileName?:string;onSave?:()=>void }) {
+  const waveOwner=mediaCacheOwner();
+  const savedWave=readChatWave(waveOwner,path);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(()=>savedWave?.duration||0);
   const [position, setPosition] = useState(0);
-  const [bars, setBars] = useState<number[]>(Array(43).fill(0.28));
+  const [bars, setBars] = useState<number[]>(()=>savedWave?.bars||Array(43).fill(0.28));
   const [error, setError] = useState(false);
+  const [buffering,setBuffering] = useState(false);
+  const [playSrc,setPlaySrc] = useState(src||'');
   const seeking = useRef(false);
+  const waveRequest=useRef(false);
+  const waveIdentity=useRef(path);waveIdentity.current=path;
+  useEffect(()=>{
+    let current=true;
+    setPlaySrc(src||'');setError(false);
+    // Resolve a previously warmed IndexedDB copy before the user presses play.
+    // Do not await anything inside the click handler: iOS needs user activation.
+    if(waveOwner&&path){
+      const identity='/storage/v1/object/sign/connect-attachments/'+path;
+      void resolveCachedMedia(identity,waveOwner).then(local=>{
+        if(current&&local.startsWith('blob:')&&(!audioRef.current||(audioRef.current.paused&&audioRef.current.currentTime===0)))setPlaySrc(local);
+      }).catch(()=>{});
+    }
+    return()=>{current=false;};
+  },[src,path,waveOwner]);
   const wavePointer=useRef<{x:number;y:number;started:number}|null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    let context: AudioContext | null = null;
-    const cached = voiceWaveformCache.get(src);
-    if (cached) { setBars(cached.bars); setDuration(cached.duration); return; }
-    // Decode only near the viewport. A long chat must not download and decode
-    // every recording at once just to render the first screen.
-    const decode = async () => {
-      try {
-        const response = await fetch(src, { signal: controller.signal });
-        if (!response.ok) throw new Error('Audio unavailable');
-        const bytes = await response.arrayBuffer();
-        if (cancelled) return;
-        context = new AudioContext();
-        const decoded = await context.decodeAudioData(bytes);
-        if (cancelled) return;
-        const samples = decoded.getChannelData(0);
-        const count = 43;
-        const result = Array.from({ length: count }, (_, i) => {
-          const start = Math.floor(i * samples.length / count);
-          const end = Math.max(start + 1, Math.floor((i + 1) * samples.length / count));
-          const stride = Math.max(1, Math.floor((end - start) / 140));
-          let peak = 0;
-          for (let j = start; j < end; j += stride) peak = Math.max(peak, Math.abs(samples[j] || 0));
-          return peak;
-        });
-        const max = Math.max(0.001, ...result);
-        const waveform = result.map(value => Math.max(0.14, Math.min(1, Math.pow(value / max, 0.72))));
-        voiceWaveformCache.set(src, {bars:waveform,duration:decoded.duration});
-        if (voiceWaveformCache.size > 100) voiceWaveformCache.delete(voiceWaveformCache.keys().next().value!);
-        setBars(waveform); setDuration(current => current || decoded.duration);
-      } catch { /* Browser may reject decoding; playback remains available. */ }
-      finally { if (context) void context.close().catch(() => {}); }
-    };
-    const observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); void decode(); }
-    }, {root:audioRef.current?.closest('.message-scroll'),rootMargin:'120px'});
-    if (audioRef.current?.parentElement) observer.observe(audioRef.current.parentElement);
-    return () => { cancelled = true; observer.disconnect(); controller.abort(); if (context) void context.close().catch(() => {}); };
-  }, [src]);
+    const cached = readChatWave(waveOwner,path);
+    if (cached) { setBars(cached.bars); setDuration(cached.duration); }
+    else { setBars(Array(43).fill(0.28)); setDuration(0); }
+    // Never fetch or decode an audio file during initial chat render.
+    // Decoding 80 recordings at once blocked the very first play and text send.
+  }, [path,waveOwner]);
+  async function nativeWave(){
+    if(!window.ConnectNative||waveRequest.current||readChatWave(waveOwner,path))return;
+    waveRequest.current=true;
+    try{
+      const decoded=await window.ConnectNative.request('media:waveform',{path});
+      if(waveIdentity.current!==path||mediaCacheOwner()!==waveOwner)return;
+      if(!Array.isArray(decoded)||decoded.length!==43||!decoded.every(x=>Number.isFinite(x)&&x>=0&&x<=1))return;
+      setBars(decoded);const duration=audioRef.current?.duration||0;
+      if(Number.isFinite(duration)&&duration>0)rememberChatWave(waveOwner,path,{bars:decoded,duration});
+    }catch{/* Unsupported codec keeps playback available. */}
+    finally{waveRequest.current=false;}
+  }
 
   async function toggle() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (!audio.paused) { audio.pause(); return; }
-    // Only one voice message should play at a time.
-    document.querySelectorAll<HTMLAudioElement>('audio[data-connect-voice]').forEach(other => {
-      if (other !== audio) other.pause();
+    const audio=audioRef.current;
+    if(!audio||buffering)return;
+    if(!audio.paused){audio.pause();return;}
+    document.querySelectorAll<HTMLAudioElement>('audio[data-connect-voice]').forEach(other=>{
+      if(other!==audio)other.pause();
     });
-    try { setError(false); await audio.play(); } catch { setError(true); }
+    setError(false);
+    setBuffering(true);
+    try {
+      const identity='/storage/v1/object/sign/connect-attachments/'+path;
+      let current=playSrc||src||'';
+      if(!current){
+        const cached=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
+        current=cached.startsWith('blob:')?cached:(await refreshMediaUrl(identity)||'');
+        if(!current)throw new Error('Voice message URL is not ready');
+        audio.src=current;setPlaySrc(current);
+      }
+      try {
+        // For normal, already-signed files play() runs in the user click gesture.
+        await audio.play();
+      } catch(firstError) {
+        if(!navigator.onLine||audio.error?.code===3||audio.error?.code===4)throw firstError;
+        const renewed=await refreshMediaUrl(identity);
+        if(!renewed||renewed===current)throw firstError;
+        audio.src=renewed;setPlaySrc(renewed);audio.load();
+        await audio.play();
+      }
+    } catch {setError(true);}
+    finally {setBuffering(false);}
   }
   function seek(e: React.PointerEvent<HTMLDivElement>) {
     const audio = audioRef.current;
@@ -294,13 +326,13 @@ const VoicePlayer = memo(function VoicePlayer({ src, sentAt, mine, delivered, re
   }
   const progress = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
   return <div className="voice-player">
-    <audio ref={audioRef} data-connect-voice src={src} preload="metadata"
+    <audio ref={audioRef} data-connect-voice src={playSrc||undefined} preload="none"
       onLoadedMetadata={e => { setError(false); const d=e.currentTarget.duration; if(Number.isFinite(d))setDuration(d); }}
       onDurationChange={e => { const d=e.currentTarget.duration; if(Number.isFinite(d))setDuration(d); }}
       onTimeUpdate={e => setPosition(e.currentTarget.currentTime)}
-      onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
-      onEnded={() => {setPlaying(false);setPosition(0);}} onError={() => setError(true)}/>
-    <button type="button" className="voice-play" onClick={e => {e.stopPropagation();void toggle();}} aria-label={playing ? 'Пауза' : 'Воспроизвести голосовое'}>
+      onPlay={() => {setPlaying(true);setError(false);setBuffering(false);void nativeWave();}} onPause={() => setPlaying(false)}
+      onEnded={() => {setPlaying(false);setPosition(0);}} onError={() => {setError(true);setBuffering(false);}}/>
+    <button type="button" className="voice-play" onClick={e => {e.stopPropagation();void toggle();}} aria-label={playing ? 'Пауза' : 'Воспроизвести голосовое'} disabled={buffering}>
       {playing ? <span className="voice-pause-icon"/> : <Icon name="play" size={21}/>}
     </button>
     <div className="voice-content connect-voice-v4-content">
@@ -315,7 +347,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, sentAt, mine, delivered, re
         {bars.map((height,i) => <span key={i} className={'voice-bar'+(i / bars.length <= progress ? ' listened' : '')} style={{height:`${Math.round(4+height*22)}px`}}/>)}
         </div>
       </div>
-      <div className="voice-bottom connect-voice-v4-bottom"><span>{error ? 'Не удалось воспроизвести' : `${voiceTime(playing || position > 0 ? position : duration)}${playing || position > 0 ? ' / '+voiceTime(duration) : ''}`}</span>{onSave&&<button className="voice-save" type="button" onClick={e=>{e.stopPropagation();onSave();}}>Сохранить</button>}<span className="voice-message-meta">{timeLabel(sentAt)}{mine && <MessageChecks delivered={delivered} read={read}/>}</span></div>
+      <div className="voice-bottom connect-voice-v4-bottom"><span>{buffering ? 'Загружаю аудио…' : error ? 'Не удалось воспроизвести' : `${voiceTime(playing || position > 0 ? position : duration)}${playing || position > 0 ? ' / '+voiceTime(duration) : ''}`}</span>{onSave&&<button className="voice-save" type="button" onClick={e=>{e.stopPropagation();onSave();}}>Сохранить</button>}<span className="voice-message-meta">{timeLabel(sentAt)}{mine && <MessageChecks delivered={delivered} read={read}/>}</span></div>
     </div>
   </div>;
 });
@@ -589,21 +621,71 @@ async function connectVideoFilePreview(file: File): Promise<ConnectVideoPreview 
 /** Share one stable IndexedDB-backed JPEG poster across videos, albums and video notes. */
 async function cachedChatPoster(path:string):Promise<string|null>{
   if(!supabase||!path)return null;
+  if(isNativeMediaRuntime()){
+    const viewer=mediaCacheOwner(),identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
+    if(viewer){const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);if(local.startsWith('blob:'))return local;}
+    const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
+    if(error||!data?.signedUrl)return null;
+    const signed=mediaUrl(data.signedUrl);
+    if(viewer)void prefetchCachedMedia(signed,viewer);
+    return signed;
+  }
   const viewer=mediaCacheOwner();
+  const hot=getHotChatPoster(viewer,path);
+  if(hot)return hot;
+  const identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
   if(viewer){
-    const local=await resolveCachedStorageFile(viewer,'connect-attachments',path+'__poster.jpg').catch(()=>null);
-    if(local)return local;
+    const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+    if(local.startsWith('blob:')){rememberChatPoster(viewer,path,local);return local;}
   }
   const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
   if(error||!data?.signedUrl)return null;
   const signed=mediaUrl(data.signedUrl);
-  if(viewer)void prefetchCachedMedia(signed,viewer);
+  if(viewer){
+    await prefetchCachedMedia(signed,viewer);
+    const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+    if(local.startsWith('blob:')){rememberChatPoster(viewer,path,local);return local;}
+    rememberChatPoster(viewer,path,signed);
+  }
   return signed;
+}
+
+// CONNECT_PWA_VIDEO_STILLS_FIX4_20261113
+/** Save the most recent nonempty decoded frame as a stable attachment poster.
+ * PWA only. Cross-origin/tainted video falls back to its uploaded poster.
+ */
+function preserveVisibleChatFrame(video:HTMLVideoElement,path:string,display:(url:string)=>void,squareCrop=false):boolean{
+  if(isNativeMediaRuntime()||!path||!mediaCacheOwner()||video.readyState<2||video.currentTime<.12||!video.videoWidth||!video.videoHeight)return false;
+  try{
+    const canvas=document.createElement('canvas');
+    // Fit the actual pixels, not the intrinsic portrait/landscape frame, to the
+    // fixed circular viewport. Other video posters keep their original ratio.
+    const width=video.videoWidth,height=video.videoHeight,edge=Math.min(width,height);
+    const cropSquare=squareCrop&&edge>0;
+    const sourceWidth=cropSquare?edge:width,sourceHeight=cropSquare?edge:height;
+    const scale=Math.min(1,420/sourceWidth,420/sourceHeight);
+    canvas.width=Math.max(1,Math.round(sourceWidth*scale));
+    canvas.height=Math.max(1,Math.round(sourceHeight*scale));
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx)return false;
+    const x=cropSquare?(width-edge)/2:0,y=cropSquare?(height-edge)/2:0;
+    ctx.drawImage(video,x,y,sourceWidth,sourceHeight,0,0,canvas.width,canvas.height);
+    // Avoid persisting a decoder's all-black placeholder on iOS.
+    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+    let sampled=0,lit=0;
+    for(let i=0;i<pixels.length;i+=128){sampled++;if(pixels[i]+pixels[i+1]+pixels[i+2]>65)lit++;}
+    if(sampled&&!lit)return false;
+    const url=canvas.toDataURL('image/jpeg',.76);if(url.length<180)return false;
+    const viewer=mediaCacheOwner();
+    rememberChatPoster(viewer,path,url);
+    display(url);
+    canvas.toBlob(blob=>{if(blob&&viewer===mediaCacheOwner())void storeGeneratedChatPoster(viewer,path,blob).catch(()=>{});},'image/jpeg',.76);
+    return true;
+  }catch{return false;}
 }
 
 function VideoThumbnail({src,path}:{src:string;path?:string}) {
   const [poster,setPoster]=useState<string|null>(null);
-  const [uploadedPoster,setUploadedPoster]=useState<string|null>(null);
+  const [uploadedPoster,setUploadedPoster]=useState<string|null>(()=>path?getHotChatPoster(mediaCacheOwner(),path):null);
   const [failed,setFailed]=useState(false);
   const [posterChecked,setPosterChecked]=useState(false),[near,setNear]=useState(false);
   const frameRef=useRef<HTMLSpanElement|null>(null);
@@ -611,16 +693,20 @@ function VideoThumbnail({src,path}:{src:string;path?:string}) {
   useEffect(()=>{const frame=frameRef.current;if(!frame)return;const io=new IntersectionObserver(items=>setNear(Boolean(items[0]?.isIntersecting)),{root:frame.closest('.message-scroll'),rootMargin:'120px'});io.observe(frame);return()=>io.disconnect();},[]);
   useEffect(()=>{setPoster(null);setFailed(false)},[src]);
   useEffect(() => {
-    setUploadedPoster(null);setPosterChecked(false);
+    setUploadedPoster(path?getHotChatPoster(mediaCacheOwner(),path):null);setPosterChecked(false);
     if (!path || !/__vid_\d{1,5}x\d{1,5}$/.test(path) || !supabase) {setPosterChecked(true);return;}
     if(!near)return;
     let cancelled = false;
-    void cachedChatPoster(path).then(url=>{if(!cancelled){setUploadedPoster(url);setPosterChecked(true);}})
+    void cachedChatPoster(path).then(url=>{if(!cancelled){if(url)rememberChatPoster(mediaCacheOwner(),path,url);setUploadedPoster(url);setPosterChecked(true);}})
       .catch(()=>{if(!cancelled)setPosterChecked(true);});
     return () => {cancelled = true;};
   }, [path,near]);
   function capture(video:HTMLVideoElement){
     if(!video.videoWidth||!video.videoHeight)return;
+    if(!isNativeMediaRuntime()&&path){
+      preserveVisibleChatFrame(video,path,url=>{setPoster(url);setUploadedPoster(url);});
+      return;
+    }
     try{
       const canvas=document.createElement('canvas');
       const scale=Math.min(1,480/video.videoWidth,480/video.videoHeight);
@@ -628,10 +714,10 @@ function VideoThumbnail({src,path}:{src:string;path?:string}) {
       canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
       canvas.getContext('2d')?.drawImage(video,0,0,canvas.width,canvas.height);
       const url=canvas.toDataURL('image/jpeg',.78);
-      if(url.length>100)setPoster(url);
+      if(url.length>100){setPoster(url);if(path)rememberChatPoster(mediaCacheOwner(),path,url);}
     }catch{setFailed(true)}
   }
-  return <span ref={frameRef} className="connect-video-preview">
+  return <span ref={frameRef} className={isNativeMediaRuntime()?"connect-video-preview":"connect-video-preview connect-pwa-frame-fit"}>
     {(uploadedPoster || poster) && <img src={uploadedPoster || poster || ''} alt="Предпросмотр видео" onError={()=>{setUploadedPoster(null);setPosterChecked(true);}}/>}
     {near&&posterChecked&&!uploadedPoster&&!poster&&<video ref={videoRef} src={src} playsInline muted preload="metadata"
       onLoadedMetadata={e=>{const v=e.currentTarget;if(path)connectUpdateVideoFrame(v,path);else syncVideoThumbnailSize(v);try{v.currentTime=path && Number.isFinite(v.duration) && v.duration>.3 ? Math.min(1.2,Math.max(.3,v.duration*.12),v.duration*.8) : Math.min(.2,Math.max(0,(Number.isFinite(v.duration)?v.duration:1)-.01))}catch{setFailed(true)}}}
@@ -655,15 +741,17 @@ function reconcileVisibleVideos(){
  candidates.sort(([a],[b])=>Number(b===preferredVideo)-Number(a===preferredVideo)||Math.abs(a.getBoundingClientRect().top-innerHeight/2)-Math.abs(b.getBoundingClientRect().top-innerHeight/2));
  const winner=candidates[0]?.[0];for(const[video,item]of visibleVideos)item.activate(video===winner);
 }
-function useVisibleVideo(ref:{current:HTMLVideoElement|null},src:string,userPaused:{current:boolean},muted:{current:boolean}){
- const resumePosition=useRef(0);
+function useVisibleVideo(ref:{current:HTMLVideoElement|null},src:string,userPaused:{current:boolean},muted:{current:boolean},onBeforeDetach?:(video:HTMLVideoElement)=>void){
+  const onBeforeDetachRef=useRef(onBeforeDetach);
+  onBeforeDetachRef.current=onBeforeDetach;
+  const resumePosition=useRef(0);
  useEffect(()=>{
   const video=ref.current;if(!video)return;let attached=false;
   const resume=()=>{if(resumePosition.current>0&&Number.isFinite(video.duration))video.currentTime=Math.min(resumePosition.current,Math.max(0,video.duration-.05));};
   video.addEventListener('loadedmetadata',resume);
   const item:VisibleVideo={visible:false,paused:()=>userPaused.current,activate(active){
    if(active){video.muted=muted.current;if(!attached){attached=true;video.src=src;video.load();}if(video.paused)void video.play().catch(()=>{});}
-   else if(attached){resumePosition.current=video.currentTime||resumePosition.current;attached=false;video.pause();video.removeAttribute('src');video.load();}
+   else if(attached){if(!isNativeMediaRuntime())onBeforeDetachRef.current?.(video);resumePosition.current=video.currentTime||resumePosition.current;attached=false;video.pause();video.removeAttribute('src');video.load();}
   }};
   visibleVideos.set(video,item);
   const observer=new IntersectionObserver(entries=>{item.visible=Boolean(entries[0]?.isIntersecting);reconcileVisibleVideos();},{root:video.closest('.message-scroll'),threshold:.35});
@@ -685,25 +773,32 @@ function ConnectInlineAutoplayVideo({src,path,onOpen}:{src:string;path:string;on
   const ref=useRef<HTMLVideoElement|null>(null);
   const soundRef=useRef(true);
   const [muted,setMuted]=useState(true);
-  const [poster,setPoster]=useState<string|null>(null);
+  const [poster,setPoster]=useState<string|null>(()=>getHotChatPoster(mediaCacheOwner(),path));
   const [error,setError]=useState(false);
+  const [frameReady,setFrameReady]=useState(false);
+  const firstFrameStored=useRef(false);
+  const freezeFrame=(video:HTMLVideoElement)=>{preserveVisibleChatFrame(video,path,setPoster);};
 
   useEffect(()=>{
-    setPoster(null);setError(false);
+    setPoster(getHotChatPoster(mediaCacheOwner(),path));setError(false);setFrameReady(false);firstFrameStored.current=false;
     if(!supabase || !/__vid_\d{1,5}x\d{1,5}$/.test(path))return;
     let cancelled=false;
-    void cachedChatPoster(path).then(url=>{if(!cancelled)setPoster(url);}).catch(()=>{});
+    void cachedChatPoster(path).then(url=>{if(!cancelled&&url)setPoster(previous=>previous?.startsWith('data:')?previous:url);}).catch(()=>{});
     return()=>{cancelled=true;};
   },[path]);
 
   const userPaused=useRef(false);
-  useVisibleVideo(ref,src,userPaused,soundRef);
+  useVisibleVideo(ref,src,userPaused,soundRef,freezeFrame);
 
-  return <div className="connect-inline-autoplay-video">
+  return <div className={isNativeMediaRuntime()?"connect-inline-autoplay-video":"connect-inline-autoplay-video connect-pwa-frame-fit"}>
     <button type="button" className="connect-inline-autoplay-video-open" aria-label="Открыть видео на весь экран"
       onClick={event=>{event.stopPropagation();onOpen();}}>
-      <video ref={ref} poster={poster||undefined} muted={muted} loop playsInline preload="none"
+      {!isNativeMediaRuntime()&&(poster?<img className="connect-inline-video-still" src={poster} alt="" aria-hidden="true"/>:<span className="connect-inline-video-still-fallback" aria-hidden="true">▶</span>)}
+      <video ref={ref} poster={poster||undefined} muted={muted} loop playsInline preload="none" crossOrigin={isNativeMediaRuntime()?undefined:'anonymous'}
+        style={isNativeMediaRuntime()?undefined:{opacity:frameReady?1:0}}
         onLoadedMetadata={event=>connectUpdateVideoFrame(event.currentTarget,path)}
+        onEmptied={()=>{if(!isNativeMediaRuntime())setFrameReady(false);}}
+        onTimeUpdate={event=>{if(isNativeMediaRuntime())return;const video=event.currentTarget;if(video.currentTime>.12){setFrameReady(true);if(!firstFrameStored.current){firstFrameStored.current=preserveVisibleChatFrame(video,path,setPoster);}}}}
         onError={()=>setError(true)}/>
       {error&&<span className="connect-inline-video-error">Видео недоступно</span>}
     </button>
@@ -725,11 +820,13 @@ function isVideoNote(m: Message): boolean {
 
 // Connect video-note sound control v3: round progress and mute below the circle
 function VideoNoteBubble({src,name,path,sentAt,mine,delivered,read}:{src:string;name:string;path:string;sentAt:string;mine:boolean;delivered:boolean;read:boolean}) {
-  const [poster,setPoster] = useState<string|undefined>();
+  const [poster,setPoster] = useState<string|undefined>(()=>getHotChatPoster(mediaCacheOwner(),path)||undefined);
+  const [videoFrameReady,setVideoFrameReady]=useState(false);
+  const firstFrameStored=useRef(false);
   useEffect(()=>{
     let alive=true;
-    setPoster(undefined);
-    if(supabase)void cachedChatPoster(path).then(url=>{if(alive)setPoster(url||undefined);}).catch(()=>{});
+    setPoster(getHotChatPoster(mediaCacheOwner(),path)||undefined);firstFrameStored.current=false;
+    if(supabase)void cachedChatPoster(path).then(url=>{if(alive&&url)setPoster(url);}).catch(()=>{});
     return()=>{alive=false;};
   },[path]);
   const ref=useRef<HTMLVideoElement|null>(null);
@@ -738,7 +835,8 @@ function VideoNoteBubble({src,name,path,sentAt,mine,delivered,read}:{src:string;
   const [expanded,setExpanded]=useState(false);
   const [progress,setProgress]=useState(0);
   const userPaused=useRef(false),mutedRef=useRef(true);
-  useVisibleVideo(ref,src,userPaused,mutedRef);
+  const freezeFrame=(video:HTMLVideoElement)=>{preserveVisibleChatFrame(video,path,setPoster,true);};
+  useVisibleVideo(ref,src,userPaused,mutedRef,freezeFrame);
   const circumference=2*Math.PI*47;
   const toggleNote=(event:React.MouseEvent)=>{
     event.stopPropagation();
@@ -760,12 +858,15 @@ function VideoNoteBubble({src,name,path,sentAt,mine,delivered,read}:{src:string;
     userPaused.current=true;
     ref.current?.pause();
   };
-  return <div className={'connect-v4-video-note connect-v5-video-note'+(expanded?' is-expanded':'')}>
+  return <div className={'connect-v4-video-note connect-v5-video-note'+(expanded?' is-expanded':'')+(!isNativeMediaRuntime()?' connect-pwa-frame-fit':'')}>
     <div className="connect-v5-note-stage">
       <div className="connect-v4-note-circle">
-        <video ref={ref} className="connect-v4-note-video" poster={poster} muted={muted} playsInline loop preload="none" aria-label={name}
+        {!isNativeMediaRuntime()&&(poster?<img className="connect-note-still" src={poster} alt="" aria-hidden="true"/>:<span className="connect-note-still connect-note-still-fallback" aria-hidden="true">▶</span>)}
+        <video ref={ref} className="connect-v4-note-video" poster={poster} crossOrigin={isNativeMediaRuntime()?undefined:'anonymous'} muted={muted} playsInline loop preload="none" aria-label={name} style={isNativeMediaRuntime()?undefined:{opacity:videoFrameReady?1:0}}
+          onLoadedData={()=>{/* Wait for a drawable frame instead of revealing iOS decoder black. */}}
+          onEmptied={()=>{if(!isNativeMediaRuntime())setVideoFrameReady(false);}}
           onLoadedMetadata={event=>{const d=event.currentTarget.duration;if(Number.isFinite(d)&&d>0)setDuration(d);}}
-          onTimeUpdate={event=>{const v=event.currentTarget,d=v.duration;if(Number.isFinite(d)&&d>0)setProgress(Math.max(0,Math.min(1,v.currentTime/d)));}}
+          onTimeUpdate={event=>{const v=event.currentTarget,d=v.duration;if(Number.isFinite(d)&&d>0)setProgress(Math.max(0,Math.min(1,v.currentTime/d)));if(!isNativeMediaRuntime()&&v.currentTime>.12){setVideoFrameReady(true);if(!firstFrameStored.current)firstFrameStored.current=preserveVisibleChatFrame(v,path,setPoster,true);}}}
           onSeeked={event=>{const v=event.currentTarget,d=v.duration;if(Number.isFinite(d)&&d>0)setProgress(Math.max(0,Math.min(1,v.currentTime/d)));}}/>
         <button type="button" className="connect-v4-note-hit" aria-label={expanded?'Приостановить или воспроизвести видеокружок':'Увеличить и воспроизвести видеокружок'} onClick={toggleNote}/>
         <svg className="connect-v4-note-progress" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
@@ -792,7 +893,7 @@ function VideoNoteBubble({src,name,path,sentAt,mine,delivered,read}:{src:string;
 }
 
 type VideoNotePhase = 'loading'|'ready'|'recording'|'review'|'error';
-function VideoNoteRecorder({onClose,onSend}:{onClose:()=>void;onSend:(file:File)=>void}) {
+function VideoNoteRecorder({onClose,onSend,onRecordingChange}:{onClose:()=>void;onSend:(file:File)=>void;onRecordingChange:(recording:boolean)=>void}) {
   const live=useRef<HTMLVideoElement|null>(null);
   const streamRef=useRef<MediaStream|null>(null);
   const recorderRef=useRef<MediaRecorder|null>(null);
@@ -821,7 +922,7 @@ function VideoNoteRecorder({onClose,onSend}:{onClose:()=>void;onSend:(file:File)
       }catch(e){if(!disposed){setError(e instanceof Error?e.message:'Не удалось открыть камеру');setPhase('error');}}
     })();
     return()=>{
-      disposed=true;clearClock();
+      disposed=true;clearClock();onRecordingChange(false);
       const recorder=recorderRef.current;
       if(recorder&&recorder.state!=='inactive')try{recorder.onstop=null;recorder.stop();}catch{}
       stopCamera();
@@ -833,12 +934,12 @@ function VideoNoteRecorder({onClose,onSend}:{onClose:()=>void;onSend:(file:File)
     try{
       const formats=['video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
       const mime=formats.find(x=>MediaRecorder.isTypeSupported(x));
-      const recorder=new MediaRecorder(stream,{...(mime?{mimeType:mime}:{}),videoBitsPerSecond:800000,audioBitsPerSecond:64000});
+      const recorder=new MediaRecorder(stream,{...(mime?{mimeType:mime}:{}),videoBitsPerSecond:isNativeMediaRuntime()?800000:720000,audioBitsPerSecond:isNativeMediaRuntime()?64000:56000});
       chunksRef.current=[];recorderRef.current=recorder;savedRef.current=null;
       recorder.ondataavailable=e=>{if(e.data.size>0)chunksRef.current.push(e.data)};
-      recorder.onerror=()=>{setError('Ошибка записи видео');setPhase('error');clearClock();stopCamera()};
+      recorder.onerror=()=>{onRecordingChange(false);setError('Ошибка записи видео');setPhase('error');clearClock();stopCamera()};
       recorder.onstop=()=>{
-        clearClock();stopCamera();
+        onRecordingChange(false);clearClock();stopCamera();
         const type=recorder.mimeType||chunksRef.current[0]?.type||'video/webm';
         const blob=new Blob(chunksRef.current,{type});
         if(blob.size<100){setError('Видео не записалось. Попробуйте ещё раз.');setPhase('error');return;}
@@ -846,13 +947,13 @@ function VideoNoteRecorder({onClose,onSend}:{onClose:()=>void;onSend:(file:File)
         savedRef.current=new File([blob],`connect-video-note-${Date.now()}.${ext}`,{type});
         const url=URL.createObjectURL(blob);previewRef.current=url;setPreview(url);setPhase('review');
       };
-      recorder.start(1000);startRef.current=Date.now();setSeconds(0);setPhase('recording');
+      recorder.start(1000);startRef.current=Date.now();setSeconds(0);setPhase('recording');onRecordingChange(true);
       timerRef.current=window.setInterval(()=>{
         const time=Math.floor((Date.now()-startRef.current)/1000);
         setSeconds(Math.min(60,time));
         if(time>=60&&recorder.state==='recording')recorder.stop();
       },250);
-    }catch(e){setError(e instanceof Error?e.message:'Не удалось начать запись');setPhase('error')}
+    }catch(e){onRecordingChange(false);setError(e instanceof Error?e.message:'Не удалось начать запись');setPhase('error')}
   }
   function stop(){if(recorderRef.current?.state==='recording')recorderRef.current.stop()}
   async function flipCamera() {
@@ -869,7 +970,7 @@ function VideoNoteRecorder({onClose,onSend}:{onClose:()=>void;onSend:(file:File)
       setFacing(nextFacing);setError('');
     } catch(e) {setError('Не удалось переключить камеру: '+(e instanceof Error?e.message:String(e)));}
   }
-  function cancel(){onClose()}
+  function cancel(){onRecordingChange(false);onClose()}
   return <div className="connect-vnote-backdrop" role="dialog" aria-modal="true" aria-label="Запись видеокружка">
     <div className="connect-vnote-panel">
       <div className="connect-vnote-header"><strong>Видеокружок</strong><button type="button" onClick={cancel} aria-label="Закрыть">✕</button></div>
@@ -891,6 +992,30 @@ function VideoNoteRecorder({onClose,onSend}:{onClose:()=>void;onSend:(file:File)
   </div>;
 }
 
+// CONNECT_PWA_NAV_MENUS_CALL_V1_20261114: edge gestures navigate screen history,
+// never message swipes or the iOS native system back gesture.
+type ConnectGestureView = { tab: Tab; chat: string | null; profile: string | null; media: ProfileMediaKind | null; settings: SettingsPage };
+function connectSwipeDirection(edge: 'back' | 'forward', dx: number, dy: number): -1 | 0 | 1 {
+  if (Math.abs(dx) < 76 || Math.abs(dy) > Math.abs(dx) * 0.52) return 0;
+  if (edge === 'back' && dx > 0) return -1;
+  if (edge === 'forward' && dx < 0) return 1;
+  return 0;
+}
+
+// CONNECT_PWA_DOCK_MOTION_NESTED_GESTURES_V1_20261114: no swipes between root tabs.
+function connectAllowHistorySwipe(current: ConnectGestureView | undefined, target: ConnectGestureView, direction: -1 | 1): boolean {
+  if (!current) return false;
+  // Back and forward belong to nested screens, not primary tab switching.
+  const inSubmenu = Boolean(current.profile || current.media || current.settings !== 'home');
+  if (inSubmenu) {
+    if (current.tab !== target.tab) return false;
+    return direction === -1 || Boolean(target.profile || target.media || target.settings !== 'home');
+  }
+  // A conversation is the only full-screen root child with a back edge gesture.
+  if (current.chat) return direction === -1 && !target.chat;
+  return false;
+}
+
 export default function Home() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [visualScene, setVisualScene] = useState<VisualScene>('waves');
@@ -901,6 +1026,9 @@ export default function Home() {
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   const wallpaperInput = useRef<HTMLInputElement | null>(null);
   const [stickerPicker, setStickerPicker] = useState(false);
+  const [filePickerOpen,setFilePickerOpen] = useState(false);
+  const [videoNoteRecording,setVideoNoteRecording] = useState(false);
+  const nativeVideoChat=useRef<string|null>(null);
   const [stickerPack, setStickerPack] = useState<StickerPackId>('speed');
   const [enabledPacks, setEnabledPacks] = useState<StickerPackId[]>(STICKER_PACKS.map(p=>p.id));
   const [stickerFavorites, setStickerFavorites] = useState<string[]>([]);
@@ -909,13 +1037,16 @@ export default function Home() {
   const [customStickers,setCustomStickers] = useState<CustomSticker[]>([]);
   const [customStickerUrls,setCustomStickerUrls] = useState<Record<string,string>>({});
   const [customPack,setCustomPack] = useState<string>('');
+  const [editingStickerPack,setEditingStickerPack] = useState<string|null>(null);
+  const [selectedStickerIds,setSelectedStickerIds] = useState<string[]>([]);
+  const migratedStickerAttempts=useRef<Set<string>>(new Set());
   const [packName,setPackName] = useState('');
   const [packEmoji,setPackEmoji] = useState('🎨');
   const [packPublic,setPackPublic] = useState(false);
   const [inviteEmail,setInviteEmail] = useState('');
   const [inviteLink,setInviteLink] = useState('');
   const [admin,setAdmin] = useState(false);
-  const stickerFileInput=useRef<HTMLInputElement|null>(null);
+  // Sticker input lives inside each pack's label; native iOS picker retains the tap gesture.
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -936,10 +1067,19 @@ export default function Home() {
   const [crop, setCrop] = useState<CropState | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
+  const gestureHistory = useRef<{ owner: string; entries: ConnectGestureView[]; cursor: number; restoring: boolean }>({owner:'',entries:[],cursor:-1,restoring:false});
   const [clearedChats, setClearedChats] = useState<Record<string,string>>({});
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatHistoryLoading,setChatHistoryLoading]=useState(false);
   const [historyReadyChat,setHistoryReadyChat]=useState<string|null>(null);
+  const [chatDisplayReady,setChatDisplayReady]=useState<string|null>(null);
+  useEffect(()=>{
+    if(!activeChat||isNativeMediaRuntime())return;
+    const timer=window.setTimeout(()=>setChatDisplayReady(activeChat),1400);
+    return()=>window.clearTimeout(timer);
+  },[activeChat,user?.id]);
+  const signedMediaLifetimes=useRef(new Map<string,number>());
+  const warmedChatWindows=useRef(new Map<string,number>());
   const [historyHasMore,setHistoryHasMore]=useState(false);
   const [historyLoadingMore,setHistoryLoadingMore]=useState(false);
   const [historyHasNewer,setHistoryHasNewer]=useState(false);
@@ -972,8 +1112,9 @@ export default function Home() {
   const [peerRecording, setPeerRecording] = useState(false);
   const serverDeleted=useRef(new Set<string>());
   useEffect(()=>{serverDeleted.current.clear();},[user?.id]);
-  const [peerActivity,setPeerActivity]=useState<{kind:string;until:number}|null>(null);
+  const [peerActivity,setPeerActivity]=useState<{chat:string;kind:string;until:number}|null>(null);
   const activitySupported=useRef(false),activityLast=useRef({chat:'',kind:'',at:0});
+  const activityWriteQueue=useRef<Promise<void>>(Promise.resolve());
   useEffect(()=>{let live=true;activitySupported.current=false;if(supabase&&user)void supabase.rpc('connect_unified_capabilities').then(({data})=>{if(live)activitySupported.current=data?.activity===1;});return()=>{live=false;};},[user?.id]);
   useEffect(()=>{if(!peerActivity)return;const timer=setTimeout(()=>setPeerActivity(null),Math.max(0,peerActivity.until-Date.now()));return()=>clearTimeout(timer);},[peerActivity]);
   const [peerStates, setPeerStates] = useState<Record<string,{delivered:string|null;read:string|null}>>({});
@@ -1016,6 +1157,21 @@ export default function Home() {
 
   const [recordSeconds, setRecordSeconds] = useState(0);
   const attachmentInput = useRef<HTMLInputElement | null>(null);
+  const filePickerOpenedAt=useRef(0);
+  useEffect(()=>{
+    const input=attachmentInput.current;
+    if(!input)return;
+    const cancelFileSelection=()=>setFilePickerOpen(false);
+    input.addEventListener('cancel',cancelFileSelection);
+    return()=>input.removeEventListener('cancel',cancelFileSelection);
+  },[activeChat]);
+  useEffect(()=>{
+    if(!filePickerOpen)return;
+    // Some iOS file pickers do not fire cancel. Regaining focus ends the indicator.
+    const onFocus=()=>{if(Date.now()-filePickerOpenedAt.current>800)window.setTimeout(()=>setFilePickerOpen(false),150);};
+    window.addEventListener('focus',onFocus);
+    return()=>window.removeEventListener('focus',onFocus);
+  },[filePickerOpen]);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const recordingStream = useRef<MediaStream | null>(null);
@@ -1288,20 +1444,58 @@ export default function Home() {
     if(!res.ok)throw new Error(json.error||'Ошибка сервера');
     return json;
   }
+  const stickerCatalogEpoch=useRef(0);
+  const stickerPriority=useRef<Set<string>>(new Set());
+  const [stickerCatalogReady,setStickerCatalogReady]=useState(false);
+  useEffect(()=>{
+    const ids=new Set<string>();
+    for(const m of messages){
+      const found=m.body.match(/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/);
+      if(found)ids.add(found[1]);
+    }
+    stickerPriority.current=ids;
+  },[messages]);
+  useEffect(()=>{stickerCatalogEpoch.current++;setStickerCatalogReady(false);setCustomStickerUrls({});},[user?.id]);
   const loadCustomStickers=useCallback(async()=>{
     if(!supabase||!user)return;
+    const epoch=++stickerCatalogEpoch.current;
+    const viewer=user.id;
     const packs=await supabase.from('connect_sticker_packs').select('id,name,emoji,owner_id,is_public,created_at').order('created_at',{ascending:false});
-    if(packs.error)return;
+    if(epoch!==stickerCatalogEpoch.current||packs.error)return;
     const list=(packs.data||[]) as CustomPack[];
     setCustomPacks(list);
-    if(!list.length){setCustomStickers([]);return;}
+    if(!list.length){setCustomStickers([]);setCustomStickerUrls({});setStickerCatalogReady(true);return;}
     const stickers=await supabase.from('connect_stickers').select('id,pack_id,name,storage_path,position').in('pack_id',list.map(p=>p.id)).order('position');
-    if(!stickers.error){
-      const items=(stickers.data||[]) as CustomSticker[];setCustomStickers(items);
-      const urls:Record<string,string>={};
-      await Promise.all(items.map(async st=>{const {data}=await supabase!.storage.from('connect-stickers').createSignedUrl(st.storage_path,3600);if(data?.signedUrl)urls[st.id]=mediaUrl(data.signedUrl)}));
-      setCustomStickerUrls(urls);
-    }
+    if(epoch!==stickerCatalogEpoch.current||stickers.error)return;
+    const items=(stickers.data||[]) as CustomSticker[];
+    setCustomStickers(items);
+    setStickerCatalogReady(true);
+    // Prioritize stickers referenced by the open history. Do not wait for
+    // hundreds of Storage signing requests before presenting any of them.
+    const queue=[...items].sort((a,b)=>Number(stickerPriority.current.has(b.id))-Number(stickerPriority.current.has(a.id)));
+    let cursor=0;
+    const worker=async()=>{
+      while(epoch===stickerCatalogEpoch.current&&cursor<queue.length){
+        const st=queue[cursor++];
+        const identity='/storage/v1/object/sign/connect-stickers/'+st.storage_path;
+        try {
+          const local=await resolveCachedMedia(identity,viewer);
+          if(epoch!==stickerCatalogEpoch.current)return;
+          if(local.startsWith('blob:')){
+            setCustomStickerUrls(prev=>prev[st.id]===local?prev:{...prev,[st.id]:local});
+            continue;
+          }
+          const {data}=await supabase!.storage.from('connect-stickers').createSignedUrl(st.storage_path,3600);
+          if(epoch!==stickerCatalogEpoch.current)return;
+          if(!data?.signedUrl)continue;
+          const signed=mediaUrl(data.signedUrl);
+          setCustomStickerUrls(prev=>prev[st.id]===signed?prev:{...prev,[st.id]:signed});
+          // Queue a small, account-scoped cache write. Never block the UI on it.
+          void prefetchStickerWebp(signed,viewer).catch(()=>{});
+        }catch{/* Retry on next login/visibility refresh; never expose private packs. */}
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(4,queue.length)},()=>worker()));
   },[user?.id]);
   useEffect(()=>{void loadCustomStickers()},[loadCustomStickers]);
   useEffect(()=>{if(user)void authenticatedRequest('/api/admin/invite').then(r=>setAdmin(Boolean(r.admin))).catch(()=>setAdmin(false));else setAdmin(false)},[user?.id]);
@@ -1311,39 +1505,114 @@ export default function Home() {
     const {error}=await supabase.from('connect_sticker_packs').insert({name:packName.trim().slice(0,60),emoji:packEmoji.slice(0,8)||'🎨',owner_id:user.id,is_public:packPublic});
     setBusy(false);if(error)setNotice('Не удалось создать набор: '+error.message);else{setPackName('');await loadCustomStickers();setNotice('Набор создан');}
   }
-  async function uploadCustomStickers(files:FileList|null){
-    if(!supabase||!user||!customPack||!files?.length||busy)return;
-    const pack=customPacks.find(p=>p.id===customPack);
+  async function convertStickerOnServer(file:File):Promise<Blob>{
+    if(!supabase||!supabaseUrl||!supabaseKey)throw new Error('Нет соединения с сервером');
+    const {data:{session},error}=await supabase.auth.getSession();
+    if(error||!session?.access_token)throw new Error('Войдите в Connect для загрузки стикера');
+    // FIX4 sends the actual File bytes through the existing authenticated proxy.
+    // The previous functions.invoke({body:file}) reached Supabase as 0 bytes on iOS.
+    return convertStickerWebpOnServer(file,{
+      endpoint:supabaseUrl+'/functions/v1/connect-sticker-webp-convert',
+      accessToken:session.access_token,
+      apiKey:supabaseKey,
+      transport:supabaseFetch,
+    });
+  }
+  async function uploadCustomStickers(packId:string,files:File[]){ // CONNECT_PWA_STICKER_PICKER_IOS_FIX_20261115
+    if(!supabase||!user||!packId||!files.length||busy)return;
+    const pack=customPacks.find(p=>p.id===packId);
     if(!pack||pack.owner_id!==user.id)return;
     setBusy(true);
+    setNotice('Обрабатываю '+Math.min(files.length,30)+' стикер(ов)…');
     try{
-      for(const file of Array.from(files).slice(0,30)){
-        if(!['image/png','image/webp','image/gif'].includes(file.type)||file.size>2*1024*1024)throw new Error('PNG, WebP или GIF до 2 МБ');
-        const ext=file.type==='image/png'?'png':file.type==='image/gif'?'gif':'webp';
+      for(const file of files.slice(0,30)){
+        const prepared=await prepareStickerFile(file,convertStickerOnServer);
+        const ext=prepared.type==='image/gif'?'gif':'webp';
         const path=`${user.id}/${pack.id}/${crypto.randomUUID()}.${ext}`;
-        const up=await supabase.storage.from('connect-stickers').upload(path,file,{contentType:file.type,upsert:false});
-        if(up.error)throw up.error;
-        const insert=await supabase.from('connect_stickers').insert({pack_id:pack.id,name:file.name.replace(/\.[^.]+$/,'').slice(0,60),storage_path:path});
-        if(insert.error){await supabase.storage.from('connect-stickers').remove([path]);throw insert.error;}
+        const uploaded=await supabase.storage.from('connect-stickers')
+          .upload(path,prepared,{contentType:prepared.type,upsert:false});
+        if(uploaded.error)throw uploaded.error;
+        const saved=await supabase.from('connect_stickers').insert({
+          pack_id:pack.id,name:file.name.replace(/\.[^.]+$/,'').slice(0,60),storage_path:path
+        });
+        if(saved.error){await supabase.storage.from('connect-stickers').remove([path]);throw saved.error;}
       }
-      await loadCustomStickers();setNotice('Стикеры добавлены');
+      await loadCustomStickers();setNotice('Стикеры добавлены. JPG и PNG сохраняются в WebP.');
     }catch(e){setNotice('Не удалось загрузить: '+(e instanceof Error?e.message:'Ошибка'));}
-    finally{setBusy(false);if(stickerFileInput.current)stickerFileInput.current.value='';}
+    finally{setBusy(false);}
   }
-  async function deleteCustomSticker(st:CustomSticker){
-    if(!supabase||!user||!window.confirm('Удалить этот стикер из набора?'))return;
-    const r=await supabase.from('connect_stickers').delete().eq('id',st.id);
-    if(r.error){setNotice(r.error.message);return;}
-    await supabase.storage.from('connect-stickers').remove([st.storage_path]);await loadCustomStickers();
+  function toggleStickerSelection(id:string){
+    setSelectedStickerIds(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
   }
+  async function deleteCustomStickers(items:CustomSticker[]){
+    if(!supabase||!user||busy||!items.length)return;
+    const ownPackIds=new Set(customPacks.filter(p=>p.owner_id===user.id).map(p=>p.id));
+    const chosen=items.filter(st=>ownPackIds.has(st.pack_id));
+    if(!chosen.length)return;
+    const question=chosen.length===1?'Удалить стикер навсегда из набора?':'Удалить выбранные стикеры навсегда ('+chosen.length+' шт.)?';
+    if(!window.confirm(question+' Файлы будут удалены с сервера. Ранее отправленные сообщения останутся в чатах как «Стикер недоступен».'))return;
+    setBusy(true);
+    try{
+      const {data,error}=await supabase.from('connect_stickers').delete()
+        .in('id',chosen.map(st=>st.id)).select('id');
+      if(error)throw error;
+      if((data||[]).length!==chosen.length)throw new Error('Некоторые стикеры не были удалены');
+      setSelectedStickerIds([]);
+      await loadCustomStickers();
+      setNotice('Удалено стикеров: '+chosen.length+'. Файлы удалит серверная очистка не позднее следующего ежедневного запуска.');
+    }catch(error){setNotice('Ошибка удаления: '+(error instanceof Error?error.message:String(error)));}
+    finally{setBusy(false);}
+  }
+  async function deleteCustomSticker(st:CustomSticker){await deleteCustomStickers([st]);}
   async function deleteCustomPack(pack:CustomPack){
-    if(!supabase||!window.confirm(`Удалить набор «${pack.name}»?`))return;
-    const stickers=customStickers.filter(st=>st.pack_id===pack.id);
-    const r=await supabase.from('connect_sticker_packs').delete().eq('id',pack.id);
-    if(r.error){setNotice(r.error.message);return;}
-    if(stickers.length)await supabase.storage.from('connect-stickers').remove(stickers.map(st=>st.storage_path));
-    setCustomPack('');await loadCustomStickers();
+    if(!supabase||!user||busy||pack.owner_id!==user.id||!window.confirm(`Удалить набор «${pack.name}» со всеми стикерами? Файлы будут очищены на сервере.`))return;
+    setBusy(true);
+    try{
+      const {data,error}=await supabase.from('connect_sticker_packs').delete()
+        .eq('id',pack.id).eq('owner_id',user.id).select('id');
+      if(error||!data?.length)throw error||new Error('Набор не удалён');
+      setEditingStickerPack(null);setSelectedStickerIds([]);setCustomPack('');
+      await loadCustomStickers();
+      setNotice('Набор удалён. Файлы поставлены в очередь безопасной очистки.');
+    }catch(error){setNotice('Ошибка удаления набора: '+(error instanceof Error?error.message:String(error)));}
+    finally{setBusy(false);}
   }
+  // Convert previously uploaded PNG/JPEG when its owner opens Settings → Stickers.
+  // Upload + download-verify + conditional DB path switch; the old path is queued
+  // by a database trigger and only removed after the new object is active.
+  useEffect(()=>{
+    if(!supabase||!user||busy||settingsPage!=='stickers')return;
+    const ownPacks=new Set(customPacks.filter(p=>p.owner_id===user.id).map(p=>p.id));
+    const candidate=customStickers.find(st=>ownPacks.has(st.pack_id)&&
+      /\.(png|jpe?g)$/i.test(st.storage_path)&&!migratedStickerAttempts.current.has(st.id));
+    if(!candidate)return;
+    migratedStickerAttempts.current.add(candidate.id);
+    void (async()=>{
+      setBusy(true);
+      let freshPath='';
+      try{
+        const old=await supabase!.storage.from('connect-stickers').download(candidate.storage_path);
+        if(old.error||!old.data)throw old.error||new Error('Исходный стикер недоступен');
+        const inputType=/\.png$/i.test(candidate.storage_path)?'image/png':'image/jpeg';
+        const next=await prepareStickerFile(new File([old.data],candidate.name+'.png',{type:inputType}));
+        if(next.type!=='image/webp')throw new Error('Конвертация не создала WebP');
+        freshPath=`${user!.id}/${candidate.pack_id}/${crypto.randomUUID()}.webp`;
+        const up=await supabase!.storage.from('connect-stickers').upload(freshPath,next,{contentType:'image/webp',upsert:false});
+        if(up.error)throw up.error;
+        const check=await supabase!.storage.from('connect-stickers').download(freshPath);
+        if(check.error||!check.data||check.data.size!==next.size)throw new Error('Не удалось проверить загруженный WebP');
+        const update=await supabase!.from('connect_stickers').update({storage_path:freshPath})
+          .eq('id',candidate.id).eq('storage_path',candidate.storage_path).select('id');
+        if(update.error||update.data?.length!==1)throw update.error||new Error('Стикер изменён на другом устройстве');
+        freshPath=''; // The new file is active. Trigger queued the old PNG for server GC.
+        await loadCustomStickers();
+        setNotice('Старый PNG преобразован в WebP.');
+      }catch(error){
+        if(freshPath)await supabase!.storage.from('connect-stickers').remove([freshPath]);
+        setNotice('Конвертация старого стикера: '+(error instanceof Error?error.message:String(error)));
+      }finally{setBusy(false);}
+    })();
+  },[settingsPage,user?.id,busy,customStickers,customPacks,loadCustomStickers]);
   function customStickerUrl(st:CustomSticker){return customStickerUrls[st.id]||''}
   async function sendCustomSticker(st:CustomSticker){
     if(!supabase||!user||!activeChat||busy)return;
@@ -1511,29 +1780,41 @@ export default function Home() {
     };
   }, [activeChat, tab]);
 
-  const updateActivity=useCallback(async(id:string,kind:string|null)=>{
-    if(!supabase||!user)return;
+  const updateActivity=useCallback((id:string,kind:string|null):Promise<void>=>{
+    if(!supabase||!user)return Promise.resolve();
     const now=Date.now(),last=activityLast.current;
-    if(last.chat===id&&last.kind===(kind||'')&&now-last.at<4000)return;
+    if(last.chat===id&&last.kind===(kind||'')&&now-last.at<4000)return Promise.resolve();
     activityLast.current={chat:id,kind:kind||'',at:now};
-    const until=kind?new Date(now+8000).toISOString():null;
+    const until=kind?new Date(now+activityTtl(kind)).toISOString():null;
     const values:Record<string,unknown>={conversation_id:id,user_id:user.id,typing_until:kind==='typing'?until:null,recording_until:kind==='voice'?until:null};
     if(activitySupported.current){values.activity_kind=kind;values.activity_until=until;}
-    await supabase.from('conversation_user_state').upsert(values,{onConflict:'conversation_id,user_id'});
+    // Serialize status writes so a delayed cleanup cannot overwrite the next status.
+    const client=supabase;
+    const write=activityWriteQueue.current.then(async()=>{
+      const {error}=await client.from('conversation_user_state').upsert(values,{onConflict:'conversation_id,user_id'});
+      if(error)console.warn('Connect activity update failed:',error.message);
+    });
+    activityWriteQueue.current=write.catch(()=>{});
+    return activityWriteQueue.current;
   },[user?.id]);
   const updateTyping=useCallback((id:string,value:boolean)=>updateActivity(id,value?'typing':null),[updateActivity]);
   const updateRecording=useCallback((id:string,value:boolean)=>updateActivity(id,value?'voice':null),[updateActivity]);
   useEffect(()=>{
     if(!activeChat)return;
-    const kind=videoNoteOpen?'video':stickerPicker?'sticker':null;
+    const kind=composerActivity(videoNoteRecording,stickerPicker,filePickerOpen);
     if(!kind)return;
     void updateActivity(activeChat,kind);
     const pulse=setInterval(()=>void updateActivity(activeChat,kind),4000);
-    const hidden=()=>{if(document.visibilityState!=='visible')void updateActivity(activeChat,null);};
+    const hidden=()=>{
+      const isVisible=document.visibilityState==='visible';
+      // A system file picker can temporarily hide a mobile PWA; keep its short-lived status.
+      if(kind==='file' && !isVisible)return;
+      void updateActivity(activeChat,isVisible?kind:null);
+    };
     document.addEventListener('visibilitychange',hidden);
     return()=>{clearInterval(pulse);document.removeEventListener('visibilitychange',hidden);void updateActivity(activeChat,null);};
-  },[activeChat,videoNoteOpen,stickerPicker,updateActivity]);
-  // Realtime polling starts after local inbox hydration; it never blocks it.
+  },[activeChat,videoNoteRecording,stickerPicker,filePickerOpen,updateActivity]);
+  // Realtime has a 3s polling fallback for mobile Safari when WebSockets are suspended.
   useEffect(() => {
     if (!supabase || !user || hydratedOwner!==user.id) return;
     let alive = true, refreshing=false;const inboxWork=new AbortController();
@@ -1567,7 +1848,7 @@ export default function Home() {
           window.ConnectAndroid?.dismissConversationNotifications(id,at);
       const current = activeChatRef.current;
       const action=states.find(st=>st.conversation_id===current&&st.user_id!==user.id&&st.activity_kind&&Date.parse(st.activity_until)>Date.now());
-      setPeerActivity(action?{kind:action.activity_kind,until:Date.parse(action.activity_until)}:null);
+      setPeerActivity(action?{chat:current||"",kind:action.activity_kind,until:Date.parse(action.activity_until)}:null);
       setTyping(Boolean(current && states.some(st => st.conversation_id === current && st.user_id !== user.id && st.typing_until && new Date(st.typing_until).getTime() > Date.now())));
       setPeerRecording(Boolean(current && states.some(st => st.conversation_id === current && st.user_id !== user.id && st.recording_until && new Date(st.recording_until).getTime() > Date.now())));
       for (const m of recent) {
@@ -1669,7 +1950,8 @@ export default function Home() {
         // messages were deleted. A shorter complete response supersedes cache.
         const firstIncoming=incoming[0];
         const older=!recentered&&incoming.length===200 ? prev.filter(m=>m.conversation_id===id&&firstIncoming&&compareChatMessages(m,firstIncoming)<0&&!m.deleted_at&&!serverDeleted.current.has(m.id)) : [];
-        const merged=[...older,...incoming].filter(m=>!m.deleted_at&&!serverDeleted.current.has(m.id));
+        const queued=prev.filter(m=>m.id.startsWith('local-')&&m.conversation_id===id);
+        const merged=[...older,...incoming,...queued].filter(m=>!m.deleted_at&&!serverDeleted.current.has(m.id)).sort(compareChatMessages);
         if(prev.length===merged.length&&prev.every((m,i)=>m.id===merged[i].id&&m.body===merged[i].body&&m.edited_at===merged[i].edited_at&&m.deleted_at===merged[i].deleted_at&&m.attachment_path===merged[i].attachment_path))return prev;
         return merged;
       });
@@ -1710,9 +1992,13 @@ export default function Home() {
         if(m.sender_id!==user.id)return;
         setNewerHistory(false);historyOldest.current=m;historyNewest.current=m;setMessages([m]);void refresh();return;
       }
-      setMessages(prev => {
-        const exists = prev.some(x => x.id === m.id);
-        return exists ? prev.map(x => x.id === m.id ? m : x) : [...prev, m].sort(compareChatMessages);
+      const optimistic=optimisticSend.current;
+      const replaceOptimistic=optimistic&&optimistic.chat===id&&m.sender_id===user.id&&
+        m.body===optimistic.body&&m.reply_to===optimistic.reply&&m.created_at>=optimistic.at;
+      setMessages(prev=>{
+        const without=replaceOptimistic?prev.filter(x=>x.id!==optimistic!.id):prev;
+        const exists=without.some(x=>x.id===m.id);
+        return exists?without.map(x=>x.id===m.id?m:x):[...without,m].sort(compareChatMessages);
       });
       // The viewport scan acknowledges messages only after they are actually shown.
     }).subscribe(status => { if (status === 'SUBSCRIBED') void refresh(); });
@@ -1731,7 +2017,7 @@ export default function Home() {
   useEffect(()=>{
     if(!user?.id||!activeChat||!messages.some(m=>m.conversation_id===activeChat))return;
     const userId=user.id,chatId=activeChat;
-    const rows=messages.filter(m=>m.conversation_id===chatId&&!m.deleted_at&&!hiddenMessages.includes(m.id)&&!serverDeleted.current.has(m.id));
+    const rows=messages.filter(m=>m.conversation_id===chatId&&!m.id.startsWith('local-')&&!m.deleted_at&&!hiddenMessages.includes(m.id)&&!serverDeleted.current.has(m.id));
     const timer=window.setTimeout(()=>{void writeChatHistory(userId,chatId,rows,readCache.current[chatId]||'').catch(()=>{});},400);
     return()=>window.clearTimeout(timer);
   },[user?.id,activeChat,messages,hiddenMessages]);
@@ -1959,6 +2245,11 @@ export default function Home() {
   useEffect(()=>{
     if(!user)return;for(const m of messages)if(!serverDeleted.current.has(m.id)&&!m.deleted_at)void linkMessageMedia(user.id,m.id,[...(m.attachment_path?[m.attachment_path]:[]),...parseAlbum(m.body).map(x=>x.path)]).catch(()=>{});
   },[messages,user?.id]);
+  // Retried private storage cleanups contain only object paths, never message text.
+  useEffect(()=>{
+    if(!supabase||!user)return;
+    void supabase.functions.invoke('connect-delete-forever',{body:{cleanup_pending:true}}).catch(()=>{});
+  },[user?.id]);
   useEffect(()=>{
     if(!supabase||!user)return;let active=true,running=false;
     const key='connect-deletion-cursor:'+user.id;
@@ -2064,12 +2355,22 @@ export default function Home() {
       setNotice('Не удалось переслать: ' + (error instanceof Error ? error.message : String(error)));
     } finally { setBusy(false); }
   }
+  // CONNECT_PWA_HARD_DELETE_UNIFIED_QUALITY_20261115
   async function eraseMessage(m:Message){
-    if(!supabase)return {error:{message:'Нет соединения'}};
-    let result=await supabase.rpc('connect_delete_message',{p_message_id:m.id});
-    if(result.error?.code==='PGRST202')result=await supabase.from('messages').update({deleted_at:new Date().toISOString(),body:'',attachment_path:null,attachment_name:null,attachment_type:null,attachment_size:null,attachment_kind:null}).eq('id',m.id).eq('sender_id',user!.id) as typeof result;
-    if(!result.error){await dropCachedMessage(user!.id,m.conversation_id,m.id).catch(()=>{});for(const path of [m.attachment_path,...parseAlbum(m.body).map(x=>x.path)])if(path)await clearCachedMedia('temporary','connect-attachments/'+path);}
-    return result;
+    if(!supabase||!user)return {error:new Error('Нет соединения')};
+    // The server verifies the sender, physically deletes the message row,
+    // writes a content-free tombstone, and removes unreferenced media.
+    // No fallback to a soft-delete: do not claim success if the server fails.
+    const {data,error}=await supabase.functions.invoke<{deleted:boolean;pending_files?:number}>(
+      'connect-delete-forever',{body:{message_id:m.id}}
+    );
+    if(error||!data?.deleted)return {error:error||new Error('Удаление не подтверждено сервером')};
+    await dropCachedMessage(user.id,m.conversation_id,m.id).catch(()=>{});
+    for(const path of [m.attachment_path,...parseAlbum(m.body).map(x=>x.path)]){
+      if(path)await clearCachedMedia('temporary','connect-attachments/'+path);
+    }
+    if((data.pending_files||0)>0)setNotice('Сообщение удалено. Вложение ожидает очистки на сервере.');
+    return {error:null};
   }
   async function removeForEveryone(ids:string[]){if(!supabase||!user||busy)return;const own=visibleMessages.filter(m=>ids.includes(m.id)&&m.sender_id===user.id);if(!own.length){setNotice('Можно удалить у всех только свои сообщения');return;}if(!window.confirm('Удалить '+own.length+' сообщ. у обоих участников?'))return;setBusy(true);let failed='';for(const m of own){const r=await eraseMessage(m);if(r.error){failed=r.error.message;break;}}setBusy(false);if(failed)setNotice('Не удалось удалить: '+failed);else{setMessages(prev=>prev.filter(m=>!own.some(x=>x.id===m.id)));setSelectedIds([]);setSelectionMode(false);setMenuMessage(null);}}
   function selectOne(id:string){setSelectedIds(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);}
@@ -2085,13 +2386,53 @@ export default function Home() {
   const currentName = selected?.other?.display_name || 'Собеседник';
   const peerPresence = selected?.other ? presence[selected.other.id] : undefined;
   const activityText:Record<string,string>={typing:'Печатает…',voice:'Записывает голосовое…',video:'Записывает видео…',sticker:'Выбирает стикер…',file:'Выбирает файл…'};
-  const peerStatus = peerActivity&&peerActivity.until>Date.now()?activityText[peerActivity.kind]||formatPresence(peerPresence,clock):peerRecording?'Записывает голосовое…':typing?'Печатает…':formatPresence(peerPresence,clock);
+  const activePeerKind=visiblePeerActivity(peerActivity,activeChat,Date.now());
+  const peerStatus = activePeerKind?activityText[activePeerKind]||formatPresence(peerPresence,clock):peerRecording?'Записывает голосовое…':typing?'Печатает…':formatPresence(peerPresence,clock);
   const currentPeerState=activeChat?peerStates[activeChat]:undefined;
   const filteredChats = chats.filter(c => (c.other?.display_name || '').toLocaleLowerCase('ru-RU').includes(search.toLocaleLowerCase('ru-RU')));
   useEffect(()=>{if(chatSearchOpen&&chatQuery.trim()&&searchMatches.length){const match=searchMatches[Math.min(searchPosition,searchMatches.length-1)];requestAnimationFrame(()=>document.getElementById('msg-'+match.id)?.scrollIntoView({behavior:'smooth',block:'center'}));}},[chatQuery,chatSearchOpen,searchMatches.length]);
   const filteredContacts = contacts.filter(p => p.display_name.toLocaleLowerCase('ru-RU').includes(search.toLocaleLowerCase('ru-RU')));
   const unreadTotal = Object.values(unread).reduce((sum, n) => sum + n, 0);
 
+
+  // CONNECT_PWA_HOME_ICON_BADGE_V1 — authoritative foreground reconciliation.
+  const [badgeCalls,setBadgeCalls]=useState<{userId:string;count:number;latest:string}>({userId:'',count:0,latest:''});
+  useEffect(()=>{
+    const listener=(event:Event)=>{
+      const item=(event as CustomEvent<{userId:string;count:number;latest:string}>).detail;
+      if(!item?.userId||item.userId!==user?.id)return;
+      const count=Math.min(9999,Math.max(0,Math.floor(Number(item.count)||0)));
+      const latest=typeof item.latest==='string'?item.latest:'';
+      setBadgeCalls(prev=>prev.userId===item.userId&&prev.count===count&&prev.latest===latest?prev:{userId:item.userId,count,latest});
+    };
+    window.addEventListener('connect:badge:missed',listener);
+    return()=>window.removeEventListener('connect:badge:missed',listener);
+  },[user?.id]);
+  // Include chats already read: their last known message time prevents a delayed push
+  // from turning a cleared badge back on.
+  const badgeMessages=useMemo(()=>Object.fromEntries(
+    [...new Set([...Object.keys(latest),...Object.keys(unread)])].map(id=>[id,Math.max(0,unread[id]||0)])
+  ),[unread,latest]);
+  const badgeMessageLatest=useMemo(()=>Object.fromEntries(Object.keys(badgeMessages).map(id=>[id,latest[id]?.created_at||''])),[badgeMessages,latest]);
+  const badgeSignature=JSON.stringify({chats:badgeMessages,latest:badgeMessageLatest});
+  useEffect(()=>{
+    if(window.ConnectAndroid)return;
+    const userId=user?.id||'';
+    const calls=badgeCalls.userId===userId?badgeCalls.count:0;
+    const count=userId?Math.min(9999,unreadTotal+calls):0;
+    const nav=navigator as Navigator&{setAppBadge?:(n:number)=>Promise<void>;clearAppBadge?:()=>Promise<void>};
+    // The browser displays the badge only when installed/permissioned; no extra prompt.
+    if(count>0)void nav.setAppBadge?.(count).catch(()=>{});
+    else if(nav.clearAppBadge)void nav.clearAppBadge().catch(()=>{});
+    else void nav.setAppBadge?.(0).catch(()=>{});
+    if(!('serviceWorker'in navigator))return;
+    const snapshot={type:'CONNECT_BADGE_SNAPSHOT',userId,
+      chats:userId?badgeMessages:{},latest:userId?badgeMessageLatest:{},
+      missed:calls,callsLatest:badgeCalls.userId===userId?badgeCalls.latest:''};
+    const send=(worker:ServiceWorker|null|undefined)=>worker?.postMessage(snapshot);
+    if(navigator.serviceWorker.controller)send(navigator.serviceWorker.controller);
+    else void navigator.serviceWorker.ready.then(reg=>send(reg.active)).catch(()=>{});
+  },[user?.id,unreadTotal,badgeSignature,badgeCalls.userId,badgeCalls.count,badgeCalls.latest]);
   function clearConversation(id: string) {
     if (!user || !window.confirm('Очистить переписку только на этом устройстве? У собеседника сообщения останутся.')) return;
     const next={...clearedChats,[id]:new Date().toISOString()};
@@ -2100,7 +2441,7 @@ export default function Home() {
     if (activeChat===id) exitChat();
     setNotice('Переписка скрыта на этом устройстве');
   }
-  function enterChat(id: string) { resetChatTools(); setListActions(null); setActiveChat(id); setTab('chats'); setSearch(''); setReplyTo(null); setEditing(null); setDraft(''); setMenuMessage(null); }
+  function enterChat(id: string) { setPeerActivity(null);setTyping(false);setPeerRecording(false);setFilePickerOpen(false);setVideoNoteRecording(false);setChatDisplayReady(user?.id&&(warmedChatWindows.current.get(user.id+":"+id)||0)>Date.now()?id:null); resetChatTools(); setListActions(null); setActiveChat(id); setTab('chats'); setSearch(''); setReplyTo(null); setEditing(null); setDraft(''); setMenuMessage(null); }
   useEffect(() => {
     function openFromAndroid() {
       const chatId=window.__connectAndroidPendingChat;
@@ -2113,8 +2454,85 @@ export default function Home() {
     return ()=>window.removeEventListener('connect:android-open-chat',openFromAndroid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[conversations,user?.id]);
-  function exitChat() { captureChatAnchor(); flushVisibleRead(); resetChatTools(); setActiveChat(null); setReplyTo(null); setEditing(null); setDraft(''); setMenuMessage(null); setTyping(false); }
-  function switchTab(t: Tab) { setSettingsPage('home'); setStickerPicker(false); setTab(t); setSearch(''); setNotice(''); setProfileView(null); setProfileMediaOpen(null); }
+  function exitChat() { setFilePickerOpen(false);setVideoNoteRecording(false);setPeerActivity(null);setPeerRecording(false);captureChatAnchor(); flushVisibleRead(); resetChatTools(); setActiveChat(null); setReplyTo(null); setEditing(null); setDraft(''); setMenuMessage(null); setTyping(false); }
+  function switchTab(t: Tab) { setSettingsPage('home'); setFilePickerOpen(false);setStickerPicker(false); setTab(t); setSearch(''); setNotice(''); setProfileView(null); setProfileMediaOpen(null); }
+  // Keep one in-memory navigation stack. Swipe restoration must not create new entries.
+  useEffect(() => {
+    const history = gestureHistory.current;
+    if(!user?.id) { history.owner='';history.entries=[];history.cursor=-1;history.restoring=false;return; }
+    if(history.owner!==user.id) { history.owner=user.id;history.entries=[];history.cursor=-1;history.restoring=false; }
+    const view:ConnectGestureView={tab,chat:activeChat,profile:profileView,media:profileMediaOpen,settings:settingsPage};
+    if(history.restoring) { history.restoring=false;return; }
+    const same=(a:ConnectGestureView|undefined,b:ConnectGestureView)=>Boolean(a && a.tab===b.tab && a.chat===b.chat && a.profile===b.profile && a.media===b.media && a.settings===b.settings);
+    if(same(history.entries[history.cursor],view))return;
+    // Native back buttons and bottom tabs must move the cursor too, not push duplicate screens.
+    if(same(history.entries[history.cursor-1],view)){history.cursor--;return;}
+    if(same(history.entries[history.cursor+1],view)){history.cursor++;return;}
+    history.entries=[...history.entries.slice(0,history.cursor+1),view].slice(-24);
+    history.cursor=history.entries.length-1;
+  },[user?.id,tab,activeChat,profileView,profileMediaOpen,settingsPage]);
+
+  useEffect(() => {
+    if(!user?.id || isNativeMediaRuntime())return;
+    const shell=shellRef.current;
+    if(!shell)return;
+    // CONNECT_PWA_LIST_PARITY_GESTURE_V1_20261114: PWA-only layout, never Android WebView.
+    shell.setAttribute('data-connect-pwa-list-parity','true');
+    let started:{x:number;y:number;edge:'back'|'forward'}|null=null;
+    function start(e: Event){
+      started=null;
+      // This is a DOM listener, not the React TouchEvent imported for message gestures.
+      const touches=(e as Event & {touches:TouchList}).touches;
+      if(touches.length!==1 || crop || mediaViewer || videoNoteOpen || !!menuMessage || !!forwardIds.length || selectionMode || stickerPicker || chatSearchOpen || chatActions)return;
+      if(document.querySelector('.connect-call-backdrop,.connect-call-history-screen'))return;
+      // A root tab never starts swipe navigation, even away from the bottom dock.
+      const currentView=gestureHistory.current.entries[gestureHistory.current.cursor];
+      if(!currentView || (!currentView.chat && !currentView.profile && !currentView.media && currentView.settings==='home'))return;
+      const target=e.target;
+      // Keep the entire bottom navigation dock outside swipe history, even near screen edges.
+      if(target instanceof Element && target.closest('.bottom-nav,.nav-tab,.connect-calls-tab'))return;
+      const dock=shell!.querySelector<HTMLElement>('.bottom-nav');
+      if(dock && touches[0].clientY>=dock.getBoundingClientRect().top-12)return;
+      if(target instanceof Element && target.closest('input,textarea,select,[contenteditable="true"],.bubble,.context-overlay,.sticker-picker,.connect-vnote-backdrop,.connect-media-overlay'))return;
+      const rect=shell!.getBoundingClientRect(),x=touches[0].clientX,y=touches[0].clientY;
+      if(x>=rect.left && x<=rect.left+28)started={x,y,edge:'back'};
+      else if(x<=rect.right && x>=rect.right-28)started={x,y,edge:'forward'};
+    }
+    function end(e: Event){
+      const changedTouches=(e as Event & {changedTouches:TouchList}).changedTouches;
+      if(!started || changedTouches.length!==1)return;
+      const origin=started;started=null;
+      // Do not navigate if a gesture ends on or within the bottom dock's hit zone.
+      const dock=shell!.querySelector<HTMLElement>('.bottom-nav');
+      if((e.target instanceof Element && e.target.closest('.bottom-nav,.nav-tab,.connect-calls-tab')) ||
+        (dock && changedTouches[0].clientY>=dock.getBoundingClientRect().top-12))return;
+      const dx=changedTouches[0].clientX-origin.x,dy=changedTouches[0].clientY-origin.y;
+      const direction=connectSwipeDirection(origin.edge,dx,dy);
+      if(!direction)return;
+      const history=gestureHistory.current,step=history.cursor+direction;
+      if(step<0||step>=history.entries.length)return;
+      const target=history.entries[step];
+      if(target.chat && !conversations.some(c=>c.id===target.chat))return;
+      if(target.profile && !profiles.some(p=>p.id===target.profile))return;
+      if(!connectAllowHistorySwipe(history.entries[history.cursor],target,direction))return;
+      e.preventDefault();
+      history.cursor=step;
+      history.restoring=true;
+      if(activeChat && target.chat!==activeChat)exitChat();
+      if(target.chat && target.chat!==activeChat)enterChat(target.chat);
+      if(!target.chat)setActiveChat(null);
+      if(target.profile)showProfile(target.profile);
+      else {setProfileView(null);setProfileMediaOpen(null);}
+      setProfileMediaOpen(target.media);
+      setTab(target.tab);setSettingsPage(target.settings);setSearch('');setListActions(null);setStickerPicker(false);
+    }
+    function cancel(){started=null;}
+    shell.addEventListener('touchstart',start,{passive:true});
+    shell.addEventListener('touchend',end,{passive:false});
+    shell.addEventListener('touchcancel',cancel,{passive:true});
+    return()=>{shell.removeEventListener('touchstart',start);shell.removeEventListener('touchend',end);shell.removeEventListener('touchcancel',cancel);};
+  },[user?.id,tab,activeChat,profileView,profileMediaOpen,settingsPage,crop,mediaViewer,videoNoteOpen,menuMessage,forwardIds.length,selectionMode,stickerPicker,chatSearchOpen,chatActions,conversations,profiles]);
+
   async function openContact(p: Profile) {
     if (!supabase || !user || busy) return;
     setBusy(true); setNotice('');
@@ -2150,45 +2568,132 @@ export default function Home() {
     if (error) { setNotice('Не удалось удалить: ' + error.message); return; }
     setMessages(prev => prev.filter(x => x.id !== m.id));
   }
+  const optimisticSend=useRef<{id:string;chat:string;body:string;reply:string|null;at:string}|null>(null);
   async function sendMessage(e: FormEvent) {
     e.preventDefault();
     if (!supabase || !user || !activeChat || !draft.trim() || busy) return;
-    const body = draft.trim(); setBusy(true); setNotice('');
-    if (editing) {
-      const { error } = await supabase.from('messages').update({ body }).eq('id', editing.id).eq('sender_id', user.id);
-      setBusy(false); if (error) { setNotice('Не удалось изменить: ' + error.message); return; }
-      setMessages(prev => prev.map(m => m.id === editing.id ? { ...m, body, edited_at: new Date().toISOString() } : m));
-      cancelCompose(); return;
+    const body=draft.trim(),chat=activeChat,reply=replyTo?.id||null;
+    setBusy(true);setNotice('');
+    if(editing){
+      const {error}=await supabase.from('messages').update({body}).eq('id',editing.id).eq('sender_id',user.id);
+      setBusy(false);if(error){setNotice('Не удалось изменить: '+error.message);return;}
+      setMessages(prev=>prev.map(m=>m.id===editing.id?{...m,body,edited_at:new Date().toISOString()}:m));
+      cancelCompose();return;
     }
-    const { data, error } = await supabase.from('messages').insert({ conversation_id: activeChat, sender_id: user.id, body, reply_to: replyTo?.id || null }).select(MESSAGE_COLUMNS).single();
-    setBusy(false); if (error || !data) { setNotice('Не удалось отправить: ' + (error?.message || 'Ошибка')); return; }
-    setDraft(''); setReplyTo(null); lastKeypress.current = 0; void updateTyping(activeChat, false);
-    const m = data as Message;
-    setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m]);
-    setLatest(prev => ({ ...prev, [activeChat]: m }));
-    requestAnimationFrame(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; });
+    const tempId='local-'+crypto.randomUUID(),at=new Date().toISOString();
+    optimisticSend.current={id:tempId,chat,body,reply,at};
+    const optimistic:Message={id:tempId,conversation_id:chat,sender_id:user.id,body,created_at:at,
+      edited_at:null,deleted_at:null,reply_to:reply,attachment_path:null,attachment_name:null,
+      attachment_type:null,attachment_size:null,attachment_kind:null};
+    setMessages(prev=>[...prev,optimistic].sort(compareChatMessages));
+    setDraft('');setReplyTo(null);lastKeypress.current=0;void updateTyping(chat,false);
+    requestAnimationFrame(()=>{const el=scrollRef.current;if(el&&activeChat===chat)el.scrollTop=el.scrollHeight;});
+    const {data,error}=await supabase.from('messages').insert({conversation_id:chat,sender_id:user.id,body,reply_to:reply}).select(MESSAGE_COLUMNS).single();
+    setBusy(false);
+    if(error||!data){
+      setMessages(prev=>prev.filter(m=>m.id!==tempId));
+      if(activeChat===chat){setDraft(current=>current||body);setReplyTo(current=>current||replyTo);}
+      setNotice('Не удалось отправить: '+(error?.message||'Ошибка'));
+      if(optimisticSend.current?.id===tempId)optimisticSend.current=null;
+      return;
+    }
+    const m=data as Message;
+    if(optimisticSend.current?.id===tempId)optimisticSend.current=null;
+    setMessages(prev=>{
+      const without=prev.filter(x=>x.id!==tempId);
+      return without.some(x=>x.id===m.id)?without:[...without,m].sort(compareChatMessages);
+    });
+    setLatest(prev=>({...prev,[chat]:m}));
   }
 
 
+  // CONNECT_PWA_CHAT_MEDIA_ENTRY_V2
   useEffect(() => {
-    if (!supabase || !user) return;
-    let cancelled = false;
-    const paths = Array.from(new Set(messages.filter(m=>!m.deleted_at).flatMap(m=>[...(m.attachment_path?[m.attachment_path]:[]),...parseAlbum(m.body).map(x=>x.path)])));
-    const missing = paths.filter(path => !attachmentUrls[path]);
-    if (!missing.length) return;
-    void Promise.all(missing.map(async path => {
-      const {data} = await supabase.storage.from('connect-attachments').createSignedUrl(path, 3600);
-      return {path, url:data?.signedUrl ? mediaUrl(data.signedUrl) : undefined};
-    })).then(rows => {
-      if (cancelled) return;
-      setAttachmentUrls(prev => {
-        const next={...prev};
-        rows.forEach(row => {if(row.url) next[row.path]=row.url;});
-        return next;
-      });
-    });
-    return () => {cancelled=true;};
-  }, [messages, user?.id]);
+    if(!supabase||!user)return;
+    let cancelled=false;
+    const client=supabase,viewer=user.id;
+    // Android also needs progressive, bounded signing for large audio-heavy chats.
+    if(isNativeMediaRuntime()){
+      const selected=messages.filter(m=>!m.deleted_at&&(!activeChat||m.conversation_id===activeChat));
+      const paths=Array.from(new Set([...selected].reverse().flatMap(m=>[...(m.attachment_path?[m.attachment_path]:[]),...parseAlbum(m.body).map(x=>x.path)])));
+      const missing=paths.filter(path=>!attachmentUrls[path]);
+      let cursor=0, audioWarm=0;
+      const worker=async()=>{
+        while(!cancelled&&cursor<missing.length){
+          const path=missing[cursor++];
+          const meta=selected.find(m=>m.attachment_path===path);
+          const identity='/storage/v1/object/sign/connect-attachments/'+path;
+          try {
+            const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+            let url=local.startsWith('blob:')?local:'';
+            if(!url){
+              const {data}=await client.storage.from('connect-attachments').createSignedUrl(path,3600);
+              url=data?.signedUrl?mediaUrl(data.signedUrl):'';
+            }
+            if(!url||cancelled)continue;
+            setAttachmentUrls(prev=>prev[path]?prev:{...prev,[path]:url});
+            if(meta?.attachment_kind==='audio'&&meta.attachment_size&&meta.attachment_size<=1024*1024&&audioWarm++<2)
+              void prefetchChatAudio(url,viewer,meta.attachment_size);
+          }catch{/* One failed attachment must not block the rest. */}
+        }
+      };
+      void Promise.all(Array.from({length:Math.min(4,missing.length)},()=>worker())).catch(()=>{});
+      return()=>{cancelled=true;};
+    }
+    if(!activeChat||historyReadyChat!==activeChat)return;
+    const chatId=activeChat;
+    // Newest first. UI can open while older attachments continue preparing.
+    const entries=[...new Map(messages.filter(m=>m.conversation_id===chatId&&!m.deleted_at&&!serverDeleted.current.has(m.id))
+      .flatMap(m=>[
+        ...(m.attachment_path?[{path:m.attachment_path,kind:m.attachment_kind||'file',size:m.attachment_size||0}]:[]),
+        ...parseAlbum(m.body).map(x=>({path:x.path,kind:x.kind,size:0}))
+      ]).filter(item=>Boolean(item.path)).map(item=>[item.path,item] as const)).values()].reverse();
+    // Set readiness as soon as the recent set is prepared; outer timer is a hard cap.
+    let offset=0,recentLeft=Math.min(10,entries.length);
+    if(!recentLeft)setChatDisplayReady(chatId);
+    const worker=async()=>{
+      while(!cancelled&&offset<entries.length){
+        const index=offset++,item=entries[index],path=item.path;
+        try{
+          const identity='/storage/v1/object/sign/connect-attachments/'+path;
+          const cached=await resolveCachedMedia(identity,viewer);
+          const previous=attachmentUrls[path];
+          let url=cached.startsWith('blob:')?cached:(previous&&(previous.startsWith('blob:')||(signedMediaLifetimes.current.get(path)||0)>Date.now()+60000)?previous:'');
+          if(!url){
+            const {data,error}=await client.storage.from('connect-attachments').createSignedUrl(path,3600);
+            if(!error&&data?.signedUrl){url=mediaUrl(data.signedUrl);signedMediaLifetimes.current.set(path,Date.now()+48*60*1000);}
+          }
+          if(!url)continue;
+          if(!cancelled)setAttachmentUrls(prev=>prev[path]===url?prev:{...prev,[path]:url});
+          if(item.kind==='image'&&supportsPhotoPreview(path)){
+            const thumb=photoPreviewPath(path),thumbIdentity='/storage/v1/object/sign/connect-attachments/'+thumb;
+            let local=await resolveCachedMedia(thumbIdentity,viewer);
+            if(!local.startsWith('blob:')){
+              const signed=await client.storage.from('connect-attachments').createSignedUrl(thumb,3600);
+              if(signed.data?.signedUrl){const thumbUrl=mediaUrl(signed.data.signedUrl);
+                await prefetchCachedMedia(thumbUrl,viewer);
+                const hydrated=await resolveCachedMedia(thumbIdentity,viewer);
+                local=hydrated.startsWith('blob:')?hydrated:thumbUrl;
+              }else local='';
+            }
+            if(!cancelled)setPhotoPreviews(prev=>prev[path]=== (local||null)?prev:{...prev,[path]:local||null});
+          }
+          if(item.kind==='video')await cachedChatPoster(path).catch(()=>null);
+           if(item.kind==='audio'&&index<4&&item.size>0&&item.size<=1024*1024)
+             void prefetchChatAudio(url,viewer,item.size);
+        }catch{/* Never let a failed attachment block message navigation. */}
+        finally{
+          if(index<10&&--recentLeft===0&&!cancelled){
+            warmedChatWindows.current.set(viewer+':'+chatId,Date.now()+42*60*1000);
+            setChatDisplayReady(chatId);
+          }
+        }
+      }
+    };
+    void Promise.all(Array.from({length:Math.min(3,entries.length)},()=>worker())).catch(()=>{});
+    return()=>{cancelled=true;};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeChat,historyReadyChat,messages,user?.id]);
 
   useEffect(()=>{
     if(!supabase||!user)return;
@@ -2254,30 +2759,11 @@ export default function Home() {
     try {
       const source = await supabase.storage.from('connect-attachments').download(m.attachment_path);
       if (source.error || !source.data) throw new Error(source.error?.message || 'Файл недоступен');
-      let imageBlob: Blob = source.data;
-      let mime = (m.attachment_type || imageBlob.type || 'image/png').toLowerCase();
-      if (mime === 'image/jpeg' || mime === 'image/jpg') {
-        const url = URL.createObjectURL(imageBlob);
-        try {
-          const image = new Image();
-          await new Promise<void>((resolve, reject) => {
-            image.onload = () => resolve();
-            image.onerror = () => reject(new Error('Невозможно прочитать изображение'));
-            image.src = url;
-          });
-          const canvas = document.createElement('canvas');
-          canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
-          const context = canvas.getContext('2d');
-          if (!context) throw new Error('Невозможно обработать изображение');
-          context.drawImage(image, 0, 0);
-          imageBlob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
-            value => value ? resolve(value) : reject(new Error('Не удалось создать PNG')), 'image/png'
-          ));
-          mime = 'image/png';
-        } finally { URL.revokeObjectURL(url); }
-      }
-      if (!['image/png','image/webp','image/gif'].includes(mime)) throw new Error('Поддерживаются PNG, WebP и GIF');
-      if (imageBlob.size < 1 || imageBlob.size > 2 * 1024 * 1024) throw new Error('Размер стикера должен быть до 2 МБ');
+      let imageBlob: Blob = await prepareStickerFile(new File(
+        [source.data],m.attachment_name||'sticker.png',
+        {type:(m.attachment_type||source.data.type||'image/png').toLowerCase()}
+      ),convertStickerOnServer);
+      const mime=imageBlob.type;
       const hash = await crypto.subtle.digest('SHA-256', await imageBlob.arrayBuffer());
       const fingerprint = Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join('').slice(0, 48);
       const name = 'iOS-' + fingerprint;
@@ -2364,7 +2850,11 @@ export default function Home() {
       const {data:{session}}=await client.auth.getSession();
       if(!session)throw Error('Сессия завершена');
       for(let i=0;i<files.length;i++){
-        const file=files[i];let path=`${chatId}/${uid}/${crypto.randomUUID()}`;
+        let file=files[i];
+        // Reduce supported media BEFORE creating thumbnails, uploading, or recording album MIME.
+        const prepared=await connectOptimizeMedia(file,{native:isNativeMediaRuntime(),onProgress:f=>setUploadProgress(Math.round(((i+f*.35)/files.length)*100))});
+        file=prepared.file;
+        let path=`${chatId}/${uid}/${crypto.randomUUID()}`;
         let thumb:Blob|null=null,poster:Blob|null=null;
         if(file.type.startsWith('image/') && file.type!=='image/gif'){
           const size=await connectImageFileSize(file);
@@ -2418,6 +2908,10 @@ export default function Home() {
     let path=`${chatId}/${user.id}/${crypto.randomUUID()}`;
     setBusy(true);setUploadProgress(0);setNotice('');
     try {
+      // The same preparation is used for a single file and every item in an album.
+      // It retains the original file when iOS cannot safely encode the audio/video.
+      const prepared=await connectOptimizeMedia(file,{native:isNativeMediaRuntime(),onProgress:f=>setUploadProgress(Math.round(f*35))});
+      file=prepared.file;
       // The dimensions travel with the storage path, so the recipient can reserve
       // an accurate layout before downloading a newly sent photo.
       if (kind === 'image' && !/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(file.name)) {
@@ -2513,7 +3007,7 @@ export default function Home() {
         ? ['audio/webm;codecs=opus','audio/webm','audio/mp4;codecs=mp4a.40.2','audio/mp4']
         : ['audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/webm;codecs=opus','audio/webm'];
       const mime=formats.find(x=>MediaRecorder.isTypeSupported(x));
-      const recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+      const recorder=new MediaRecorder(stream,{...(mime?{mimeType:mime}:{}),...(!isNativeMediaRuntime()?{audioBitsPerSecond:56000}:{})});
       audioChunks.current=[];recordingStream.current=stream;mediaRecorder.current=recorder;
       recordingChat.current=activeChat;recordingStarted.current=performance.now();
       let failed=false;let sendOnStop=true;
@@ -2572,15 +3066,13 @@ export default function Home() {
   }
   async function openNativeVideoNote(){
     if(!window.ConnectNative){setVideoNoteOpen(true);return;}
-    const chat=activeChat;
-    if(chat)void updateActivity(chat,'video');
-    const pulse=setInterval(()=>{if(chat)void updateActivity(chat,'video');},4000);
+    const chat=activeChat;nativeVideoChat.current=chat;
     try{const file:File|null=await window.ConnectNative.request('recordVideo:open');if(file&&chat===activeChatRef.current)await sendAttachment(file);}
     catch(e){setNotice(e instanceof Error?e.message:'Не удалось записать видеокружок');}
-    finally{clearInterval(pulse);if(chat)void updateActivity(chat,null);}
+    finally{if(nativeVideoChat.current===chat)nativeVideoChat.current=null;setVideoNoteRecording(false);if(chat)void updateActivity(chat,null);}
   }
   useEffect(()=>{
-    const stopped=(event:Event)=>{const state=(event as CustomEvent).detail;if(state?.kind!=='voice'||state.recording)return;const chat=recordingChat.current;if(recordInterval.current!==null)clearInterval(recordInterval.current);recordInterval.current=null;setRecording(false);setRecordSeconds(0);if(chat)void updateRecording(chat,false);};
+    const stopped=(event:Event)=>{const state=(event as CustomEvent).detail;if(state?.kind==='video'){setVideoNoteRecording(nativeVideoActivity(state.recording===true,nativeVideoChat.current,activeChatRef.current));return;}if(state?.kind!=='voice'||state.recording)return;const chat=recordingChat.current;if(recordInterval.current!==null)clearInterval(recordInterval.current);recordInterval.current=null;setRecording(false);setRecordSeconds(0);if(chat)void updateRecording(chat,false);};
     window.addEventListener('connect:native-recording',stopped);
     return()=>window.removeEventListener('connect:native-recording',stopped);
   },[user?.id]);
@@ -2728,7 +3220,7 @@ export default function Home() {
     window.history.replaceState({}, '', window.location.pathname);
   }
   async function logout() {
-    if(user?.id)await wipeUserHistory(user.id).catch(()=>{}); await supabase?.auth.signOut(); exitChat(); setProfiles([]); setConversations([]); setMessages([]);
+    if(user?.id)await wipeUserHistory(user.id).catch(()=>{}); setAvatarUrls({});if(user?.id)forgetUserChatPresentation(user.id); warmedChatWindows.current.clear();signedMediaLifetimes.current.clear(); await supabase?.auth.signOut(); exitChat(); setProfiles([]); setConversations([]); setMessages([]);
     setLatest({}); setUnread({}); readCache.current = {}; setPassword(''); setNotice('');
   }
 
@@ -2736,6 +3228,7 @@ export default function Home() {
   const screenStyle: CSSProperties | undefined = frame ? { height: `${frame.height}px`, top: `${frame.top}px`, paddingBottom: keyboardOpen ? '0px' : undefined } : undefined;
   return <div className={'connect-app ' + theme + (keyboardOpen ? ' keyboard-open' : '')} data-visual-scene={visualScene} ref={shellRef} style={{...screenStyle, '--accent':accent,'--accent2':accent} as CSSProperties}>
     {splashVisible && <ConnectSplashScreen ready={!loading && (!user || directoryReady)} onComplete={finishSplash}/>}
+    {supabase && user && !setup && <ConnectPushGuardian supabase={supabase} userId={user.id}/>}
     {!supabase ? <div className="connection-error"><Icon name="info" size={32}/><h2>Подключение не настроено</h2><p>Проверьте NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY в Vercel.</p></div>
       : loading || user&&hydratedOwner!==user.id ? <div className="loading-screen"><img src="/icon-192.png" alt=""/><p>Подключаем Connect…</p></div>
         : !user || setup ? <div className="login-screen">
@@ -2774,7 +3267,7 @@ export default function Home() {
             </div>
             </>}
           </div>
-          : activeChat && selected ? <div className="chat-view">
+          : activeChat && selected ? <div className={"chat-view"+(!isNativeMediaRuntime()&&chatDisplayReady!==activeChat?" connect-chat-preparing":"")}>
             <header className="chat-header">
               <button type="button" className="icon-btn back-btn" onClick={exitChat} aria-label="Назад к чатам"><Icon name="back" size={28}/></button>
               <button type="button" className="chat-person-link" onClick={()=>selected.other && showProfile(selected.other.id)}>
@@ -2786,6 +3279,7 @@ export default function Home() {
             </header>
             {chatSearchOpen&&<div className="chat-search-bar"><Icon name="search" size={18}/><input autoFocus placeholder="Поиск по чату" value={chatQuery} onChange={e=>{setChatQuery(e.target.value);setSearchPosition(0)}}/><small>{searchMatches.length?`${searchPosition+1}/${searchMatches.length}`:'0'}</small><button type="button" onClick={()=>showMatch(searchPosition-1)}>↑</button><button type="button" onClick={()=>showMatch(searchPosition+1)}>↓</button><button type="button" onClick={()=>{setChatSearchOpen(false);setChatQuery('')}} aria-label="Закрыть поиск"><Icon name="close" size={17}/></button></div>}
             {selectionMode&&<div className="selection-toolbar"><button type="button" onClick={()=>{setSelectionMode(false);setSelectedIds([])}}>Отмена</button><strong>Выбрано: {selectedIds.length}</strong><button type="button" disabled={!selectedIds.length} onClick={()=>beginForward(selectedIds)}>Переслать</button><button type="button" disabled={!selectedIds.length} onClick={()=>hideMessages(selectedIds)}>У себя</button><button type="button" disabled={!selectedIds.length||selectedIds.some(id=>visibleMessages.find(m=>m.id===id)?.sender_id!==user.id)} onClick={()=>void removeForEveryone(selectedIds)}>У всех</button></div>}
+            {!isNativeMediaRuntime()&&chatDisplayReady!==activeChat&&<div className="connect-chat-entry-overlay" role="status" aria-label="Подготовка переписки" style={wallpaper?{backgroundImage:`linear-gradient(#00000018,#00000018),url(${wallpaper})`,backgroundSize:'cover',backgroundPosition:'center'}:undefined}><span className="connect-chat-entry-pulse" aria-hidden="true"><i/><i/><i/></span></div>}
             <div className={"message-scroll"+(wallpaper?" has-wallpaper":"")} style={wallpaper?{backgroundImage:`linear-gradient(#00000018,#00000018),url(${wallpaper})`}:undefined} ref={scrollRef} onScroll={trackScroll} onPointerDownCapture={()=>{historyTouched.current=true}} onWheelCapture={()=>{historyTouched.current=true}} aria-label="История сообщений">
               <div className="message-stream">
                 {historyHasMore&&<button type="button" className="connect-history-more" disabled={historyLoadingMore} onClick={()=>void loadOlderChatMessages()}>{historyLoadingMore?'Загружаем…':'Предыдущие сообщения'}</button>}
@@ -2814,7 +3308,7 @@ export default function Home() {
                         {forwardedMessage(m.body).from && <div className="connect-forward-compact" title={`Переслано от ${forwardedMessage(m.body).from}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 5l6 6-6 6"/><path d="M20 11H9a6 6 0 0 0-6 6v2"/></svg><span>от {forwardedMessage(m.body).from}</span></div>}
                         {parseAlbum(m.body).length>0 && <div className="connect-album-grid">{parseAlbum(m.body).map((item,i)=><button type="button" key={item.path} className="connect-media-thumb" onClick={e=>{e.stopPropagation();if(attachmentUrls[item.path])setMediaViewer({...item,url:attachmentUrls[item.path]})}} aria-label={`Открыть файл ${i+1}`}>{attachmentUrls[item.path]?(item.kind==='image'?(imageInChat(item.path)?<img src={imageInChat(item.path)} alt={item.name} loading="lazy" onError={()=>failedPhotoPreview(item.path)}/>:<span>Миниатюра…</span>):<><VideoThumbnail src={attachmentUrls[item.path]} path={item.path}/><span className="connect-media-play">▶</span></>):<span>Загрузка…</span>}</button>)}</div>}
                         {m.attachment_path && <div className={isKeyboardSticker(m) ? "attachment-preview keyboard-sticker-preview" : m.attachment_kind==='image' ? "attachment-preview connect-adaptive-photo" : m.attachment_kind==='video' && !isVideoNote(m) ? "attachment-preview connect-adaptive-video" : "attachment-preview"} style={m.attachment_kind==='image' && !isKeyboardSticker(m) ? connectPhotoFrameStyle(m.attachment_path) : m.attachment_kind==='video' && !isVideoNote(m) ? connectVideoFrameStyle(m.attachment_path) : undefined}>
-                          {!attachmentUrls[m.attachment_path] ? (isKeyboardSticker(m) ? <span className="connect-keyboard-sticker-loading" aria-label="Загрузка стикера"/> : <span>Загрузка вложения…</span>)
+                          {!attachmentUrls[m.attachment_path] ? (isKeyboardSticker(m) ? <span className="connect-keyboard-sticker-loading" aria-label="Загрузка стикера"/> : (isNativeMediaRuntime()?<span>Загрузка вложения…</span>:<span className="connect-media-unavailable" aria-label="Подготовка вложения">{m.attachment_kind==='video'?'▶':m.attachment_kind==='audio'?'♪':m.attachment_kind==='image'?'▧':'◇'}</span>))
                             : m.attachment_kind==='image' ? (isKeyboardSticker(m)
                               ? <img className="connect-keyboard-sticker" src={attachmentUrls[m.attachment_path]} alt="Стикер" draggable={false} loading="lazy"/>
                               : <button type="button" className="connect-media-thumb connect-adaptive-image" onClick={e=>{e.stopPropagation();setMediaViewer({url:attachmentUrls[m.attachment_path!],path:m.attachment_path!,name:m.attachment_name || 'Фото.jpg',kind:'image'})}} aria-label="Открыть фото">{imageInChat(m.attachment_path!)
@@ -2824,11 +3318,11 @@ export default function Home() {
                                  : <span>Миниатюра…</span>}</button>)
                             : isVideoNote(m) ? <VideoNoteBubble src={attachmentUrls[m.attachment_path]} name={m.attachment_name||'Видеокружок'} path={m.attachment_path} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/>
                             : m.attachment_kind==='video' ? <ConnectInlineAutoplayVideo src={attachmentUrls[m.attachment_path]} path={m.attachment_path} onOpen={()=>setMediaViewer({url:attachmentUrls[m.attachment_path!],path:m.attachment_path!,name:m.attachment_name || 'Видео.mp4',kind:'video'})}/>
-                            : m.attachment_kind==='audio' ? <div className="connect-audio-download"><VoicePlayer src={attachmentUrls[m.attachment_path]} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/></div>
-                            : isPlayableAudioFile(m) ? <VoicePlayer src={attachmentUrls[m.attachment_path]} sentAt={m.created_at} mine={mine} fileName={m.attachment_name||'Аудиофайл'} onSave={()=>void saveAttachment(m.attachment_path!,m.attachment_name||'Аудиофайл')} delivered={Boolean(currentPeerState?.delivered&&currentPeerState.delivered>=m.created_at||currentPeerState?.read&&currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read&&currentPeerState.read>=m.created_at)}/>
+                            : m.attachment_kind==='audio' ? <div className="connect-audio-download"><VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/></div>
+                            : isPlayableAudioFile(m) ? <VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} sentAt={m.created_at} mine={mine} fileName={m.attachment_name||'Аудиофайл'} onSave={()=>void saveAttachment(m.attachment_path!,m.attachment_name||'Аудиофайл')} delivered={Boolean(currentPeerState?.delivered&&currentPeerState.delivered>=m.created_at||currentPeerState?.read&&currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read&&currentPeerState.read>=m.created_at)}/>
                             : <button type="button" className="attachment-file" onClick={e=>{e.stopPropagation();void saveAttachment(m.attachment_path!,m.attachment_name || 'Файл')}}><Icon name="file" size={23}/><span>{m.attachment_name || 'Файл'}<small>{m.attachment_size ? (m.attachment_size/1048576).toFixed(1)+' МБ' : ''} · Скачать</small></span></button>}
                         </div>}
-                        {/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/.test(forwardedMessage(m.body).text) ? (()=>{const id=forwardedMessage(m.body).text.match(/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/)?.[1];const st=customStickers.find(x=>x.id===id);return st?<img className="sent-sticker" src={customStickerUrl(st)} alt="Стикер" loading="lazy"/>:<span>Стикер недоступен</span>})() : stickerFromBody(forwardedMessage(m.body).text) ? <img className="sent-sticker" src={stickerUrl(stickerFromBody(forwardedMessage(m.body).text)!)} alt="Стикер" loading="lazy"/> : (parseAlbum(m.body).length ? null : forwardedMessage(m.body).text ? highlightMessage(forwardedMessage(m.body).text) : null)}
+                        {/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/.test(forwardedMessage(m.body).text) ? (()=>{const id=forwardedMessage(m.body).text.match(/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/)?.[1];const st=customStickers.find(x=>x.id===id);const link=st?customStickerUrl(st):'';return link?<img className="sent-sticker" src={link} alt="Стикер" loading="lazy"/>:(!st&&stickerCatalogReady?<span>Стикер недоступен</span>:<span className="connect-sticker-loading" role="status" aria-label="Загрузка стикера"><i/></span>)})() : stickerFromBody(forwardedMessage(m.body).text) ? <img className="sent-sticker" src={stickerUrl(stickerFromBody(forwardedMessage(m.body).text)!)} alt="Стикер" loading="lazy"/> : (parseAlbum(m.body).length ? null : forwardedMessage(m.body).text ? highlightMessage(forwardedMessage(m.body).text) : null)}
                       </></div>
                       {m.attachment_kind!=='audio' && !isPlayableAudioFile(m) && !isVideoNote(m) && <div className="bubble-meta">{!m.deleted_at && isPlayableAudioFile(m) && <button type="button" className="connect-inline-audio-save" onClick={e=>{e.stopPropagation();void saveAttachment(m.attachment_path!,m.attachment_name || 'Аудиофайл')}}>Сохранить</button>}{m.edited_at && !m.deleted_at && <span>изменено · </span>}{timeLabel(m.created_at)}{mine && <MessageChecks delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/>}</div>}
                     </div>
@@ -2854,7 +3348,7 @@ export default function Home() {
               </div>}
               {uploadProgress!==null && <div className="upload-status">Отправка файла: {uploadProgress}%<progress max={100} value={uploadProgress}/></div>}
               {recording && <RecordingBar started={recordingStarted.current} stream={recordingStream.current} onCancel={()=>finishRecording(false)} onSend={()=>finishRecording(true)}/>}
-              <input ref={attachmentInput} type="file" multiple hidden onChange={e=>{chooseAttachments(e.currentTarget.files);e.currentTarget.value='';}}/>
+              <input ref={attachmentInput} type="file" multiple hidden onChange={e=>{setFilePickerOpen(false);chooseAttachments(e.currentTarget.files);e.currentTarget.value='';}}/>
               {stickerPicker && <div className="sticker-picker">
                 <div className="sticker-picker-tabs">
                   {STICKER_PACKS.filter(p=>enabledPacks.includes(p.id)).map(p=><button key={p.id} type="button" className={stickerPack===p.id?'active':''} onClick={()=>{setStickerPack(p.id);setCustomPack('')}}>{p.emoji} {p.name}</button>)}
@@ -2869,7 +3363,7 @@ export default function Home() {
                     <button type="button" className="sticker-fav" onClick={()=>void deleteCustomSticker(st)} aria-label="Удалить из избранного">★</button>
                   </div>)}{customPack?customStickers.filter(st=>st.pack_id===customPack).map(st=><button key={st.id} type="button" className="sticker-choice" onClick={()=>void sendCustomSticker(st)} disabled={busy}><img src={customStickerUrl(st)} alt="Стикер"/></button>):(stickerPack==='favorites'?stickerFavorites:stickerPack==='recent'?stickerRecent:STICKER_PACKS.find(p=>p.id===stickerPack)?.stickers.map(st=>stickerPack+':'+st.id)||[]).map(key=>{const [pack,id]=key.split(':');const found=STICKER_PACKS.find(p=>p.id===pack)?.stickers.find(st=>st.id===id);if(!found)return null;return <div key={key} className="sticker-choice"><button type="button" onClick={()=>void sendSticker(pack as StickerPackId,id)} disabled={busy} aria-label="Отправить стикер"><img src={stickerUrl({pack,id})} alt="Стикер"/></button><button type="button" className="sticker-fav" onClick={()=>toggleFavorite(key)} aria-label="В избранное">{stickerFavorites.includes(key)?'★':'☆'}</button></div>;})}</div>
               </div>}
-              <div className="compose-line"><button type="button" className="composer-extra" onClick={()=>setStickerPicker(x=>!x)} aria-label="Стикеры"><Icon name="smile" size={24}/></button><button className="composer-extra" type="button" disabled={busy || recording || Boolean(editing)} onClick={()=>{if(activeChat)void updateActivity(activeChat,'file');attachmentInput.current?.click();}} aria-label="Прикрепить фото, видео или файл"><Icon name="plus" size={23}/></button><input ref={inputRef} type="text" autoComplete="off" enterKeyHint="send" aria-label="Сообщение" maxLength={10000} value={draft} onChange={e => changeDraft(e.target.value)} onPaste={handleComposerPaste} placeholder={editing ? 'Изменить сообщение…' : 'Сообщение…'}/><button className="send-button" type="submit" disabled={busy || !draft.trim()} aria-label={editing ? 'Сохранить' : 'Отправить'}><Icon name={editing ? 'check' : 'send'} size={23}/></button>{!draft.trim() && !editing && !recording && <button className="composer-extra" type="button" disabled={busy} onClick={()=>void openNativeVideoNote()} aria-label="Записать видеокружок"><Icon name="camera" size={22}/></button>}{!draft.trim() && !editing && <button className="composer-extra" type="button" disabled={busy} onClick={()=>recording?finishRecording(true):void beginRecording()} aria-label="Записать голосовое"><Icon name={recording?'stop':'mic'} size={22}/></button>}</div>
+              <div className="compose-line"><button type="button" className="composer-extra" onClick={()=>{setFilePickerOpen(false);setStickerPicker(x=>!x);}} aria-label="Стикеры"><Icon name="smile" size={24}/></button><button className="composer-extra" type="button" disabled={busy || recording || Boolean(editing)} onClick={()=>{setStickerPicker(false);filePickerOpenedAt.current=Date.now();setFilePickerOpen(true);if(activeChat)void updateActivity(activeChat,'file');attachmentInput.current?.click();}} aria-label="Прикрепить фото, видео или файл"><Icon name="plus" size={23}/></button><input ref={inputRef} type="text" autoComplete="off" enterKeyHint="send" aria-label="Сообщение" maxLength={10000} value={draft} onChange={e => changeDraft(e.target.value)} onPaste={handleComposerPaste} placeholder={editing ? 'Изменить сообщение…' : 'Сообщение…'}/><button className="send-button" type="submit" disabled={busy || !draft.trim()} aria-label={editing ? 'Сохранить' : 'Отправить'}><Icon name={editing ? 'check' : 'send'} size={23}/></button>{!draft.trim() && !editing && !recording && <button className="composer-extra" type="button" disabled={busy} onClick={()=>void openNativeVideoNote()} aria-label="Записать видеокружок"><Icon name="camera" size={22}/></button>}{!draft.trim() && !editing && <button className="composer-extra" type="button" disabled={busy} onClick={()=>recording?finishRecording(true):void beginRecording()} aria-label="Записать голосовое"><Icon name={recording?'stop':'mic'} size={22}/></button>}</div>
             </form>
           </div>
             : <><div className="main-view">
@@ -2884,7 +3378,7 @@ export default function Home() {
                     onTouchMove={e=>{const t=e.touches[0],h=listHold.current;if(h&&t&&(Math.abs(t.clientX-h.x)>12||Math.abs(t.clientY-h.y)>12)){if(h.timer!==null)clearTimeout(h.timer);h.timer=null}}}
                     onTouchEnd={()=>{if(listHold.current?.timer!==null&&listHold.current?.timer!==undefined)clearTimeout(listHold.current.timer);}}
                     onContextMenu={e=>{e.preventDefault();setListActions(c.id)}}
-                    onClick={() => {if(listHold.current?.opened){listHold.current=null;return;}enterChat(c.id)}}><Avatar name={c.other?.display_name || 'Собеседник'} id={c.other?.id} url={c.other ? avatarUrls[c.other.id] : undefined}/><div className="dialog-summary"><strong>{c.other?.display_name || 'Собеседник'}</strong><span>{messagePreview(c.last, user.id)}</span></div><div className="dialog-meta"><time>{listTimeLabel(c.last?.created_at || c.created_at)}</time>{c.count > 0 && <span className="unread-pill">{c.count > 99 ? '99+' : c.count}</span>}</div></button>{listActions===c.id&&<div className="list-chat-popover"><button type="button" onClick={()=>{setListActions(null);clearConversation(c.id)}}>Удалить переписку</button><button type="button" onClick={()=>setListActions(null)}>Отмена</button></div>}</div>)}
+                    onClick={() => {if(listHold.current?.opened){listHold.current=null;return;}enterChat(c.id)}}><PresenceAvatar name={c.other?.display_name || 'Собеседник'} id={c.other?.id} url={c.other ? avatarUrls[c.other.id] : undefined} online={formatPresence(presence[c.other?.id || ''], clock) === 'В сети'}/><div className="dialog-summary"><strong>{c.other?.display_name || 'Собеседник'}</strong><span>{messagePreview(c.last, user.id)}</span></div><div className="dialog-meta"><time>{listTimeLabel(c.last?.created_at || c.created_at)}</time>{c.count > 0 && <span className="unread-pill">{c.count > 99 ? '99+' : c.count}</span>}</div></button>{listActions===c.id&&<div className="list-chat-popover"><button type="button" onClick={()=>{setListActions(null);clearConversation(c.id)}}>Удалить переписку</button><button type="button" onClick={()=>setListActions(null)}>Отмена</button></div>}</div>)}
                 </div>
               </>}
               {tab === 'contacts' && <>
@@ -2893,7 +3387,7 @@ export default function Home() {
                 <div className="section-caption">МОИ КОНТАКТЫ</div>
                 <div className="scroll-content contact-rows">
                   {filteredContacts.length === 0 ? <div className="empty-state"><Icon name="contacts" size={38}/><strong>{search ? 'Контакт не найден' : 'Контактов пока нет'}</strong><span>{search ? 'Попробуйте другое имя' : 'Контакты появятся после приглашения участников'}</span></div>
-                    : filteredContacts.map(p => <button type="button" className="contact-row" key={p.id} disabled={busy} onClick={() => void openContact(p)}><Avatar name={p.display_name} id={p.id} url={avatarUrls[p.id]}/><span className="contact-text"><strong>{p.display_name}</strong><small>{p.bio || "Открыть переписку"}</small></span><Icon name="chevron" size={19}/></button>)}
+                    : filteredContacts.map(p => <button type="button" className="contact-row" key={p.id} disabled={busy} onClick={() => void openContact(p)}><PresenceAvatar name={p.display_name} id={p.id} url={avatarUrls[p.id]} online={formatPresence(presence[p.id], clock) === 'В сети'}/><span className="contact-text"><strong>{p.display_name}</strong><small>{p.bio || "Открыть переписку"}</small></span><Icon name="chevron" size={19}/></button>)}
                 </div>
               </>}
               {tab === 'settings' && <>
@@ -2933,7 +3427,44 @@ export default function Home() {
                   </>}
                   {settingsPage==='notifications' && <div className="settings-group"><ConnectNotificationSettings supabase={supabase!} userId={user.id}/></div>}
                   {settingsPage==='stickers' && <><p className="settings-hint">Общие наборы доступны всем пользователям. Выбирайте, какие показывать в чате.</p><div className="settings-group">{STICKER_PACKS.map((p,i)=><div key={p.id}>{i>0&&<div className="setting-divider"/>}<label className="sticker-pack-setting"><span className="sticker-pack-emoji">{p.emoji}</span><span><strong>{p.name}</strong><small>{p.description} · {p.stickers.length} шт.</small></span><input type="checkbox" checked={enabledPacks.includes(p.id)} onChange={()=>togglePack(p.id)}/></label></div>)}</div><h3>Мои наборы</h3><div className="settings-group data-settings"><input className="field" placeholder="Название нового набора" maxLength={60} value={packName} onChange={e=>setPackName(e.target.value)}/><label className="settings-hint">Эмодзи набора <input className="field" style={{maxWidth:75}} value={packEmoji} onChange={e=>setPackEmoji(e.target.value)}/></label><label className="settings-hint"><input type="checkbox" checked={packPublic} onChange={e=>setPackPublic(e.target.checked)}/> Доступен всем участникам Connect</label><button type="button" className="settings-action" disabled={busy||!packName.trim()} onClick={()=>void createCustomPack()}>Создать набор</button></div>
-                    {customPacks.filter(p=>p.owner_id===user.id).map(p=><div key={p.id} className="settings-group data-settings"><strong>{p.emoji} {p.name} · {customStickers.filter(st=>st.pack_id===p.id).length} шт.</strong><small>{p.is_public?'Общий набор':'Личный набор'}</small><div className="connect-custom-grid">{customStickers.filter(st=>st.pack_id===p.id).map(st=><button key={st.id} type="button" onClick={()=>void deleteCustomSticker(st)} title="Удалить стикер"><img src={customStickerUrl(st)} alt="Стикер"/></button>)}</div><button className="settings-action" type="button" onClick={()=>{setCustomPack(p.id);setTimeout(()=>document.getElementById('connect-sticker-upload')?.click(),0)}}>Добавить стикеры</button><button className="settings-action secondary" type="button" onClick={()=>void deleteCustomPack(p)}>Удалить набор</button>{customPack===p.id&&<input id="connect-sticker-upload" type="file" accept="image/png,image/webp,image/gif" multiple hidden onChange={e=>void uploadCustomStickers(e.target.files)}/>}</div>)}
+                    {customPacks.filter(p=>p.owner_id===user.id).map(p=><div key={p.id} className="settings-group data-settings">
+                      <strong>{p.emoji} {p.name} · {customStickers.filter(st=>st.pack_id===p.id).length} шт.</strong>
+                      <small>{p.is_public?'Общий набор':'Личный набор'}</small>
+                      {editingStickerPack===p.id&&<p className="settings-hint">Выберите стикеры для удаления. После подтверждения они исчезнут из всех наборов и файлового хранилища.</p>}
+                      <div className={'connect-custom-grid'+(editingStickerPack===p.id?' is-editing':'')}>
+                        {customStickers.filter(st=>st.pack_id===p.id).map(st=><button key={st.id} type="button" disabled={busy}
+                          title={editingStickerPack===p.id?'Выбрать или снять выбор':'Редактировать набор'}
+                          aria-pressed={editingStickerPack===p.id?selectedStickerIds.includes(st.id):undefined}
+                          onClick={()=>{if(editingStickerPack===p.id)toggleStickerSelection(st.id);else{setEditingStickerPack(p.id);setSelectedStickerIds([st.id]);}}}>
+                          <img src={customStickerUrl(st)} alt={st.name||'Стикер'}/>
+                          {editingStickerPack===p.id&&<span className="connect-sticker-check" aria-hidden="true">{selectedStickerIds.includes(st.id)?'✓':'○'}</span>}
+                        </button>)}
+                      </div>
+                      <button className="settings-action secondary" type="button" disabled={busy} onClick={()=>{
+                        if(editingStickerPack===p.id){setEditingStickerPack(null);setSelectedStickerIds([]);}
+                        else{setEditingStickerPack(p.id);setSelectedStickerIds([]);}
+                      }}>{editingStickerPack===p.id?'Готово':'Редактировать стикеры'}</button>
+                      {editingStickerPack===p.id&&<button className="settings-action" type="button"
+                        disabled={busy||selectedStickerIds.length===0}
+                        onClick={()=>void deleteCustomStickers(customStickers.filter(st=>st.pack_id===p.id&&selectedStickerIds.includes(st.id)))}>
+                        Удалить выбранные ({selectedStickerIds.length})
+                      </button>}
+                      <label className={'settings-action connect-sticker-upload-action'+(busy?' is-busy':'')}>
+                        <span>Добавить стикеры</span>
+                        <input type="file" className="connect-sticker-upload-input"
+                          accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+                          multiple disabled={busy} aria-label={'Добавить стикеры в набор '+p.name}
+                          onChange={e=>{
+                            // Snapshot FileList BEFORE clearing the native input: it is a live collection.
+                            const input=e.currentTarget;
+                            const selected=Array.from(input.files||[]);
+                            input.value='';
+                            if(selected.length)void uploadCustomStickers(p.id,selected);
+                          }}/>
+                      </label>
+                      <button className="settings-action secondary" type="button" disabled={busy} onClick={()=>void deleteCustomPack(p)}>Удалить набор</button>
+
+                    </div>)}
                     <p className="settings-hint">В чате нажмите ☺ рядом с полем сообщения. Есть избранное и недавно отправленные.</p></>}
                   {settingsPage==='members' && admin && <div className="settings-group data-settings"><strong>Приглашения</strong><p className="settings-hint">Создавайте одноразовые коды для новых участников. Код действует 24 часа.</p><button type="button" className="settings-action" onClick={()=>window.dispatchEvent(new Event('connect:open-invitations'))}>Коды приглашений</button><button type="button" className="settings-action" onClick={()=>window.dispatchEvent(new Event('connect:open-hidden-invitations'))}>Коды для скрытых</button><div style={{marginTop:20}}><ConnectHiddenMembers request={authenticatedRequest} onChanged={()=>void loadDirectory()}/></div></div>}
                   {settingsPage==='data' && <><CacheSettings userId={user.id}/><div className="settings-group data-settings"><strong>Локальные данные</strong><p className="settings-hint">Сбросит тему, цвет, фон и настройки стикеров на этом устройстве. Переписки, файлы и голосовые на сервере останутся.</p><button type="button" className="settings-action secondary" onClick={clearLocalPreferences}>Очистить локальные настройки</button></div><div className="settings-group data-settings"><strong>Экспорт переписки</strong><p className="settings-hint">Экспорт всех доступных переписок в JSON (до 50 000 сообщений). Файлы вложений в архив не входят.</p><button type="button" className="settings-action" disabled={busy||conversations.length===0} onClick={()=>void exportChats()}>Экспортировать переписки</button></div></>}
@@ -2947,7 +3478,7 @@ export default function Home() {
     {crop && <AvatarCropper url={crop.url} saving={busy} onCancel={closeCrop} onSave={blob=>void uploadAvatar(new File([blob],'avatar.jpg',{type:'image/jpeg'}))}/>}
     {notice && <button type="button" className="notice-toast"  role="status" onClick={() => setNotice('')}>{notice} <Icon name="close" size={16}/></button>}
     {forwardIds.length>0&&<div className="forward-overlay"><div className="forward-dialog"><header><strong>Переслать сообщения</strong><button type="button" onClick={()=>setForwardIds([])}><Icon name="close" size={21}/></button></header><p>Выберите получателя · {forwardIds.length} сообщ.</p><div className="forward-contacts">{contacts.map(p=><button type="button" key={p.id} disabled={busy} onClick={()=>void forwardTo(p)}><Avatar name={p.display_name} id={p.id} url={avatarUrls[p.id]}/><span>{p.display_name}</span><Icon name="chevron" size={18}/></button>)}</div></div></div>}
-    {videoNoteOpen && <VideoNoteRecorder onClose={()=>setVideoNoteOpen(false)} onSend={file=>{setVideoNoteOpen(false);void sendAttachment(file)}}/>}
+    {videoNoteOpen && <VideoNoteRecorder onClose={()=>{setVideoNoteRecording(false);setVideoNoteOpen(false)}} onRecordingChange={setVideoNoteRecording} onSend={file=>{setVideoNoteRecording(false);setVideoNoteOpen(false);void sendAttachment(file)}}/>}
     {mediaViewer && <ConnectGalleryViewer
       items={galleryIndex>=0?gallery:[...gallery,mediaViewer]}
       currentPath={mediaViewer.path}

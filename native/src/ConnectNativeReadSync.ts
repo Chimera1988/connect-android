@@ -7,6 +7,7 @@ import {useEffect} from 'react';
 import {AppState} from 'react-native';
 import notifee from '@notifee/react-native';
 import {db} from './backend';
+import {chatTimeKey} from '../web/lib/chat-order';
 import {dismissChatPush,rememberReadAt} from './ConnectNativePush';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -35,7 +36,7 @@ export function useConnectNativeReadSync(ownerId:string){
           if(!read||!Number.isFinite(Date.parse(read)))continue;
           // Missing FCM sent-at time: do not assume this alert was read.
           if(!alert.createdAt||!Number.isFinite(Date.parse(alert.createdAt)))continue;
-          if(Date.parse(read)>=Date.parse(alert.createdAt)){
+          if(chatTimeKey(read)>=chatTimeKey(alert.createdAt)){
             await rememberReadAt(alert.conversationId,read);
             if(alive)await dismissChatPush(alert.conversationId,read);
           }

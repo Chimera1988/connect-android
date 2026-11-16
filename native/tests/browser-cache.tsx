@@ -8,6 +8,8 @@ import ConnectProfileMedia from '../web/components/ConnectProfileMedia';
 import {ConnectMusicProvider,ConnectMusicLibrary} from '../web/components/ConnectMusicSystem';
 import {safeCatalog} from '../src/hybridProtocol';
 import {installMediaCache,prefetchProfileFile,resolveCachedProfileFile,retireCachedProfileFile,boundedMediaBody,clearCachedMedia,cacheStats,prefetchCachedMedia} from '../web/lib/media-cache';
+import {prefetchStickerWebp,prefetchChatAudio,resolveCachedMedia} from '../web/lib/media-cache';
+import {rememberChatWave,readChatWave,forgetUserChatPresentation} from '../web/lib/chat-media-presentation';
 import {readProfileLibrary,writeProfileLibrary,warmPeerProfileLibraries,profilePrefetchSelection} from '../web/lib/profile-media-index';
 import {readChatHistory,writeChatHistory,dropCachedMessage,releaseHistoryMemory} from '../web/lib/chat-history-cache';
 const results:{name:string;pass:boolean;error?:string}[]=[];
@@ -134,6 +136,7 @@ await test('music selection obtains a network URL after its cached blob was clea
  }finally{root.unmount();container.remove();HTMLMediaElement.prototype.play=play;}
 });
 await test('Android sound settings retain legacy choice, reset to MP3 default and stop preview on close',async()=>{
+ const previousBridge=window.ConnectNative;window.ConnectNative={request:async command=>{assert(command==='notification:diagnostics','unexpected diagnostic command');return [{stage:'received',at:'2026-11-15T10:00:00Z'}];}};
  const commands:{kind:string;value?:any}[]=[],writes:any[]=[];
  const previous=window.ConnectAndroid;
  (window as any).ConnectAndroid={
@@ -159,8 +162,35 @@ await test('Android sound settings retain legacy choice, reset to MP3 default an
   assert(commands.some(x=>x.kind==='reset'&&x.value==='message'),'native reset missing');
   const preview=Array.from(container.querySelectorAll('button')).find(x=>x.textContent==='Прослушать') as HTMLButtonElement;preview.click();
   assert(commands.some(x=>x.kind==='preview'&&x.value==='soft'),'preview did not select new default');
-  const before=commands.filter(x=>x.kind==='stop').length;root.unmount();
+  const journal=Array.from(container.querySelectorAll('button')).find(x=>x.textContent==='Журнал уведомлений') as HTMLButtonElement;assert(journal,'native journal action missing');journal.click();
+ for(let i=0;i<30&&!container.querySelector('pre');i++)await delay();assert(container.querySelector('pre')?.textContent?.includes('received'),'journal was not shown from native boundary');
+ const before=commands.filter(x=>x.kind==='stop').length;root.unmount();
   assert(commands.filter(x=>x.kind==='stop').length>before,'unmount left preview playing');
- }finally{root.unmount();container.remove();window.ConnectAndroid=previous;localStorage.removeItem('connect-notification-prefs-'+viewer);}
+ }finally{root.unmount();container.remove();window.ConnectAndroid=previous;window.ConnectNative=previousBridge;localStorage.removeItem('connect-notification-prefs-'+viewer);}
+});
+await test('personal sticker bytes survive new signatures and are isolated to the owner',async()=>{
+ stop();activeOwner=viewer;stop=installMediaCache(viewer);
+ const url=location.origin+'/storage/v1/object/sign/connect-stickers/'+peer+'/private-sticker.webp?token=one';
+ await prefetchStickerWebp(url,viewer);const count=downloads;
+ await prefetchStickerWebp(url.replace('token=one','token=two'),viewer);
+ assert(downloads===count,'sticker downloaded again for a new signature');
+ const local=await resolveCachedMedia(url,viewer);assert(local.startsWith('blob:'),'sticker was not persisted');
+ assert((await resolveCachedMedia(url,other))===url,'sticker escaped owner isolation');
+});
+await test('streaming play does not issue an extra original fetch; small explicit audio warmup is deduplicated',async()=>{
+ const url=location.origin+'/storage/v1/object/sign/connect-attachments/'+viewer+'/lazy-voice.m4a?token=one';
+ const before=downloads;const elements=['audio','video'].map(tag=>{const el=document.createElement(tag) as HTMLMediaElement;el.preload='none';el.src=url;document.body.append(el);return el;});
+ await delay();for(const el of elements)el.dispatchEvent(new Event('play',{bubbles:true}));
+ for(let i=0;i<8;i++)await delay();assert(downloads===before,'play caused a parallel fetch of original media');
+ await Promise.all([prefetchChatAudio(url,viewer,512),prefetchChatAudio(url,viewer,512)]);
+ assert(downloads===before+1,'small audio cache did not deduplicate');
+ for(const el of elements)el.remove();
+});
+await test('native waveform presentation survives remount without crossing account boundaries',async()=>{
+ const path=viewer+'/wave.m4a',bars=Array.from({length:43},(_,i)=>(i+1)/43);
+ rememberChatWave(viewer,path,{bars,duration:4});forgetUserChatPresentation(viewer);
+ assert(readChatWave(viewer,path)?.duration===4,'native decoded wave was not persisted');
+ assert(readChatWave(other,path)===null,'wave leaked to another account');
+ localStorage.removeItem('connect-chat-wave-v1:'+viewer+':'+path);forgetUserChatPresentation(viewer);
 });
 stop();document.body.innerHTML='';const output=document.createElement('pre');output.id='connect-cache-results';output.textContent=JSON.stringify({results,passed:results.filter(x=>x.pass).length,failed:results.filter(x=>!x.pass).length});document.body.append(output);

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import ConnectWebPushDiagnostics from './ConnectWebPushDiagnostics';
 
 import {TONE_LABELS,isNotificationTone,serverNotificationPrefs,mergeServerNotificationPrefs,type NotificationTone as Sound} from '../lib/android-sound-policy';
 type Prefs = { enabled: boolean; sound: Sound; vibrate: boolean };
@@ -68,7 +69,15 @@ function nativeSounds(): NativeSounds | null {
   try {return window.ConnectAndroid ? JSON.parse(window.ConnectAndroid.getSoundSettings()) as NativeSounds : null;} catch {return null;}
 }
 
-export default function ConnectNotificationSettings({supabase,userId}:{supabase:SupabaseClient,userId:string}) {
+/* CONNECT_PWA_PUSH_DIAGNOSTICS_V1: runtime choice after hydration; Android stays unchanged. */
+export default function ConnectNotificationSettings(props:{supabase:SupabaseClient;userId:string}){
+  const [runtime,setRuntime]=useState<'pending'|'web'|'android'>('pending');
+  useEffect(()=>{setRuntime(window.ConnectAndroid?'android':'web');},[]);
+  if(runtime==='pending')return <section className="connect-notifications" aria-label="Уведомления"/>;
+  return runtime==='web'?<ConnectWebPushDiagnostics {...props}/>:<ConnectAndroidNotificationSettings {...props}/>;
+}
+function ConnectAndroidNotificationSettings({supabase,userId}:{supabase:SupabaseClient,userId:string}) {
+  const [diagnostics,setDiagnostics]=useState('');
   const [prefs,setPrefs]=useState<Prefs>(defaults), [status,setStatus]=useState(''), [busy,setBusy]=useState(false);
   const [sounds,setSounds]=useState<NativeSounds|null>(null);
   const [fullScreenAllowed,setFullScreenAllowed]=useState(true);
@@ -194,6 +203,10 @@ export default function ConnectNotificationSettings({supabase,userId}:{supabase:
     <label><input type="checkbox" checked={prefs.vibrate} onChange={e=>save({...latest.current,vibrate:e.target.checked})}/> Вибрация (где поддерживается)</label>
     <button type="button" disabled={busy} onClick={()=>void activate()}>{busy?'Подключаем…':'Подключить уведомления'}</button>
     <p role="status">{status}</p>
+    {window.ConnectAndroid&&window.ConnectNative&&<div>
+      <button type="button" onClick={()=>{void window.ConnectNative!.request('notification:diagnostics').then(events=>setDiagnostics(JSON.stringify(events,null,2))).catch(error=>setStatus(error instanceof Error?error.message:'Не удалось прочитать журнал'));}}>Журнал уведомлений</button>
+      {diagnostics&&<pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:11}}>{diagnostics}</pre>}
+    </div>}
     <small>Android может отдельно менять звук и полноэкранный показ через системные настройки уведомлений. Если система запретила их, приложение не может обойти запрет.</small>
   </section>;
 }

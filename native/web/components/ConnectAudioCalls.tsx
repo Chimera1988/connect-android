@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import ConnectCallAvatar, { loadCallAvatarUrls } from './ConnectCallAvatar';
 import { traceCall } from '../lib/call-diagnostics';
+import {callOutputSupported,listedCallOutputs,chooseCallOutput,type ConnectCallOutput} from '../lib/connect-call-output'; // CONNECT_PWA_CALL_OUTPUT_UI_20261114
 
 type Status = 'ringing' | 'active' | 'ended' | 'declined' | 'missed' | 'busy' | 'failed';
 type CallRow = {
@@ -30,6 +31,46 @@ const RING_TIMEOUT_MS = 50000;
 const isLive = (s: Status) => s === 'ringing' || s === 'active';
 const friendlyError = (e: unknown) => e instanceof Error ? e.message : 'Неизвестная ошибка';
 const initials = (name: string) => name.trim().slice(0, 1).toLocaleUpperCase('ru-RU') || '☎';
+
+/** CONNECT_IOS_CALL_SCREEN_AWAKE_20261114
+ * Audio Session improves call audio routing, not iOS background permissions.
+ * Wake Lock prevents automatic screen off, but does not override power-button lock.
+ */
+function configureCallAudioSession(type: 'auto' | 'play-and-record') {
+  if (window.ConnectAndroid || !/iP(hone|ad|od)/.test(navigator.userAgent)) return;
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+  try { if (session) session.type = type; } catch { /* WebKit may reject the transition. */ }
+}
+
+function holdIosCallScreenAwake(): () => void {
+  if (window.ConnectAndroid || !/iP(hone|ad|od)/.test(navigator.userAgent) || !navigator.wakeLock) return () => {};
+  let disposed = false;
+  let pending = false;
+  let lock: WakeLockSentinel | null = null;
+  async function acquire() {
+    if (disposed || pending || lock || document.visibilityState !== 'visible') return;
+    pending = true;
+    try {
+      const next = await navigator.wakeLock.request('screen');
+      if (disposed || document.visibilityState !== 'visible') {
+        void next.release();
+        return;
+      }
+      lock = next;
+      next.addEventListener('release', () => { if (lock === next) lock = null; });
+    } catch { /* iOS may deny wake lock in the current power state. */ }
+    finally { pending = false; }
+  }
+  document.addEventListener('visibilitychange', acquire);
+  void acquire();
+  return () => {
+    disposed = true;
+    document.removeEventListener('visibilitychange', acquire);
+    const previous = lock;
+    lock = null;
+    if (previous) void previous.release();
+  };
+}
 
 function Glyph({ name }: { name: 'call' | 'end' | 'mic' | 'muted' | 'speaker' }) {
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: name === 'call' ? 2.0 : 1.9, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -176,6 +217,8 @@ class ConnectCallSound {
 }
 
 export default function ConnectAudioCalls({ client, userId, conversationId, peerId, peerName }: Props) {
+  // CONNECT_PWA_NAV_MENUS_CALL_V1_20261114: minimized PWA calls keep their WebRTC component mounted.
+  const [minimized,setMinimized]=useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [shown, setShown] = useState<CallRow | null>(null);
   const [shownName, setShownName] = useState('');
@@ -183,6 +226,10 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
   const [shownAvatarUrl, setShownAvatarUrl] = useState('');
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(false);
+  const [audioRouteOpen,setAudioRouteOpen]=useState(false);
+  const [audioRouteBusy,setAudioRouteBusy]=useState(false);
+  const [audioRouteName,setAudioRouteName]=useState('Системный');
+  const [audioRouteDevices,setAudioRouteDevices]=useState<ConnectCallOutput[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
@@ -211,6 +258,14 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
   // A single sound engine is kept for this component's lifetime.
   const soundRef = useRef<ConnectCallSound | null>(null);
   if (!soundRef.current) soundRef.current = new ConnectCallSound();
+
+  // iOS Home Screen PWA supports Screen Wake Lock from iOS 18.4.
+  const callIsOpen = phase !== 'idle';
+  useEffect(()=>{if(phase==='idle')setMinimized(false);},[phase]);
+  useEffect(() => {
+    if (!callIsOpen) return;
+    return holdIosCallScreenAwake();
+  }, [callIsOpen]);
 
   // The call modal may open from the chat, the Calls tab, or an incoming call.
   // Resolve its image from the actual peer ID rather than guessing by display name.
@@ -352,6 +407,7 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
     window.ConnectAndroid?.setSpeakerphone(false);
     if (callRef.current) window.ConnectAndroid?.setCallState(callRef.current.id, 'ended');
     setSpeakerOn(false);
+    setAudioRouteOpen(false);setAudioRouteBusy(false);setAudioRouteName('Системный');setAudioRouteDevices([]);
     soundRef.current?.stop();
     generationRef.current++;
     if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
@@ -362,6 +418,7 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
     iceChannelRef.current = null;
     pcRef.current?.close(); pcRef.current = null;
     streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null;
+    configureCallAudioSession('auto');
     if (remoteAudioRef.current) { remoteAudioRef.current.pause(); remoteAudioRef.current.srcObject = null; }
     callRef.current = null;
     localIceRef.current = [];
@@ -420,6 +477,7 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
     if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
       throw new Error('Для звонков нужен современный браузер с доступом к микрофону и HTTPS.');
     }
+    configureCallAudioSession('play-and-record');
     // On iOS request microphone access inside the original tap handler, before
     // waiting for the TURN configuration over the network.
     const stream = await navigator.mediaDevices.getUserMedia({ audio: {
@@ -442,6 +500,15 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
     pcRef.current = pc;
     stream.getTracks().forEach(track => pc.addTrack(track, stream));
     const ownsPeer = () => generation === generationRef.current && pcRef.current === pc;
+    // Separate browser-level capture interruption from the user's mute button.
+    for (const track of stream.getTracks().filter(track => track.kind === 'audio')) {
+      track.addEventListener('mute', () => {
+        if (ownsPeer()) traceCall(callRef.current?.id, 'microphone', 'system-muted', document.visibilityState);
+      });
+      track.addEventListener('unmute', () => {
+        if (ownsPeer()) traceCall(callRef.current?.id, 'microphone', 'system-resumed', document.visibilityState);
+      });
+    }
     pc.oniceconnectionstatechange=()=>{if(ownsPeer())traceCall(callRef.current?.id,'ice',pc.iceConnectionState);};
     pc.onicecandidate = event => { if (ownsPeer() && event.candidate) void sendIce(event.candidate.toJSON()); };
     pc.ontrack = event => {
@@ -738,13 +805,55 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
     streamRef.current?.getAudioTracks().forEach(track => { track.enabled = !next; });
     setMuted(next);
   }
-  function enableRemoteAudio() {
+  async function enableRemoteAudio() {
     if (window.ConnectAndroid) {
       const next=!speakerOn;
       window.ConnectAndroid.setSpeakerphone(next);
       setSpeakerOn(next);
+      void remoteAudioRef.current?.play().catch(() => setError('Не удалось включить звук.'));
+      return;
     }
-    void remoteAudioRef.current?.play().then(() => setError('')).catch(() => setError('Не удалось включить звук. Проверьте настройки воспроизведения.'));
+    // A browser can expose only the default device, even on a new iOS version.
+    // Never label a made-up device as an earpiece or a loudspeaker.
+    const audio=remoteAudioRef.current;
+    setAudioRouteOpen(value=>!value);
+    if(!audio||!callOutputSupported(audio)){
+      setError('На этом iPhone PWA не может переключать аудиовыход. Используй системный выбор звука iOS.');
+      void audio?.play().catch(()=>{});
+      return;
+    }
+    setAudioRouteBusy(true);
+    try{
+      const devices=await navigator.mediaDevices.enumerateDevices();
+      setAudioRouteDevices(listedCallOutputs(devices));
+      setError('');
+    }catch{setError('iOS не предоставила список аудиоустройств.');}
+    finally{setAudioRouteBusy(false);}
+    void audio.play().catch(()=>{});
+  }
+  async function applyAudioRoute(deviceId:string,name:string){
+    const audio=remoteAudioRef.current;
+    setAudioRouteBusy(true);
+    try{
+      await chooseCallOutput(audio,deviceId);
+      await audio?.play();
+      setAudioRouteName(name);setError('');setAudioRouteOpen(false);
+    }catch{setError('iOS не разрешила переключить аудиовыход. Текущий звук сохранён.');}
+    finally{setAudioRouteBusy(false);}
+  }
+  async function askSystemAudioOutput(){
+    // selectAudioOutput() MUST be invoked synchronously from the button click.
+    const devices=navigator.mediaDevices as MediaDevices & {selectAudioOutput?:()=>Promise<MediaDeviceInfo>};
+    if(!devices?.selectAudioOutput)return;
+    setAudioRouteBusy(true);
+    try{
+      const selected=await devices.selectAudioOutput();
+      await chooseCallOutput(remoteAudioRef.current,selected.deviceId);
+      await remoteAudioRef.current?.play();
+      setAudioRouteName(selected.label||'Выбранное устройство');
+      setAudioRouteOpen(false);setError('');
+    }catch{setError('Не удалось выбрать устройство. Проверь разрешение iOS.');}
+    finally{setAudioRouteBusy(false);}
   }
 
   // Notification action intents are delivered before or after React mounts.
@@ -766,6 +875,7 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
 
   const calling = phase !== 'idle';
   const incoming = phase === 'incoming';
+  const compactCall=minimized && (phase==='active'||phase==='reconnecting') && !window.ConnectAndroid && !window.ConnectNative;
   const phaseTitle: Record<Phase, string> = {
     idle: '', preparing: 'Подключаем микрофон…', ringing: 'Вызываем…', incoming: 'Входящий аудиозвонок',
     connecting: 'Соединяем…', active: `Разговор · ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`,
@@ -773,26 +883,47 @@ export default function ConnectAudioCalls({ client, userId, conversationId, peer
   };
 
   return <>
-    {calling && <div className="connect-call-backdrop" role="dialog" aria-modal="true" aria-label="Аудиозвонок Connect">
+    {calling && compactCall && <button type="button" className="connect-call-mini" aria-label="Вернуться к разговору" onClick={()=>setMinimized(false)}>
+      <span className="connect-call-mini-name">{shownName || 'Собеседник'}</span>
+      <span className="connect-call-mini-phase">{phaseTitle[phase]}</span>
+      <span className="connect-call-mini-expand" aria-hidden="true">↗</span>
+    </button>}
+    {calling && !compactCall && <div className={"connect-call-backdrop" + (!window.ConnectAndroid && !window.ConnectNative ? " connect-pwa-call-layout" : "")} role="dialog" aria-modal="true" aria-label="Аудиозвонок Connect">
       <div className="connect-call-modal">
-        <p className="connect-call-eyebrow">CONNECT · АУДИО</p>
-        <ConnectCallAvatar className="connect-call-avatar" name={shownName || 'Собеседник'} url={shownAvatarUrl}/>
-        <h2>{shownName || 'Собеседник'}</h2>
-        <p className="connect-call-info" role="status">{phaseTitle[phase]}</p>
+        <div className="connect-call-headline">
+          <p className="connect-call-eyebrow">CONNECT · АУДИО</p>
+          {(phase==='active'||phase==='reconnecting') && !window.ConnectAndroid && !window.ConnectNative && <button className="connect-call-minimize" type="button" onClick={()=>{setAudioRouteOpen(false);setMinimized(true);}} aria-label="Свернуть звонок">Свернуть</button>}
+        </div>
+        {/* CONNECT_PWA_CALL_SCREEN_JOURNAL_V2_20261114: centered identity; transport remains mounted. */}
+        <div className="connect-call-identity">
+          <ConnectCallAvatar className="connect-call-avatar" name={shownName || 'Собеседник'} url={shownAvatarUrl}/>
+          <h2>{shownName || 'Собеседник'}</h2>
+          <p className="connect-call-info" role="status">{phaseTitle[phase]}</p>
+        </div>
         <div className="connect-call-actions">
           {incoming && <button className="connect-call-action accept" type="button" onClick={() => void acceptIncoming()}>
             <span><Glyph name="call"/></span><span>Принять</span>
           </button>}
           {!incoming && (phase === 'active' || phase === 'connecting' || phase === 'reconnecting') && <button className={'connect-call-action' + (muted ? ' muted' : '')}
             type="button" onClick={toggleMute}><span><Glyph name={muted ? 'muted' : 'mic'}/></span><span>{muted ? 'Включить микрофон' : 'Выключить микрофон'}</span></button>}
-          {!incoming && <button className="connect-call-action" type="button" onClick={enableRemoteAudio}>
-            <span><Glyph name="speaker"/></span><span>{window.ConnectAndroid ? speakerOn ? 'Обычный звук' : 'Громкая связь' : 'Звук'}</span>
+          {(!incoming || !window.ConnectAndroid) && <button className="connect-call-action" type="button" onClick={() => void enableRemoteAudio()} aria-expanded={!window.ConnectAndroid ? audioRouteOpen : undefined}>
+            <span><Glyph name="speaker"/></span><span>{window.ConnectAndroid ? speakerOn ? 'Обычный звук' : 'Громкая связь' : 'Аудиовыход'}</span>
           </button>}
           <button className="connect-call-action hangup" type="button"
             onClick={() => void finish(incoming ? 'decline' : 'hangup')}>
             <span><Glyph name="end"/></span><span>{incoming ? 'Отклонить' : 'Завершить'}</span>
           </button>
         </div>
+        {audioRouteOpen && !window.ConnectAndroid && <div className="connect-call-outputs" aria-label="Выбор аудиовыхода">
+          <strong>Аудиовыход · {audioRouteName}</strong>
+          {callOutputSupported(remoteAudioRef.current) ? <>
+            <button type="button" disabled={audioRouteBusy} onClick={() => void applyAudioRoute('','Системный')}>Системный выход iOS</button>
+            {audioRouteDevices.filter(x=>x.id!=='default').map(device=><button key={device.id} type="button" disabled={audioRouteBusy} onClick={() => void applyAudioRoute(device.id,device.label)}>{device.label}</button>)}
+            {typeof (navigator.mediaDevices as MediaDevices & {selectAudioOutput?:()=>Promise<MediaDeviceInfo>})?.selectAudioOutput==='function' &&
+              <button type="button" disabled={audioRouteBusy} onClick={() => void askSystemAudioOutput()}>Выбрать другое устройство…</button>}
+            {!audioRouteDevices.some(x=>x.id!=='default') && <small>iOS не предоставила отдельные динамики. Доступен системный аудиовыход.</small>}
+          </> : <small>Этот браузер не предоставляет выбор аудиовыхода. Переключи звук в Пункте управления iOS.</small>}
+        </div>}
         {error && <p className="connect-call-error" role="alert">{error}</p>}
         <p className="connect-call-note">Звонки работают при открытой PWA. В фоне iPhone может отключить микрофон.</p>
       </div>

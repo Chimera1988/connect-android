@@ -12,6 +12,8 @@ const TONES = new Set(['soft', 'bright', 'gentle', 'silent', 'legacy-soft']);
 const KINDS = new Set(['call', 'message']);
 
 export type HybridCommand =
+  | 'notification:diagnostics'
+  | 'media:waveform'
   | 'calls:journal'
   | 'history:catalog-retire' | 'history:catalog-read' | 'history:catalog-write' | 'history:catalog-drop'
   | 'history:read' | 'history:page' | 'history:chunk' | 'history:write' | 'history:drop' | 'history:wipe' | 'history:stats' | 'history:limit'
@@ -80,6 +82,8 @@ function payloadValid(command: string, value: unknown): boolean {
   if (command === 'session' && value === null) return true;
   if (!record(value)) return false;
   switch (command) {
+    case 'notification:diagnostics':return fields(value,[]);
+    case 'media:waveform':return fields(value,['path'])&&text(value.path,1000,1)&&/^[a-fA-F0-9-]{36}\/[a-zA-Z0-9_./-]+$/.test(value.path as string)&&!(value.path as string).includes('..');
     case 'calls:journal':return fields(value,['userId','action'],['rows','at'])&&uuid(value.userId)&&['state','seed','view','close','reconcile'].includes(value.action as string)&&(value.rows===undefined||Array.isArray(value.rows)&&value.rows.length<=200&&value.rows.every(r=>record(r)&&fields(r,['id','conversation_id','caller_id','callee_id','status','created_at','answered_at','ended_at'],['hidden'])&&uuid(r.id)&&uuid(r.callee_id)&&uuid(r.caller_id)&&text(r.created_at,48,20)&&text(r.status,20)&&(r.answered_at===null||text(r.answered_at,48))&&(r.ended_at===null||text(r.ended_at,48))&&(r.hidden===undefined||typeof r.hidden==='boolean')))&&(value.at===undefined||Number.isFinite(value.at));
     case 'history:catalog-retire':return fields(value,['userId','key','path'])&&uuid(value.userId)&&text(value.key,90,1)&&/^profile:[a-fA-F0-9-]{36}:(photos|videos|music)$/.test(value.key as string)&&text(value.path,1000,1)&&!(value.path as string).includes('..')&&!/[?\\]/.test(value.path as string)&&safeCatalog(value.path);
     case 'history:catalog-read':case 'history:catalog-drop':return fields(value,['userId','key'])&&uuid(value.userId)&&text(value.key,90,1)&&/^(inbox|profile:[a-fA-F0-9-]{36}:(photos|videos|music))$/.test(value.key as string);

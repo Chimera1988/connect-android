@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import zipfile
+from check_release_signing import validate_certificate
 
 apk = Path(sys.argv[1]).resolve()
 output = Path(sys.argv[2] if len(sys.argv) > 2 else apk.parent).resolve()
@@ -17,7 +18,7 @@ tools = sdk / 'build-tools' / '37.0.0'
 badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
 assert "package: name='com.connect.messenger'" in badging, 'Wrong application ID'
 assert "application-label:'Connect'" in badging, 'Wrong visible name'
-assert "versionCode='23'" in badging and "versionName='3.0.5'" in badging, 'Wrong release version'
+assert "versionCode='24'" in badging and "versionName='3.0.6'" in badging, 'Wrong release version'
 assert "sdkVersion:'29'" in badging, 'Android 10 minimum not enforced'
 assert 'application-debuggable' not in badging, 'Release must not be debuggable'
 with zipfile.ZipFile(apk) as z:
@@ -61,14 +62,18 @@ with zipfile.ZipFile(apk) as z:
 signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
 fingerprint = re.search(r'(?:Signer #1|V2 Signer|V3 Signer):? certificate SHA-256 digest: ([0-9a-fA-F]+)', signature)
 assert fingerprint, 'Missing signing certificate'
+assert os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE'), 'Final candidate requires the existing release key; debug fallback is forbidden'
 expected = os.environ.get('CONNECT_PREVIOUS_CERT_SHA256', '').replace(':', '').lower()
+assert re.fullmatch(r'[0-9a-f]{64}', expected), 'Expected installed certificate is required'
+owner = re.search(r'certificate DN: (.*)', signature)
+validate_certificate(fingerprint[1], expected, owner[1] if owner else '')
 compatible = None if not expected else expected == fingerprint[1].lower()
 previous_artifact_certificate = 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c'
 if compatible is False:
     raise SystemExit('Certificate differs from configured previous release; refusing incompatible update artifact')
 report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
-    'version': '3.0.5', 'versionCode': 23, 'minSdk': 29,
+    'version': '3.0.6', 'versionCode': 24, 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
     'signerSha256': fingerprint[1],
     'signing': 'supplied-release-key' if os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE') else 'Android debug key (fallback)',
@@ -77,7 +82,7 @@ report = {
     'previousArtifactApkSha256': '835f076c896d48205b286beed5d9c77b164d18a0bab9fa0f1cae9bb00a7843f4',
     'matchesPreviousArtifactCertificate': fingerprint[1].lower() == previous_artifact_certificate,
     'embeddedJavaScript': True,
-    'deviceAcceptance': 'Not established by APK verification. See SOUNDS_301_REPORT.md.',
+    'deviceAcceptance': 'Not established by APK verification. See PARITY_NOTIFICATIONS_REPORT.md.',
 }
 (output / 'APK-VERIFICATION.json').write_text(json.dumps(report, indent=2) + '\n')
 (output / 'APK-SIGNATURE.txt').write_text(signature)

@@ -571,6 +571,7 @@ class ConnectCallService : Service() {
             else manager.placeCall(android.net.Uri.fromParts("sip", machine.id, null), Bundle().apply { putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account); putBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS, extras) })
             ConnectCallDiagnostics.event(this,machine.id,"telecom",if(isIncoming)"INCOMING_REQUESTED" else "OUTGOING_REQUESTED")
             return true
+        } catch (error: SecurityException) { ConnectCallDiagnostics.exception(this,machine.id,"telecom","PERMISSION_DENIED",error);end(ConnectCallState.Phase.FAILED,"Android не разрешил системный аудиовызов",source="TELECOM");return false
         } catch (error: Exception) { ConnectCallDiagnostics.exception(this,machine.id,"telecom","REGISTRATION_OR_ADD_FAILED",error);end(ConnectCallState.Phase.FAILED,"Android не разрешил системный аудиовызов",source="TELECOM");return false }
     }
     private fun applyFocus(available:Boolean){

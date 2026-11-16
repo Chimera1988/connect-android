@@ -2481,3 +2481,204 @@
   stroke-width: .7px !important;
   opacity: .34 !important;
 }
+
+/* CONNECT_PWA_PUSH_DIAGNOSTICS_V1: seven-theme Liquid Glass PWA diagnostics */
+.connect-app .connect-notifications.connect-web-push{display:flex;flex-direction:column;gap:16px;padding:12px 5px 10px}
+.connect-app .connect-web-push-state,.connect-app .connect-web-push-delivery{display:flex;align-items:flex-start;gap:12px;padding:15px 14px;border:1px solid var(--glass-stroke-hi,rgba(255,255,255,.14));border-radius:17px;background:color-mix(in srgb,var(--glass-surface,rgba(33,44,65,.6)) 85%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.connect-app .connect-web-push-state>div,.connect-app .connect-web-push-delivery>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.connect-app .connect-web-push-state strong,.connect-app .connect-web-push-delivery strong{color:var(--text);font-size:15px;font-weight:660}
+.connect-app .connect-web-push-state small,.connect-app .connect-web-push-delivery small{font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.connect-app .connect-web-push-indicator{width:11px;height:11px;min-width:11px;border-radius:50%;margin-top:3px;background:var(--muted);box-shadow:0 0 0 4px color-mix(in srgb,var(--muted) 14%,transparent)}
+.connect-app .connect-web-push-indicator.is-active{background:var(--wave-primary,var(--accent));box-shadow:0 0 0 4px color-mix(in srgb,var(--wave-primary,var(--accent)) 15%,transparent),0 0 15px color-mix(in srgb,var(--wave-primary,var(--accent)) 25%,transparent)}
+.connect-app .connect-web-push-indicator.is-checking{background:var(--wave-secondary,var(--accent))}
+.connect-app .connect-web-push-indicator.is-denied,.connect-app .connect-web-push-indicator.is-error,.connect-app .connect-web-push-indicator.is-unregistered{background:#e6a55a}
+.connect-app .connect-web-push-primary,.connect-app .connect-web-push-secondary{display:flex!important;align-items:center!important;justify-content:center!important;min-height:48px!important;padding:12px 16px!important;border:1px solid var(--glass-stroke-hi,rgba(255,255,255,.2))!important;border-radius:15px!important;font-size:14px!important;font-weight:650!important;color:var(--text)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.12)!important}
+.connect-app .connect-web-push-primary{background:linear-gradient(120deg,color-mix(in srgb,var(--wave-primary,var(--accent)) 25%,var(--glass-surface-strong,#172034)),color-mix(in srgb,var(--wave-secondary,var(--accent)) 21%,var(--glass-surface-strong,#172034)))!important}
+.connect-app .connect-web-push-secondary{background:color-mix(in srgb,var(--glass-surface,rgba(27,39,58,.64)) 90%,transparent)!important}
+.connect-app .connect-web-push-primary:disabled,.connect-app .connect-web-push-secondary:disabled{opacity:.48}
+.connect-app .connect-web-push-note{font-size:12px;line-height:1.55;color:var(--muted);margin:0 5px}
+
+/* CONNECT_PWA_CHAT_ONLINE_DOT_CLIP_FIX_20261114: allow presence marker outside the circular chat avatar. */
+.connect-app .chat-rows .dialog-row > .connect-presence-avatar {
+  overflow: visible;
+  border-radius: 0;
+}
+.connect-app .chat-rows .dialog-row > .connect-presence-avatar > .person-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+/* CONNECT_PWA_NAV_MENUS_CALL_V1_20261114: native-size iOS search; unified list menus. */
+.connect-app .main-view .search-field input {
+  font-size: 16px !important;
+  line-height: normal;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+.connect-app .main-view .search-field input:focus,
+.connect-app .main-view .search-field input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.connect-app .main-view .search-field:focus-within {
+  border-color: var(--glass-stroke);
+  box-shadow: inset 0 1px 0 var(--glass-sheen), var(--glass-shadow);
+}
+.connect-app .chat-actions-menu,
+.connect-app .floating-menu,
+.connect-app .list-chat-popover,
+.connect-app .connect-call-editor-popup {
+  background: var(--panel) !important;
+  color: var(--text);
+  border-color: var(--v4-border, var(--glass-stroke)) !important;
+  box-shadow: var(--glass-shadow, 0 16px 40px rgba(0,0,0,.32));
+}
+
+/* CONNECT_PWA_LIST_PARITY_GESTURE_V1_20261114 — Contacts are the visual list baseline.
+   Only iPhone/desktop PWA receives this attribute; the Android wrapper is untouched. */
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-entry {
+  min-height:66px;
+  padding:0;
+  background:linear-gradient(120deg,rgba(37,54,78,.35),rgba(25,35,53,.20));
+  -webkit-backdrop-filter:blur(14px);
+  backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--glass-stroke);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row {
+  display:flex !important;
+  flex-wrap:nowrap;
+  align-items:center;
+  min-height:66px;
+  gap:12px;
+  padding:8px 9px;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .connect-presence-avatar {
+  flex:0 0 46px;
+  width:46px;
+  min-width:46px;
+  height:46px;
+  overflow:visible;
+  border-radius:0;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .connect-presence-avatar > .person-avatar {
+  width:100%;height:100%;border-radius:50%;overflow:hidden;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .dialog-summary {
+  display:flex;
+  flex:1 1 0;
+  flex-direction:column;
+  justify-content:center;
+  min-width:0;
+  gap:5px;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .dialog-summary strong {
+  font-size:16px;
+  font-weight:680;
+  line-height:1.25;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .dialog-summary > span {
+  font-size:12px;
+  line-height:1.35;
+  color:var(--muted);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .dialog-meta {
+  flex:0 0 auto;
+  align-self:center;
+  align-items:flex-end;
+  justify-self:auto;
+  max-width:84px;
+  gap:6px;
+  margin:0;
+  padding:0;
+  white-space:nowrap;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .dialog-meta time {
+  font-size:11px;
+}
+.connect-app.light[data-connect-pwa-list-parity="true"] .chat-rows .dialog-entry {
+  background:rgba(255,255,255,.76);
+}
+
+/* CONNECT_PWA_DOCK_MOTION_NESTED_GESTURES_V1_20261114
+   Liquid-glass moving selection capsule, scoped to the PWA.
+   Only the highlight moves. All four buttons remain in place and clickable. */
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav {
+  isolation:isolate;
+  justify-content:space-between;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav::before {
+  content:"";
+  box-sizing:border-box;
+  position:absolute;
+  top:4px;
+  bottom:4px;
+  left:4px;
+  width:calc((100% - 8px) / 3);
+  border-radius:18px;
+  z-index:0;
+  pointer-events:none;
+  background:linear-gradient(145deg,
+    color-mix(in srgb,var(--wave-primary,var(--accent)) 10%,rgba(222,231,241,.21)),
+    color-mix(in srgb,var(--wave-secondary,var(--accent)) 7%,rgba(174,192,215,.16)));
+  border:1px solid color-mix(in srgb,var(--glass-stroke-hi) 70%,rgba(255,255,255,.13));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 4px 15px rgba(0,0,0,.13);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);
+  backdrop-filter:blur(18px) saturate(140%);
+  transform:translate3d(0,0,0);
+  transition:transform .44s cubic-bezier(.2,1.12,.34,1),width .24s ease,background-color .24s ease;
+  will-change:transform;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:has(> .connect-calls-tab)::before {
+  width:calc((100% - 8px) / 4);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:has(> .nav-tab:nth-child(2).selected):not(:has(> .connect-calls-tab.selected))::before {
+  transform:translate3d(100%,0,0);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:has(> .nav-tab:nth-child(3).selected):not(:has(> .connect-calls-tab.selected))::before {
+  transform:translate3d(300%,0,0);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:not(:has(> .connect-calls-tab)):has(> .nav-tab:nth-child(3).selected)::before {
+  transform:translate3d(200%,0,0);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav:has(> .connect-calls-tab.selected)::before {
+  transform:translate3d(200%,0,0);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab {
+  position:relative;
+  z-index:1;
+  flex:1 1 0;
+  min-width:0;
+  max-width:none;
+  background:transparent !important;
+  border:1px solid transparent !important;
+  box-shadow:none !important;
+  transition:color .23s ease;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab.selected {
+  color:var(--accent);
+}
+.connect-app.light[data-connect-pwa-list-parity="true"] .bottom-nav::before {
+  background:linear-gradient(145deg,rgba(73,92,115,.19),rgba(106,124,143,.13));
+  border-color:rgba(65,88,118,.19);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 4px 10px rgba(42,67,93,.10);
+}
+@media(prefers-reduced-motion:reduce) {
+  .connect-app[data-connect-pwa-list-parity="true"] .bottom-nav::before {transition:none;will-change:auto;}
+}
+
+/* CONNECT_PWA_CHAT_COMPACT_OFFLINE_V1_20261115 — offline chats use the same 46px avatar as Contacts.
+   PresenceAvatar renders an unwrapped .person-avatar while offline; override the legacy
+   54/58px :first-child chat sizing without changing online dots or Android. */
+.connect-app[data-connect-pwa-list-parity="true"] .chat-rows .dialog-row > .person-avatar.avatar-md {
+  flex:0 0 46px;
+  width:46px;
+  min-width:46px;
+  height:46px;
+  border-radius:50%;
+  overflow:hidden;
+}

@@ -1,7 +1,9 @@
 # Bundled Connect interface
 
 Client source snapshot: Chimera1988/connect-messenger main, commit
-`5b9e3cb` (full SHA and file hashes in `../verification/source/PWA-PROVENANCE.json`).
+`55a5314043e604bdd2f21d35a032bc34fc1ce075` (reviewed source hashes in
+`../PARITY_SOURCE_LOCK.json`; Android adaptations and limitations in
+`../PARITY_NOTIFICATIONS_REPORT.md`).
 The original `app/page.tsx`, component tree, CSS, SVG and public artwork render
 inside a **single** Android Chromium WebView. `hybrid/main.tsx` replaces only
 the Next server layout. The existing Connect HTTPS server continues to serve

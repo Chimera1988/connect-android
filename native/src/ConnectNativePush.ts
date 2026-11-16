@@ -4,6 +4,7 @@ import notifee, {AndroidCategory, AndroidImportance, AndroidVisibility, EventTyp
 import {AppState,NativeModules,DeviceEventEmitter} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import {db} from './backend';
+import {chatTimeKey} from '../web/lib/chat-order';
 import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
 import {getConnectSoundChannel} from './ConnectNativeSoundSettings';
 import {NOTIFICATION_KEY,parseNotificationPrefs,mergeServerNotificationPrefs,type NotificationPrefs} from '../web/lib/android-sound-policy';
@@ -15,6 +16,7 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MESSAGES='connect-native-messages-v1';
 const CALLS='connect-native-calls-v1';
 const READ_KEY='connect-native-read-marker-v1-';
+const SHOWN_KEY='connect-native-shown-message-v1-';
 // connect-native-push-pref-phase9: preserve the same user-facing settings as PWA.
 const LAST_RECEIVED_KEY='connect-native-fcm-last-message-v1';
 const LAST_REGISTERED_KEY='connect-native-fcm-last-registration-v1';
@@ -24,6 +26,28 @@ async function notificationPrefs():Promise<NotificationPrefs>{
 }
 
 type Data=Record<string,string|undefined>;
+const TRACE_KEY='connect-native-push-trace-v1';
+let traceWrites=Promise.resolve();
+/** Bounded metadata only. Never pass arbitrary FCM fields, text, URLs or tokens. */
+async function tracePush(stage:'received'|'shown'|'read'|'dismissed'|'registered'|'registration-failed',conversationId='',eventAt='',messageId=''){
+  const at=new Date().toISOString();
+  traceWrites=traceWrites.catch(()=>{}).then(async()=>{
+    try{
+      const raw=JSON.parse(await SecureStore.getItemAsync(TRACE_KEY)||'[]');
+      const rows=Array.isArray(raw)?raw.slice(-15):[];
+      rows.push({stage,at,...(UUID.test(conversationId)?{conversationId}:{}),
+        ...(Number.isFinite(Date.parse(eventAt))?{eventAt}:{}),
+        ...(/^[a-zA-Z0-9_-]{1,80}$/.test(messageId)?{messageId}:{})});
+      await SecureStore.setItemAsync(TRACE_KEY,JSON.stringify(rows));
+    }catch{console.warn('Connect push diagnostic storage unavailable');}
+  });
+  await traceWrites;
+}
+export async function getNativePushDiagnostics():Promise<unknown[]>{
+  await traceWrites;
+  try{const rows=JSON.parse(await SecureStore.getItemAsync(TRACE_KEY)||'[]');return Array.isArray(rows)?rows:[];}catch{return [];}
+}
+
 export type NativePushDestination={kind:'chat';conversationId:string}|{kind:'call';callId:string;conversationId:string|null}|{kind:'calls'};
 let onOpen:((destination:NativePushDestination)=>void)|null=null;
 let bufferedOpen:NativePushDestination|null=null;
@@ -50,6 +74,12 @@ async function ensureChannels(){
 }
 const pendingReadWrites=new Map<string,Promise<void>>();
 const pendingAlerts=new Map<string,Promise<void>>();
+/** Serialize both display and cancellation: the same chat ID is reused by Android. */
+async function updateChatAlert(conversationId:string,operation:()=>Promise<void>){
+  const task=(pendingAlerts.get(conversationId)||Promise.resolve()).catch(()=>{}).then(operation);
+  pendingAlerts.set(conversationId,task);
+  try{await task;}finally{if(pendingAlerts.get(conversationId)===task)pendingAlerts.delete(conversationId);}
+}
 /** A local read marker stops delayed FCM messages from resurrecting read alerts. */
 export async function rememberReadAt(conversationId:string,iso:string){
   if(!UUID.test(conversationId)||!Number.isFinite(Date.parse(iso)))return;
@@ -58,14 +88,15 @@ export async function rememberReadAt(conversationId:string,iso:string){
   // a slower older write cannot replace a newer high-water mark.
   const write=(pendingReadWrites.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{
     const old=await SecureStore.getItemAsync(key);
-    if(!old||Date.parse(iso)>Date.parse(old))await SecureStore.setItemAsync(key,iso);
+    if(!old||!chatTimeKey(old)||chatTimeKey(iso)>chatTimeKey(old))await SecureStore.setItemAsync(key,iso);
   });
   pendingReadWrites.set(key,write);
-  try{await write;}finally{if(pendingReadWrites.get(key)===write)pendingReadWrites.delete(key);}
+  try{await write;await tracePush('read',conversationId,iso);}finally{if(pendingReadWrites.get(key)===write)pendingReadWrites.delete(key);}
 }
 /** Handles the data-only FCM payloads already sent by the Connect server. */
 export async function handleNativePush(data:Data|undefined){
   if(!data)return;
+  await tracePush('received',data.conversationId,data.createdAt,data.messageId);
   if(data.messageId||data.kind==='message'||data.kind==='chat')
     await SecureStore.setItemAsync(LAST_RECEIVED_KEY,new Date().toISOString()).catch(()=>{});
   if(data.kind==='read'){
@@ -93,15 +124,22 @@ export async function handleNativePush(data:Data|undefined){
     // FCM delivery may be reordered or concurrent. Keep the newest unread
     // alert, otherwise a delayed old push can replace it and then be removed by
     // an old read receipt, hiding a newer unread message.
-    const update=(pendingAlerts.get(conversationId)||Promise.resolve()).catch(()=>{}).then(async()=>{
-      if(conversationId===visibleConversation)return;
+    await updateChatAlert(conversationId,async()=>{
+      if(conversationId===visibleConversation&&AppState.currentState==='active')return;
+      const previous=await SecureStore.getItemAsync(SHOWN_KEY+conversationId);
+      if(previous){
+        let shown:{messageId?:string;createdAt?:string}={};
+        try{shown=JSON.parse(previous)||{};}catch{/* A damaged dedup marker must not drop future pushes. */}
+        if(data.messageId&&shown.messageId===data.messageId)return;
+        if(chatTimeKey(data.createdAt||'')&&chatTimeKey(data.createdAt!)<chatTimeKey(shown.createdAt||''))return;
+      }
       const lastRead=await SecureStore.getItemAsync(READ_KEY+conversationId);
-      const created=Date.parse(data.createdAt||'');
-      if(lastRead&&Number.isFinite(created)&&created<=Date.parse(lastRead))return;
+      const created=chatTimeKey(data.createdAt||'');
+      if(lastRead&&created&&created<=chatTimeKey(lastRead))return;
       const current=(await notifee.getDisplayedNotifications()).find(item=>item.notification.id==='chat:'+conversationId)?.notification;
       const currentData=current?.data;
-      const currentTime=typeof currentData?.createdAt==='string'?Date.parse(currentData.createdAt):NaN;
-      if(Number.isFinite(created)&&Number.isFinite(currentTime)&&created<currentTime)return;
+      const currentTime=typeof currentData?.createdAt==='string'?chatTimeKey(currentData.createdAt):'';
+      if(created&&currentTime&&created<currentTime)return;
       if(data.messageId&&currentData?.messageId===data.messageId)return;
       const channelId=await getConnectSoundChannel('messages',{silent:prefs.sound==='silent',vibrate:prefs.vibrate,tone:prefs.sound});
       await notifee.displayNotification({
@@ -109,11 +147,11 @@ export async function handleNativePush(data:Data|undefined){
         title:'Connect · Новое сообщение',body:'Откройте переписку, чтобы прочитать сообщение',
         data:{kind:'message',conversationId,createdAt:data.createdAt||'',messageId:data.messageId||''},
         android:{channelId,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
-          visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true},
+          visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true,onlyAlertOnce:false},
       });
+      await tracePush('shown',conversationId,data.createdAt,data.messageId);
+      await SecureStore.setItemAsync(SHOWN_KEY+conversationId,JSON.stringify({messageId:data.messageId||'',createdAt:data.createdAt||''}));
     });
-    pendingAlerts.set(conversationId,update);
-    try{await update;}finally{if(pendingAlerts.get(conversationId)===update)pendingAlerts.delete(conversationId);}
   }
 }
 
@@ -136,7 +174,8 @@ async function sendRegistration(endpoint:string, method:'POST'|'DELETE',expected
     method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
     body:JSON.stringify(method==='POST'?{platform:'android',endpoint}:{endpoint}),
   });
-  if(!res.ok)throw Error('Сервер Connect отклонил регистрацию уведомлений (HTTP '+res.status+')');
+  if(!res.ok){await tracePush('registration-failed');throw Error('Сервер Connect отклонил регистрацию уведомлений (HTTP '+res.status+')');}
+  if(method==='POST')await tracePush('registered');
 }
 export async function registerNativePushNow(ownerId:string){
   const permission=await notifee.requestPermission();
@@ -196,20 +235,24 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
 
 export async function dismissChatPush(conversationId:string,readAt?:string){
   if(!UUID.test(conversationId))return;
-  await pendingAlerts.get(conversationId)?.catch(()=>{});
-  const boundary=readAt?Date.parse(readAt):null;
-  if(boundary!==null&&!Number.isFinite(boundary))return;
-  const displayed=await notifee.getDisplayedNotifications().catch(()=>[]);
+  const boundary=readAt?chatTimeKey(readAt):null;
+  if(boundary!==null&&!boundary)return;
+  await updateChatAlert(conversationId,async()=>{
+  const displayed=await notifee.getDisplayedNotifications();
+  const children=displayed.filter(item=>item.notification?.data?.conversationId===conversationId&&['message','chat'].includes(String(item.notification.data.kind))&&!item.notification.android?.groupSummary);
+  const unread=children.some(item=>{const at=chatTimeKey(String(item.notification?.data?.createdAt||''));return boundary!==null&&(!at||at>boundary);});
   await Promise.all(displayed.filter(item=>{
     const notification=item.notification;
     if(!notification||notification.data?.conversationId!==conversationId||typeof notification.id!=='string')return false;
     // Incoming-call notifications carry conversationId too; reading messages
     // must never cancel a call alert in the same conversation.
+    if(notification.android?.groupSummary&&['message','chat','message-summary'].includes(String(notification.data.kind)))return !unread;
     if(notification.id!=='chat:'+conversationId&&notification.data.kind!=='message'&&notification.data.kind!=='chat')return false;
     if(boundary===null)return true;
-    const createdAt=Date.parse(String(notification.data.createdAt||''));
-    return Number.isFinite(createdAt)&&createdAt<=boundary;
-  }).map(item=>notifee.cancelNotification(item.notification!.id!)));
+    const createdAt=chatTimeKey(String(notification.data.createdAt||''));
+    return Boolean(createdAt)&&createdAt<=boundary;
+  }).map(async item=>{await notifee.cancelNotification(item.notification!.id!);await tracePush('dismissed',conversationId,readAt);}));
+  });
 }
 
 
@@ -238,7 +281,7 @@ export async function testNativeMessagePush(ownerId:string):Promise<string>{
     body:'Если видите это уведомление, системный канал работает.',
     data:{kind:'diagnostic'},
     android:{channelId,category:AndroidCategory.MESSAGE,importance:AndroidImportance.HIGH,
-      visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true},
+      visibility:AndroidVisibility.PRIVATE,pressAction:{id:'default'},autoCancel:true,onlyAlertOnce:false},
   });
   const last=await SecureStore.getItemAsync(LAST_RECEIVED_KEY);
   return 'Разрешение Android есть, FCM-токен зарегистрирован, тест отправлен в шторку. '+

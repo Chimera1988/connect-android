@@ -1,3 +1,5 @@
+Текущее обновление 3.0.6: [матрица и результаты](PARITY_NOTIFICATIONS_REPORT.md), [диагностика](NOTIFICATION_DIAGNOSIS.md), [итоговый workflow](../.github/workflows/connect-android-parity-notifications-final.yml). Новый workflow требует совместимую недебажную подпись и использует testReleaseUnitTest. Описанный ниже исторический debug fallback не допускается для окончательного выпуска.
+
 # Connect Android
 
 Expo SDK 58 / React Native 0.88 hosts one WebView containing the shared Connect PWA React/CSS/SVG interface. Native services handle Android notifications, audio calls, recording, files and permissions. The app keeps `com.connect.messenger`, the existing Firebase client, Supabase accounts and the Connect HTTPS proxy. Calls are audio only; camera access is used for video notes and attachments.
@@ -14,7 +16,7 @@ npm run typecheck
 npm test
 npx expo prebuild --platform android --no-install --clean
 cd android
-./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testDebugUnitTest
+./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest :app:lintRelease
 ./gradlew :app:assembleRelease
 ```
 

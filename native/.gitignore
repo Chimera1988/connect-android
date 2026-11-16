@@ -9,3 +9,5 @@ ios/
 web/dist/
 src/generated/
 verification/browser/*.html
+__pycache__/
+*.pyc

@@ -24,3 +24,98 @@
 .connect-app .connect-call-history-screen.is-selecting .connect-call-redial{display:none;}
 .connect-app .connect-call-editor-error{font-size:12px;color:#ffa6b0;padding:0 9px 9px;}
 @media(max-width:375px){.connect-app .connect-call-history-head-actions{gap:6px;}.connect-app .connect-call-editor-more{width:36px;height:38px;}.connect-app .connect-call-editor-toolbar button{font-size:11px;padding:7px 8px;}}
+
+/* CONNECT_PWA_CALL_SCREEN_JOURNAL_V2_20261114 — the Calls tab owns its screen.
+   The underlying Chats/Contacts/Settings view must not bleed through. */
+.connect-app .main-view:has(> .connect-pwa-call-journal) > :not(.connect-pwa-call-journal) {
+  display:none !important;
+}
+.connect-app .main-view:has(> .connect-pwa-call-journal) {
+  overflow:hidden;
+  isolation:isolate;
+}
+.connect-app .main-view > .connect-call-history-screen.connect-pwa-call-journal {
+  position:relative;
+  inset:auto;
+  flex:1 1 auto;
+  width:100%;
+  min-height:0;
+  z-index:1;
+  background:transparent;
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+}
+
+/* CONNECT_PWA_LIST_PARITY_GESTURE_V1_20261114 — Calls list matches Contact cards. */
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-list {
+  border:0;
+  border-radius:18px;
+  overflow:hidden;
+  background:transparent;
+  box-shadow:none;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-item {
+  min-height:66px;
+  padding:8px 9px;
+  gap:12px;
+  border-bottom:1px solid var(--glass-stroke);
+  background:linear-gradient(120deg,rgba(37,54,78,.35),rgba(25,35,53,.20));
+  -webkit-backdrop-filter:blur(14px);
+  backdrop-filter:blur(14px);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-item:last-child {
+  border-bottom-color:var(--glass-stroke);
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-avatar {
+  width:46px;
+  height:46px;
+  flex:0 0 46px;
+  font-size:21px;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-details {
+  flex:1 1 0;
+  gap:5px;
+  min-width:0;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-details strong {
+  font-size:16px;
+  font-weight:680;
+  line-height:1.25;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-details small {
+  font-size:12px;
+  line-height:1.35;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-actions {
+  gap:8px;
+  min-width:0;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-date {
+  font-size:11px;
+  max-width:85px;
+  line-height:1.25;
+  text-align:right;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-date time {
+  white-space:normal;
+  overflow-wrap:normal;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-redial {
+  width:38px;
+  height:38px;
+  flex:0 0 38px;
+}
+.connect-app.light[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-item {
+  background:rgba(255,255,255,.76);
+}
+@media(max-width:380px) {
+  .connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-item {
+    gap:9px;
+  }
+  .connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-actions {
+    gap:5px;
+  }
+  .connect-app[data-connect-pwa-list-parity="true"] .connect-pwa-call-journal .connect-call-history-date {
+    max-width:72px;
+  }
+}

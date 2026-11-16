@@ -14,6 +14,14 @@ const uuid='bce41143-d7ac-4dcf-aac2-c66b80872765';
 const token='eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmb28ifQ.signature';
 const message=(command,payload,extra={})=>JSON.stringify({v:1,nonce,id:'request:1',command,payload,...extra});
 const read=(command,payload,extra,url=CONNECT_ORIGIN+'/')=>parse(message(command,payload,extra),nonce,url);
+test('waveform bridge accepts stable attachment paths and refuses URL injection or traversal',()=>{
+ assert(read('media:waveform',{path:uuid+'/voice.m4a'}));
+ for(const value of ['https://evil/audio','../secret','file:///secret',uuid+'/voice?token=x',uuid+'/%2e%2e/private'])assert.equal(read('media:waveform',{path:value}),null);
+});
+test('notification journal request accepts no arbitrary data or credentials',()=>{
+ assert(read('notification:diagnostics',{}));
+ assert.equal(read('notification:diagnostics',{token:'private'}),null);
+});
 
 test('bridge requires the exact HTTPS origin without credentials or URL tricks',()=>{
   assert.equal(trusted(CONNECT_ORIGIN),true);

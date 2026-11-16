@@ -187,3 +187,55 @@
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
+
+/* CONNECT_PWA_VIDEO_FRAME_GEOMETRY_FIX6_20261113
+   Media pixels fill existing fixed viewports. NEVER resize the chat bubbles,
+   stage, playback controls, sound control or progress ring. */
+.connect-app .bubble.video-note-bubble .connect-v5-video-note.connect-pwa-frame-fit .connect-v5-note-stage > .connect-v4-note-circle {
+  overflow: hidden !important;
+  border-radius: 50% !important;
+  isolation: isolate !important;
+}
+.connect-app .bubble.video-note-bubble .connect-v5-video-note.connect-pwa-frame-fit .connect-v5-note-stage > .connect-v4-note-circle > img.connect-note-still,
+.connect-app .bubble.video-note-bubble .connect-v5-video-note.connect-pwa-frame-fit .connect-v5-note-stage > .connect-v4-note-circle > video.connect-v4-note-video {
+  display: block !important;
+  position: absolute !important;
+  inset: 0 !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  aspect-ratio: auto !important;
+  object-fit: cover !important;
+  object-position: center center !important;
+  border-radius: 50% !important;
+  -webkit-clip-path: circle(50% at 50% 50%);
+  clip-path: circle(50% at 50% 50%);
+}
+/* The old Liquid Glass video rules use 'contain' which produces empty bars.
+   Cover applies to moving frames and frozen images; the viewport stays put. */
+.connect-app .connect-inline-autoplay-video.connect-pwa-frame-fit .connect-inline-autoplay-video-open > video,
+.connect-app .connect-inline-autoplay-video.connect-pwa-frame-fit .connect-inline-autoplay-video-open > img.connect-inline-video-still,
+.connect-app .connect-video-preview.connect-pwa-frame-fit > video,
+.connect-app .connect-video-preview.connect-pwa-frame-fit > img {
+  position: absolute !important;
+  inset: 0 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  object-fit: cover !important;
+  object-position: center center !important;
+}

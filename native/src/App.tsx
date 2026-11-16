@@ -10,9 +10,11 @@ import notifee from '@notifee/react-native';
 import {db,mediaUrl,type Profile} from './backend';
 import {parseHybridMessage,CONNECT_ORIGIN} from './hybridProtocol';
 import {useConnectNativeVoice} from './ConnectNativeVoice';
-import {subscribeNativePush,registerNativePushNow,disableNativePush,setVisibleConversation,rememberReadAt,dismissChatPush} from './ConnectNativePush';
+import {subscribeNativePush,registerNativePushNow,getNativePushDiagnostics,disableNativePush,setVisibleConversation,rememberReadAt,dismissChatPush} from './ConnectNativePush';
 import {chooseConnectSound,getConnectSoundLabel,getConnectSoundPreference,getConnectSoundSilence,setConnectSoundSilence,previewConnectSound,resetConnectSound,previewBuiltinSound,stopSoundPreview,type BuiltinNotificationTone} from './ConnectNativeSoundSettings';
 import pwa from './generated/pwa';
+import {getAudioWaveform} from './nativeWaveform';
+import {useConnectNativeReadSync} from './ConnectNativeReadSync';
 import ConnectHybridRecorder,{type ConnectHybridRecorderHandle,type HybridRecordingFile} from './ConnectHybridRecorder';
 import {File as NativeFile} from 'expo-file-system';
 import {fromUint8Array,toUint8Array} from 'js-base64';
@@ -27,6 +29,7 @@ function HybridConnect(){
   const web=useRef<WebView>(null);
   const [initial,setInitial]=useState<{access_token:string;refresh_token:string}|null|undefined>(undefined);
   const [ownerId,setOwnerId]=useState(''),[profiles,setProfiles]=useState<Profile[]>([]),[avatars,setAvatars]=useState<Record<string,string>>({});
+  useConnectNativeReadSync(ownerId);
   const [failure,setFailure]=useState(''),[revision,setRevision]=useState(0);
   const nonce=useMemo(()=>Crypto.randomUUID(),[revision]);
   const documentNonce=useRef(nonce);documentNonce.current=nonce;
@@ -176,6 +179,14 @@ function HybridConnect(){
       if(v.phase!=='idle'&&['sounds:preview','sounds:previewBuiltin'].includes(command))throw Error('Прослушивание доступно после завершения аудиозвонка');
       if(command.startsWith('calls:')&&command!=='calls:accept'&&p.callId&&p.callId!==v.shown?.id)throw Error('Этот звонок уже завершён');
       switch(command){
+        case 'notification:diagnostics':if(!ownerId)throw Error('Войдите в Connect');result=await getNativePushDiagnostics();break;
+        case 'media:waveform':{
+          const viewer=ownerId;if(!viewer)throw Error('Войдите в Connect');
+          const signed=await db.storage.from('connect-attachments').createSignedUrl(p.path as string,120);
+          if(signed.error||!signed.data?.signedUrl)throw Error('Аудио недоступно');
+          result=await getAudioWaveform(mediaUrl(signed.data.signedUrl),43);
+          if(viewer!==ownerId)throw Error('Аккаунт изменился');break;
+        }
         case 'calls:journal':{if(p.userId!==ownerId)throw Error('Аккаунт изменился');result=JSON.parse(await NativeModules.ConnectCallCoordinator.journal(p.userId,JSON.stringify(p)));break;}
         case 'history:catalog-retire':case 'history:catalog-read':case 'history:catalog-write':case 'history:catalog-drop':case 'history:read':case 'history:page':case 'history:chunk':case 'history:write':case 'history:drop':case 'history:wipe':case 'history:stats':case 'history:limit':{
           // Native storage verifies the locally encrypted session owner itself.
@@ -279,8 +290,8 @@ function HybridConnect(){
     // network page must never inherit the injected native nonce.
     onShouldStartLoadWithRequest={r=>{if(loaded.current&&r.isTopFrame&&/^https?:\/\//.test(r.url))void Linking.openURL(r.url).catch(()=>{});return false;}}
     onMessage={e=>{void handle(e);}}
-    onError={()=>{loaded.current=false;abortTransfers();setFailure('Не удалось открыть интерфейс Connect. Повторите запуск.');}}
-    onRenderProcessGone={()=>{loaded.current=false;abortTransfers();setFailure('Android освободил память интерфейса. Откройте Connect снова.');}}
+    onError={()=>{setVisibleConversation(null);active.current='';loaded.current=false;abortTransfers();setFailure('Не удалось открыть интерфейс Connect. Повторите запуск.');}}
+    onRenderProcessGone={()=>{setVisibleConversation(null);active.current='';loaded.current=false;abortTransfers();setFailure('Android освободил память интерфейса. Откройте Connect снова.');}}
   /></>;
 }
 export default function App(){return <SafeAreaProvider><SafeAreaView edges={['top','bottom','left','right']} style={{flex:1,backgroundColor:'#080b11'}}><StatusBar style="light"/><HybridConnect/></SafeAreaView></SafeAreaProvider>;}

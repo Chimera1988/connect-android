@@ -1,11 +1,20 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),ts=require('typescript');
 function loadPolicy(){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../web/lib/android-sound-policy.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{exports});return exports;}
+function notifeeValidator(){
+ const base=path.dirname(require.resolve('@notifee/react-native/package.json'));
+ const load=(file,deps={})=>{const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(base,'src',file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{exports,require:n=>{if(!(n in deps))throw Error(n);return deps[n];}});return exports;};
+ const types=load('types/NotificationAndroid.ts');
+ const utils=load('utils/validate.ts');utils.objectHasProperty=(object,key)=>Object.prototype.hasOwnProperty.call(object,key);
+ const rules=load('validators/validate.ts',{'../utils':utils,'../types/NotificationAndroid':types});
+ return load('validators/validateAndroidChannel.ts',{'../utils':utils,'./validate':rules,'../types/NotificationAndroid':types}).default;
+}
+const validateChannel=notifeeValidator();
 function fixture(){
  const records=new Map(),played=[],channels=[],created=[],existing=new Map(),state={currentState:'active'};
  let vibration=true,stops=0,read=async k=>records.get(k)||null;
  const native={previewSound:async uri=>{played.push(uri);return true;},stopPreviewSound:async()=>{stops++;},importSound:async()=> 'content://media/external/audio/media/17'};
  const secure={getItemAsync:k=>read(k),setItemAsync:async(k,v)=>records.set(k,v),deleteItemAsync:async k=>records.delete(k)};
- const notifee={getChannel:async id=>existing.get(id),createChannel:async c=>{created.push(c);existing.set(c.id,{...c});}};
+ const notifee={getChannel:async id=>existing.get(id),createChannel:async c=>{validateChannel(c);created.push(c);existing.set(c.id,{...c});}};
  const deps={'react':{},'react-native':{AppState:state,Platform:{OS:'android'},NativeModules:{ConnectSoundModule:native,ConnectCallCoordinator:{getCallVibration:async()=>vibration,configureSounds:async(...args)=>{channels.push(args);return 'native-calls'}}}},'expo-document-picker':{getDocumentAsync:async()=>({canceled:false,assets:[{uri:'content://provider/sound',name:'Моя мелодия.m4a',size:128}]})},'expo-secure-store':secure,'@notifee/react-native':{...notifee,AndroidImportance:{HIGH:4,NONE:0}},'../web/lib/android-sound-policy':loadPolicy()};
  const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(require.resolve('../src/ConnectNativeSoundSettings.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,{exports,require:n=>deps[n],Promise,Error});
  return{api:exports,policy:deps['../web/lib/android-sound-policy'],records,played,channels,created,existing,state,native,stops:()=>stops,setRead:fn=>{read=fn;},setVibration:v=>vibration=v};
@@ -13,6 +22,11 @@ function fixture(){
 const prefsKey='connect-native-notifications-v1';
 const legacyId='connect-native-messages-connect_soft-v5-audible-vib';
 const factoryId='connect-native-messages-connect_notification-v6-audible-vib';
+test('fresh message channels have explicit vibration pattern and never bypass DND',async()=>{
+ const h=fixture();await h.api.getConnectSoundChannel('messages');
+ assert.deepEqual(Array.from(h.created[0].vibrationPattern||[]),[200,100,200,100]);
+ assert.equal(h.created[0].bypassDnd,false);
+});
 test('new call and message previews match the exact bundled MP3 resource names',async()=>{
  const h=fixture();await h.api.previewConnectSound('calls');await h.api.previewConnectSound('messages');
  assert.deepEqual(h.played,['android.resource://com.connect.messenger/raw/connect_ringtone','android.resource://com.connect.messenger/raw/connect_notification']);
@@ -100,4 +114,11 @@ test('prebuild verifies exact original bytes and retains all six offline resourc
  const plugin=require('../plugins/withConnectBuiltinSounds');
  try{plugin.copySounds(path.join(__dirname,'..'),root);const files=fs.readdirSync(path.join(root,'app/src/main/res/raw'));assert.equal(files.length,6);assert.ok(files.includes('connect_ringtone.mp3'));assert.ok(files.includes('connect_notification.mp3'));const stable=fs.readFileSync(path.join(root,'app/connect-sound-ids.txt'),'utf8');assert.match(stable,/raw\/connect_soft = 0x7f110003/);assert.match(stable,/raw\/connect_gentle = 0x7f110002/);const configured=plugin.configureBuild('android { androidResources { } }');assert.match(configured,/--stable-ids/);assert.equal(plugin.configureBuild(configured),configured);}
  finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+test('legacy Android vibration patterns rejected by Notifee are kept in their original user channel',async()=>{
+ for(const vibrationPattern of [[0,200,100,200],[200,100,200]]){
+  const h=fixture();h.existing.set(legacyId,{id:legacyId,name:'System-edited',importance:4,vibration:true,vibrationPattern,sound:'connect_soft'});
+  assert.equal(await h.api.getConnectSoundChannel('messages'),legacyId);
+  assert.equal(h.created.length,0,'migration must not reject delivery or reset the system pattern');
+ }
 });

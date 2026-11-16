@@ -649,3 +649,66 @@
 
 /* Message controls use the Connect menu; text inputs retain system editing. */
 .voice-player{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+
+/* CONNECT_PWA_CHAT_MEDIA_ENTRY_V2: quiet, stable first paint of media-bearing chats. */
+.chat-view.connect-chat-preparing .message-scroll{visibility:hidden;pointer-events:none}
+.connect-chat-entry-overlay{position:absolute;inset:60px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;background:var(--bg);color:var(--text);pointer-events:auto;text-align:center;padding:24px}
+.connect-chat-entry-overlay strong{font-size:14px;font-weight:600}
+.connect-chat-entry-overlay small{font-size:12px;color:var(--muted)}
+.connect-chat-entry-spinner{width:24px;height:24px;border:2px solid var(--line,rgba(130,140,150,.25));border-top-color:var(--text);border-radius:50%;animation:connect-chat-entry-spin .8s linear infinite}
+@keyframes connect-chat-entry-spin{to{transform:rotate(360deg)}}
+.connect-v4-note-circle:has(>.connect-note-still){position:relative;isolation:isolate}
+.connect-v4-note-circle>.connect-note-still{position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;pointer-events:none;z-index:0}
+.connect-v4-note-circle>.connect-note-still-fallback{display:flex;align-items:center;justify-content:center;background:var(--panel,rgba(45,55,70,.72));font-size:22px;color:var(--muted)}
+.connect-v4-note-circle:has(>.connect-note-still)>.connect-v4-note-video{z-index:1;transition:none!important}
+.connect-media-unavailable{color:var(--muted);font-size:12px}
+
+/* CONNECT_PWA_VIDEO_STILLS_FIX4_20261113: themed, text-free media warmup */
+.connect-app .connect-chat-entry-overlay {
+  background-color:transparent !important;
+  color:var(--wave-primary,var(--accent)) !important;
+  -webkit-backdrop-filter:blur(3px) saturate(112%);
+  backdrop-filter:blur(3px) saturate(112%);
+}
+.connect-chat-entry-pulse{display:flex;align-items:center;justify-content:center;gap:15px;width:110px;height:58px;pointer-events:none}
+.connect-chat-entry-pulse>i{display:block;width:13px;height:13px;border-radius:50%;background:var(--wave-primary,var(--accent));box-shadow:0 0 17px color-mix(in srgb,var(--wave-primary,var(--accent)) 70%,transparent),0 0 34px color-mix(in srgb,var(--wave-secondary,var(--accent)) 38%,transparent);animation:connect-media-dot 1.18s ease-in-out infinite both}
+.connect-chat-entry-pulse>i:nth-child(2){background:var(--wave-secondary,var(--accent));animation-delay:.16s}
+.connect-chat-entry-pulse>i:nth-child(3){background:var(--wave-tertiary,var(--accent));animation-delay:.32s}
+@keyframes connect-media-dot{0%,70%,100%{opacity:.4;transform:translateY(0) scale(.75)}36%{opacity:1;transform:translateY(-8px) scale(1.15)}}
+@media(prefers-reduced-motion:reduce){.connect-chat-entry-pulse>i{animation:none;opacity:1}}
+.connect-app .connect-v4-note-circle>.connect-note-still-fallback{background:linear-gradient(135deg,color-mix(in srgb,var(--wave-primary,var(--accent)) 18%,var(--panel)),color-mix(in srgb,var(--wave-secondary,var(--accent)) 14%,var(--panel))) !important;color:var(--text)!important}
+.connect-app .connect-inline-autoplay-video-open>.connect-inline-video-still,.connect-app .connect-inline-autoplay-video-open>.connect-inline-video-still-fallback{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain;pointer-events:none;z-index:0;border-radius:12px}
+.connect-app .connect-inline-autoplay-video-open>.connect-inline-video-still-fallback{display:grid;place-items:center;font-size:28px;color:var(--wave-primary,var(--accent));background:linear-gradient(120deg,color-mix(in srgb,var(--wave-primary,var(--accent)) 16%,var(--panel)),color-mix(in srgb,var(--wave-secondary,var(--accent)) 11%,var(--panel)))}
+.connect-app .connect-inline-autoplay-video-open>video{z-index:1;transition:opacity .12s ease}
+
+/* CONNECT_PWA_ONLINE_BADGES_V1_20261114: color follows the selected Connect accent. */
+.connect-app .connect-presence-avatar {
+  display:inline-flex;position:relative;align-items:center;justify-content:center;
+  flex:0 0 auto;vertical-align:middle;
+}
+.connect-app .connect-presence-dot {
+  position:absolute;right:-2px;bottom:-2px;z-index:2;
+  width:12px;height:12px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--bg);
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 27%,transparent);
+  pointer-events:none;
+}
+/* CONNECT_PWA_STICKER_WEBP_EDITOR_20261115 — explicit selection, never delete on preview tap. */
+.connect-custom-grid.is-editing button{position:relative;min-width:0;padding:2px;border:1px solid var(--border);border-radius:11px;background:rgba(255,255,255,.025)}
+.connect-custom-grid.is-editing button[aria-pressed="true"]{border-color:var(--accent);background:rgba(90,166,255,.14)}
+.connect-sticker-check{position:absolute;right:2px;top:2px;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--panel2);border:1px solid var(--border);font-size:13px;color:var(--accent2);line-height:1}
+.connect-custom-grid.is-editing button[aria-pressed="true"] .connect-sticker-check{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* CONNECT_PWA_STICKER_PICKER_IOS_FIX_20261115
+ * Invisible native input covers its label, so iOS Safari receives a real touch.
+ * display:none/hidden plus delayed .click() can lose the user activation.
+ */
+.connect-sticker-upload-action{display:inline-flex;position:relative;align-items:center;justify-content:center;overflow:hidden;max-width:100%;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.connect-sticker-upload-action.is-busy{opacity:.55;cursor:default;}
+.connect-sticker-upload-input{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;opacity:0;cursor:pointer;z-index:1;}
+.connect-sticker-upload-input:focus-visible{opacity:.01;outline:2px solid var(--accent);outline-offset:-3px;}
+
+/* CONNECT_PWA_STICKER_LOADING_PREVIEW_V1_20261115 */
+.connect-sticker-loading{display:flex;width:152px;height:152px;align-items:center;justify-content:center;background:transparent;color:var(--text);opacity:.5}
+.connect-sticker-loading i{display:block;width:23px;height:23px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:connect-sticker-spin .8s linear infinite}
+@keyframes connect-sticker-spin{to{transform:rotate(360deg)}}

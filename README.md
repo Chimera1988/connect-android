@@ -1,3 +1,5 @@
+Текущий пакет изменений 3.0.6: [матрица и проверки](native/PARITY_NOTIFICATIONS_REPORT.md), [диагностика уведомлений](native/NOTIFICATION_DIAGNOSIS.md), [единый workflow](.github/workflows/connect-android-parity-notifications-final.yml). Итоговый APK допускается только с прежней совместимой недебажной подписью; debug fallback запрещён.
+
 # Connect Native — Android
 
 Текущая сверка и исправления PWA: [native/PWA_PARITY_REVIEW.md](native/PWA_PARITY_REVIEW.md). Старые отчёты phase10/final-parity-review описывают предыдущие снимки; они не подтверждают текущую работоспособность.

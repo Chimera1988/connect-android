@@ -5,7 +5,7 @@ import {resolve,join} from 'node:path';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
 const folder=await mkdtemp(join(tmpdir(),'connect-cache-browser-'));
-const result=await build({entryPoints:[resolve('tests/browser-cache.tsx')],bundle:true,format:'esm',target:'chrome110',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'}});
+const result=await build({entryPoints:[resolve('tests/browser-cache.tsx')],bundle:true,format:'esm',target:'chrome110',write:false,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY':'""','process.env.NEXT_PUBLIC_SUPABASE_URL':'"https://project.supabase.co"','process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY':'"test-publishable"'}});
 const script=result.outputFiles[0].text;
 const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<html><body><script type="module">'+script.replace(/<\/script/g,'<\\/script')+'</script></body></html>');});
 await new Promise(done=>server.listen(0,'127.0.0.1',done));

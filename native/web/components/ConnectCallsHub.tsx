@@ -349,13 +349,18 @@ export default function ConnectCallsHub() {
 
   useEffect(() => {
     if (!open) return;
-    function onOtherTab(event: PointerEvent) {
+    // CONNECT_PWA_CALLS_DOCK_TAP_ORDER_20261114: closing the Calls portal on pointerdown
+    // races with the subsequent click on the destination tab in iOS PWA. Wait until
+    // the actual destination click has run. Retain the native Android behavior.
+    const nativeRuntime = Boolean(window.ConnectAndroid || window.ConnectNative);
+    const closeEvent = nativeRuntime ? 'pointerdown' : 'click';
+    function onOtherTab(event: Event) {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (target.closest('.bottom-nav .nav-tab:not(.connect-calls-tab)')) { setOpen(false); setPickerOpen(false); }
     }
-    document.addEventListener('pointerdown', onOtherTab, true);
-    return () => document.removeEventListener('pointerdown', onOtherTab, true);
+    document.addEventListener(closeEvent, onOtherTab, nativeRuntime);
+    return () => document.removeEventListener(closeEvent, onOtherTab, nativeRuntime);
   }, [open]);
 
   const visibleCalls=useMemo(()=>calls.filter(call=>
@@ -510,7 +515,7 @@ export default function ConnectCallsHub() {
       aria-label={unseenMissed ? `Звонки: пропущенных ${unseenMissed}` : "Звонки"} aria-pressed={open} onClick={openCalls}>
       <span className="nav-symbol"><CallIcon />{unseenMissed > 0 && <span className="connect-nav-count" aria-hidden="true">{unseenMissed > 99 ? '99+' : unseenMissed}</span>}</span><small>Звонки</small>
     </button>, nav)}
-    {main && nav && userId && open && createPortal(<section className={"connect-call-history-screen"+(callSelecting?" is-selecting":"")} aria-label="История звонков">
+    {main && nav && userId && open && createPortal(<section className={"connect-call-history-screen"+(!window.ConnectAndroid&&!window.ConnectNative?" connect-pwa-call-journal":"")+(callSelecting?" is-selecting":"")} aria-label="История звонков">
       <div className="connect-call-history-head"><h1>Звонки</h1><div className="connect-call-history-head-actions"><span>{visibleCalls.length} записей</span><button type="button" className="connect-call-new" aria-label="Позвонить контакту" title="Новый звонок" onClick={() => { setCallMenuOpen(false);setContactSearch(''); setPickerOpen(true); void loadContacts(); }}><CallIcon size={22}/></button><div className="connect-call-editor-menu"><button type="button" className="connect-call-editor-more" aria-label="Действия с журналом вызовов" aria-expanded={callMenuOpen} onClick={()=>setCallMenuOpen(!callMenuOpen)}>•••</button>{callMenuOpen && <div className="connect-call-editor-popup" role="menu"><button type="button" role="menuitem" disabled={callEditingBusy} onClick={startCallSelection}>Выбрать</button><button type="button" role="menuitem" disabled={callEditingBusy||!visibleCalls.length} onClick={startCallSelection}>Удалить…</button><button type="button" role="menuitem" className="danger" disabled={callEditingBusy||!visibleCalls.length} onClick={()=>void clearCallJournal()}>Очистить журнал</button></div>}</div></div></div>
       {callEditingError && <div role="alert" className="connect-call-editor-error">{callEditingError}</div>}
       {callSelecting && <div className="connect-call-editor-toolbar"><button type="button" onClick={stopCallSelection}>Отмена</button><span>Выбрано: {markedCalls.length}</span><button type="button" onClick={()=>setMarkedCalls(list.map(c=>c.id))} disabled={callEditingBusy||!list.length}>Выбрать все</button><button type="button" className="danger" disabled={callEditingBusy||!markedCalls.length} onClick={()=>void deleteMarkedCalls()}>Удалить ({markedCalls.length})</button></div>}
