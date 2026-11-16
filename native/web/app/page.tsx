@@ -13,7 +13,7 @@ import {seedInboxHistory,releaseHistoryMemory,chatNetworkDue,chatNetworkVerified
 import {resolveCachedStorageFile} from '../lib/media-cache';
 import {createAvatarDirectoryCache} from '../lib/avatar-directory-cache'; // CONNECT_ANDROID_AVATAR_EGRESS_GUARD_V1
 import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
-import {readChatWave, rememberChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
+import {readChatWave, prewarmChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
 import { prefetchCachedMedia, prefetchChatAudio, prefetchStickerWebp } from '../lib/media-cache'; // CONNECT_PWA_CHAT_SPEED_STICKER_VOICE_V1_20261115
 import { readChatHistory, prewarmChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
 import {compareChatMessages,chatTimeKey} from '../lib/chat-order';
@@ -237,7 +237,7 @@ function voiceTime(seconds: number) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
-const VoicePlayer = memo(function VoicePlayer({ src, path, sentAt, mine, delivered, read, fileName, onSave }: { src:string;path:string;sentAt:string;mine:boolean;delivered:boolean;read:boolean;fileName?:string;onSave?:()=>void }) {
+const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, mine, delivered, read, fileName, onSave }: { src:string;path:string;byteSize?:number;sentAt:string;mine:boolean;delivered:boolean;read:boolean;fileName?:string;onSave?:()=>void }) {
   const waveOwner=mediaCacheOwner();
   const savedWave=readChatWave(waveOwner,path);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -249,8 +249,6 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, sentAt, mine, deliver
   const [buffering,setBuffering] = useState(false);
   const [playSrc,setPlaySrc] = useState(src||'');
   const seeking = useRef(false);
-  const waveRequest=useRef(false);
-  const waveIdentity=useRef(path);waveIdentity.current=path;
   useEffect(()=>{
     let current=true;
     setPlaySrc(src||'');setError(false);
@@ -266,25 +264,47 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, sentAt, mine, deliver
   },[src,path,waveOwner]);
   const wavePointer=useRef<{x:number;y:number;started:number}|null>(null);
 
+  // CONNECT_ANDROID_INCOMING_VOICE_WAVE_CACHE_V1_20261116
   useEffect(() => {
-    const cached = readChatWave(waveOwner,path);
-    if (cached) { setBars(cached.bars); setDuration(cached.duration); }
-    else { setBars(Array(43).fill(0.28)); setDuration(0); }
-    // Never fetch or decode an audio file during initial chat render.
-    // Decoding 80 recordings at once blocked the very first play and text send.
-  }, [path,waveOwner]);
-  async function nativeWave(){
-    if(!window.ConnectNative||waveRequest.current||readChatWave(waveOwner,path))return;
-    waveRequest.current=true;
-    try{
-      const decoded=await window.ConnectNative.request('media:waveform',{path});
-      if(waveIdentity.current!==path||mediaCacheOwner()!==waveOwner)return;
-      if(!Array.isArray(decoded)||decoded.length!==43||!decoded.every(x=>Number.isFinite(x)&&x>=0&&x<=1))return;
-      setBars(decoded);const duration=audioRef.current?.duration||0;
-      if(Number.isFinite(duration)&&duration>0)rememberChatWave(waveOwner,path,{bars:decoded,duration});
-    }catch{/* Unsupported codec keeps playback available. */}
-    finally{waveRequest.current=false;}
-  }
+    let disposed=false;
+    const syncWave=()=>{
+      const cached=readChatWave(waveOwner,path);
+      if(!cached)return false;
+      setBars(cached.bars);
+      setDuration(current=>current>0?current:cached.duration);
+      return true;
+    };
+    if(syncWave())return;
+    setBars(Array(43).fill(0.28));setDuration(0);
+    if(!waveOwner||!path||!src||!byteSize||byteSize>1024*1024||!isNativeMediaRuntime())return;
+    const updated=(event:Event)=>{
+      const detail=(event as CustomEvent<{user:string;path:string}>).detail;
+      if(!disposed&&detail?.user===waveOwner&&detail?.path===path)syncWave();
+    };
+    window.addEventListener('connect:chat-wave',updated);
+    const generate=()=>{
+      // The scheduler includes both the cache fill and the decode. Scrolling
+      // through a long chat must not download/decode every voice message.
+      void prewarmChatWave(waveOwner,path,src,byteSize,async()=>{
+        if(mediaCacheOwner()!==waveOwner)return null;
+        const identity='/storage/v1/object/sign/connect-attachments/'+path;
+        let local=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
+        if(!local.startsWith('blob:')){
+          await prefetchChatAudio(src,waveOwner,byteSize);
+          if(mediaCacheOwner()!==waveOwner)return null;
+          local=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
+        }
+        return local.startsWith('blob:')?local:null;
+      }).then(()=>{if(!disposed)syncWave();}).catch(()=>{});
+    };
+    const node=audioRef.current?.parentElement;
+    if(typeof IntersectionObserver==='undefined'||!node){generate();return()=>{disposed=true;window.removeEventListener('connect:chat-wave',updated);};}
+    const observer=new IntersectionObserver(entries=>{
+      if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();generate();}
+    },{root:node.closest('.message-scroll'),rootMargin:'80px 0px'});
+    observer.observe(node);
+    return()=>{disposed=true;observer.disconnect();window.removeEventListener('connect:chat-wave',updated);};
+  }, [src,path,waveOwner,byteSize]);
 
   async function toggle() {
     const audio=audioRef.current;
@@ -331,7 +351,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, sentAt, mine, deliver
       onLoadedMetadata={e => { setError(false); const d=e.currentTarget.duration; if(Number.isFinite(d))setDuration(d); }}
       onDurationChange={e => { const d=e.currentTarget.duration; if(Number.isFinite(d))setDuration(d); }}
       onTimeUpdate={e => setPosition(e.currentTarget.currentTime)}
-      onPlay={() => {setPlaying(true);setError(false);setBuffering(false);void nativeWave();}} onPause={() => setPlaying(false)}
+      onPlay={() => {setPlaying(true);setError(false);setBuffering(false);}} onPause={() => setPlaying(false)}
       onEnded={() => {setPlaying(false);setPosition(0);}} onError={() => {setError(true);setBuffering(false);}}/>
     <button type="button" className="voice-play" onClick={e => {e.stopPropagation();void toggle();}} aria-label={playing ? 'Пауза' : 'Воспроизвести голосовое'} disabled={buffering}>
       {playing ? <span className="voice-pause-icon"/> : <Icon name="play" size={21}/>}
@@ -3388,8 +3408,8 @@ export default function Home() {
                                  : <span>{photoPreviews[m.attachment_path!]===null?'Открыть фото':'Миниатюра…'}</span>}</button>)
                             : isVideoNote(m) ? <VideoNoteBubble src={attachmentUrls[m.attachment_path]} name={m.attachment_name||'Видеокружок'} path={m.attachment_path} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/>
                             : m.attachment_kind==='video' ? <ConnectInlineAutoplayVideo src={attachmentUrls[m.attachment_path]} path={m.attachment_path} onOpen={()=>setMediaViewer({url:attachmentUrls[m.attachment_path!],path:m.attachment_path!,name:m.attachment_name || 'Видео.mp4',kind:'video'})}/>
-                            : m.attachment_kind==='audio' ? <div className="connect-audio-download"><VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/></div>
-                            : isPlayableAudioFile(m) ? <VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} sentAt={m.created_at} mine={mine} fileName={m.attachment_name||'Аудиофайл'} onSave={()=>void saveAttachment(m.attachment_path!,m.attachment_name||'Аудиофайл')} delivered={Boolean(currentPeerState?.delivered&&currentPeerState.delivered>=m.created_at||currentPeerState?.read&&currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read&&currentPeerState.read>=m.created_at)}/>
+                            : m.attachment_kind==='audio' ? <div className="connect-audio-download"><VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} byteSize={m.attachment_size||0} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/></div>
+                            : isPlayableAudioFile(m) ? <VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} byteSize={m.attachment_size||0} sentAt={m.created_at} mine={mine} fileName={m.attachment_name||'Аудиофайл'} onSave={()=>void saveAttachment(m.attachment_path!,m.attachment_name||'Аудиофайл')} delivered={Boolean(currentPeerState?.delivered&&currentPeerState.delivered>=m.created_at||currentPeerState?.read&&currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read&&currentPeerState.read>=m.created_at)}/>
                             : <button type="button" className="attachment-file" onClick={e=>{e.stopPropagation();void saveAttachment(m.attachment_path!,m.attachment_name || 'Файл')}}><Icon name="file" size={23}/><span>{m.attachment_name || 'Файл'}<small>{m.attachment_size ? (m.attachment_size/1048576).toFixed(1)+' МБ' : ''} · Скачать</small></span></button>}
                         </div>}
                         {/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/.test(forwardedMessage(m.body).text) ? (()=>{const id=forwardedMessage(m.body).text.match(/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/)?.[1];const st=customStickers.find(x=>x.id===id);const link=st?customStickerUrl(st):'';return link?<img className="sent-sticker" src={link} alt="Стикер" loading="lazy"/>:(!st&&stickerUnavailableIds.includes(id||'')?<span>Стикер удалён или недоступен</span>:<span className="connect-sticker-loading" role="status" aria-label="Загрузка стикера"><i/></span>)})() : stickerFromBody(forwardedMessage(m.body).text) ? <img className="sent-sticker" src={stickerUrl(stickerFromBody(forwardedMessage(m.body).text)!)} alt="Стикер" loading="lazy"/> : (parseAlbum(m.body).length ? null : forwardedMessage(m.body).text ? highlightMessage(forwardedMessage(m.body).text) : null)}

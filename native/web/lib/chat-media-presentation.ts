@@ -29,6 +29,7 @@ export function rememberChatWave(user:string,path:string,value:ChatWave){
   waveMemory.set(key,normalized);
   if(waveMemory.size>600)waveMemory.delete(waveMemory.keys().next().value!);
   try{localStorage.setItem(key,JSON.stringify(normalized));}catch{/* UI still works without persistent storage. */}
+  if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('connect:chat-wave',{detail:{user,path}}));
 }
 export function getHotChatPoster(user:string,path:string):string|null{
   if(isNativeMediaRuntime())return null;
@@ -46,35 +47,74 @@ export function forgetUserChatPresentation(user:string){
   for(const key of posterMemory.keys())if(key.startsWith(user+':'))posterMemory.delete(key);
 }
 
-/** Compute wave peaks for a small voice file before the chat becomes visible.
- * Large/remote audio still loads on demand. Never preload full-size video here.
+// CONNECT_ANDROID_INCOMING_VOICE_WAVE_CACHE_V1_20261116
+// One job per account+file; at most two small, visible files are decoded.
+// The native WebView must not fetch a second remote copy for the waveform.
+const wavePending=new Map<string,Promise<void>>();
+const waveQueue:Array<()=>void>=[];
+let activeWaveJobs=0;
+function scheduleWave(task:()=>Promise<void>):Promise<void>{
+  return new Promise<void>(resolve=>{
+    const start=()=>{
+      activeWaveJobs++;
+      void task().catch(()=>{/* Waveform is optional; audio playback stays available. */}).finally(()=>{
+        activeWaveJobs--;
+        resolve();
+        waveQueue.shift()?.();
+      });
+    };
+    if(activeWaveJobs<2)start();else waveQueue.push(start);
+  });
+}
+/** Fill real bars for a visible, small voice message.
+ * In the Android WebView only a local cached blob may be decoded: the source
+ * resolver can warm the existing playback cache once, then returns its blob URL.
+ * Network URLs are never fetched by this helper on Android.
  */
-export async function prewarmChatWave(user:string,path:string,src:string,size:number=0):Promise<void>{
-  if(isNativeMediaRuntime()||!user||!path||!src||size<=0||readChatWave(user,path)||size>2*1024*1024)return;
-  let context:AudioContext|null=null;
-  try{
-    const controller=new AbortController();
-    const timeout=setTimeout(()=>controller.abort(),7000);
-    let bytes:ArrayBuffer;
+export function prewarmChatWave(
+  user:string,path:string,src:string,size:number=0,
+  resolveNativeLocal?:()=>Promise<string|null>
+):Promise<void>{
+  if(!user||!path||!src||!Number.isFinite(size)||size<=0||size>1024*1024||readChatWave(user,path))return Promise.resolve();
+  const native=isNativeMediaRuntime();
+  if(native&&!resolveNativeLocal)return Promise.resolve();
+  const key=user+':'+path,existing=wavePending.get(key);
+  if(existing)return existing;
+  // A full chat may mount many voice messages; never queue the entire history.
+  if(wavePending.size>=12)return Promise.resolve();
+  const job=scheduleWave(async()=>{
+    if(readChatWave(user,path))return;
+    let context:AudioContext|null=null;
     try{
-      const response=await fetch(src,{signal:controller.signal});
-      if(!response.ok) return;
-      const length=Number(response.headers.get('content-length')||0);
-      if(length>2*1024*1024)return;
-      bytes=await response.arrayBuffer();
-      if(bytes.byteLength>2*1024*1024)return;
-    }finally{clearTimeout(timeout);}
-    context=new AudioContext();
-    const decoded=await context.decodeAudioData(bytes);
-    const samples=decoded.getChannelData(0),count=43;
-    const peaks=Array.from({length:count},(_,i)=>{
-      const start=Math.floor(i*samples.length/count),end=Math.max(start+1,Math.floor((i+1)*samples.length/count));
-      const stride=Math.max(1,Math.floor((end-start)/140));let peak=0;
-      for(let j=start;j<end;j+=stride)peak=Math.max(peak,Math.abs(samples[j]||0));
-      return peak;
-    });
-    const max=Math.max(.001,...peaks);
-    rememberChatWave(user,path,{bars:peaks.map(x=>Math.max(.14,Math.min(1,Math.pow(x/max,.72)))),duration:decoded.duration});
-  }catch{/* Audio decode is optional; playback retains its network fallback. */}
-  finally{if(context)void context.close().catch(()=>{});}
+      const source=native?await resolveNativeLocal!():src;
+      if(!source||(native&&!source.startsWith('blob:')))return;
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),7000);
+      let bytes:ArrayBuffer;
+      try{
+        const response=await fetch(source,{signal:controller.signal});
+        if(!response.ok)return;
+        const length=Number(response.headers.get('content-length')||0);
+        if(length>1024*1024)return;
+        bytes=await response.arrayBuffer();
+        if(bytes.byteLength>1024*1024)return;
+      }finally{clearTimeout(timer);}
+      context=new AudioContext();
+      const decoded=await context.decodeAudioData(bytes);
+      const samples=decoded.getChannelData(0),count=43;
+      const peaks=Array.from({length:count},(_,i)=>{
+        const start=Math.floor(i*samples.length/count),end=Math.max(start+1,Math.floor((i+1)*samples.length/count));
+        const stride=Math.max(1,Math.floor((end-start)/140));let peak=0;
+        for(let j=start;j<end;j+=stride)peak=Math.max(peak,Math.abs(samples[j]||0));
+        return peak;
+      });
+      const max=Math.max(.001,...peaks);
+      // Duration and bars are stored by stable path, never by an expiring URL.
+      rememberChatWave(user,path,{bars:peaks.map(x=>Math.max(.14,Math.min(1,Math.pow(x/max,.72)))),duration:decoded.duration});
+    }catch{/* Unsupported codecs leave playback available. */}
+    finally{if(context)void context.close().catch(()=>{});}
+  });
+  wavePending.set(key,job);
+  void job.finally(()=>{if(wavePending.get(key)===job)wavePending.delete(key);});
+  return job;
 }
