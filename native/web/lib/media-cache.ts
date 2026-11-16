@@ -282,7 +282,9 @@ export async function purgeDeletedMedia(user:string,message:string){
 /** Background warmup of visible, lightweight chat previews; best effort. */
 export async function prefetchCachedMedia(url:string,user:string):Promise<void>{
   const id=mediaIdentity(url);if(!url||!user||!id||mediaCategory(id)!=='system'&&!/__(thumb\.webp|poster\.jpg)$/.test(id))return;
-  try{await remember(url,user);}catch{/* Network fallback remains usable. */}
+  // Avatars should stay small; previews must never fetch unbounded originals.
+  const maxBytes=id.startsWith('connect-avatars/')?1024*1024:512*1024;
+  try{await remember(url,user,maxBytes);}catch{/* Network fallback remains usable. */}
 }
 
 /** Profile bytes reuse this same objects store, keyed by path, never signed URL. */

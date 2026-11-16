@@ -204,7 +204,7 @@
     "web/app/globals.css": "29c312acbcda32fdd4fff3eba85ac68383f5ae9c4fc450332896a6f09f5845cc",
     "web/app/liquid-glass.css": "93492434c8bac17d9db19b98224db24d4a7359a111750556e4677e016283fe4f",
     "web/app/music-system.css": "785aa2a3f387ea0fe71892549dd1fec493b5c0f37f642e3079828889d7f3e367",
-    "web/app/page.tsx": "3ad5593d3eb3f3fb8887496c379a227a49bf3f1cc74fa0c4b802f61dc0cdce06",
+    "web/app/page.tsx": "2d52d5a42e89066e0b0e9c913c01f49ac7b8b9c1c1ee1d5bed5c50ff39242c1a",
     "web/app/profile-media.css": "0115f2ccd489a4a362a58313e5da9921c895bbe821dc67866fb91918d79cb5e2",
     "web/components/ConnectAudioCalls.tsx": "8424af1ec46ccbf6b6a928d6929bb98acad7b9e32c3942c3d0cd5c4f9255d015",
     "web/components/ConnectCacheSettings.tsx": "d5e27bf0827b4e913de7663491da6e16edfd414701a7be1140297748f780f0ab",
@@ -244,7 +244,7 @@
     "web/lib/connect-call-output.ts": "29fff41a11d2736f441d699637e3c392f65ddc8147e0b30a36f326d155ebdc9b",
     "web/lib/connect-media-optimizer.ts": "5c5038a688e08b60a12adc697c9170037b8ccb14d0346e1d3cfa9884c9a6dae2",
     "web/lib/connect-push-repair.ts": "f0db214eda5f1fa2f15302ac3a56de2c53d50e85dec3fa018a7b75582d8807ff",
-    "web/lib/media-cache.ts": "68b3450305ee33ab3ad1a5a851a5df164bfc55d0ca11dde6fb6733b31640bb20",
+    "web/lib/media-cache.ts": "b05ef5e4ec51f646c7121912c79e6c8558f41e9060b1311366f06bce29f8b7d0",
     "web/lib/native-catalog.ts": "a28352c726a4af6ddd445fb03d9e00aa7962e312d457fd0f3e264a5d73a6b39b",
     "web/lib/olm-engine.ts": "ebfc713db1a691bc136408e8468c0444d14fced4e3c36766e07f09b55f2ab68d",
     "web/lib/profile-media-index.ts": "6b8ae45321b4bdb432c8df926354794819f6df4b749f36e224667904280ed55f",
@@ -377,6 +377,8 @@
     "web/tsconfig.json": "e353b30d4833ff1c145dfb54594f9517e9b3777d776b84c955c49e24775e04a4",
     "web/vite.config.ts": "4b3dc10a049b2e7f8e8a3bb0b87ba8a9b005d2553e84958c928baea6d8fdf239",
     "tests/android-ui-polish.test.cjs": "93ad4c0fcf58a18fa800ab9691fbc12687575d3ef7501fdf51517b24013ea5b7",
-    "tests/android-nav-journal-parity.test.cjs": "44326c10dc8cf2a8999eb2e52629fcb9ffff4633e61946edd1dd12be359a8a1e"
+    "tests/android-nav-journal-parity.test.cjs": "44326c10dc8cf2a8999eb2e52629fcb9ffff4633e61946edd1dd12be359a8a1e",
+    "web/lib/avatar-directory-cache.ts": "4216e0f6ea2e30470509f9c0d5050f80eb6595b59eb3a512f51d50cb193fdd4b",
+    "tests/android-media-egress.test.cjs": "fc4aa5cf7fb3409d58c99f9681fa01e813687699870cbc15fab209dd04d179fe"
   }
 }

@@ -11,6 +11,7 @@ import {warmOwnProfileLibraries,warmPeerProfileLibraries} from '../lib/profile-m
 import {readNativeCatalog,writeNativeCatalog} from '../lib/native-catalog';
 import {seedInboxHistory,releaseHistoryMemory,chatNetworkDue,chatNetworkVerified} from '../lib/chat-history-cache';
 import {resolveCachedStorageFile} from '../lib/media-cache';
+import {createAvatarDirectoryCache} from '../lib/avatar-directory-cache'; // CONNECT_ANDROID_AVATAR_EGRESS_GUARD_V1
 import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
 import {readChatWave, rememberChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
 import { prefetchCachedMedia, prefetchChatAudio, prefetchStickerWebp } from '../lib/media-cache'; // CONNECT_PWA_CHAT_SPEED_STICKER_VOICE_V1_20261115
@@ -719,7 +720,8 @@ function VideoThumbnail({src,path}:{src:string;path?:string}) {
   }
   return <span ref={frameRef} className={isNativeMediaRuntime()?"connect-video-preview":"connect-video-preview connect-pwa-frame-fit"}>
     {(uploadedPoster || poster) && <img src={uploadedPoster || poster || ''} alt="Предпросмотр видео" onError={()=>{setUploadedPoster(null);setPosterChecked(true);}}/>}
-    {near&&posterChecked&&!uploadedPoster&&!poster&&<video ref={videoRef} src={src} playsInline muted preload="metadata"
+    {near&&posterChecked&&!uploadedPoster&&!poster&&isNativeMediaRuntime()&&<span className="connect-video-fallback" aria-label="Открыть видео">▶</span>}
+    {near&&posterChecked&&!uploadedPoster&&!poster&&!isNativeMediaRuntime()&&<video ref={videoRef} src={src} playsInline muted preload="metadata"
       onLoadedMetadata={e=>{const v=e.currentTarget;if(path)connectUpdateVideoFrame(v,path);else syncVideoThumbnailSize(v);try{v.currentTime=path && Number.isFinite(v.duration) && v.duration>.3 ? Math.min(1.2,Math.max(.3,v.duration*.12),v.duration*.8) : Math.min(.2,Math.max(0,(Number.isFinite(v.duration)?v.duration:1)-.01))}catch{setFailed(true)}}}
       onSeeked={e=>{if(path)connectUpdateVideoFrame(e.currentTarget,path);else syncVideoThumbnailSize(e.currentTarget);capture(e.currentTarget)}}
       onLoadedData={e=>{if(path)connectUpdateVideoFrame(e.currentTarget,path);else syncVideoThumbnailSize(e.currentTarget);if(!poster)capture(e.currentTarget)}}
@@ -787,7 +789,7 @@ function ConnectInlineAutoplayVideo({src,path,onOpen}:{src:string;path:string;on
     return()=>{cancelled=true;};
   },[path]);
 
-  const userPaused=useRef(false);
+  const userPaused=useRef(isNativeMediaRuntime()); // Android: full video only on explicit tap
   useVisibleVideo(ref,src,userPaused,soundRef,freezeFrame);
 
   return <div className={isNativeMediaRuntime()?"connect-inline-autoplay-video":"connect-inline-autoplay-video connect-pwa-frame-fit"}>
@@ -834,7 +836,7 @@ function VideoNoteBubble({src,name,path,sentAt,mine,delivered,read}:{src:string;
   const [duration,setDuration]=useState(0);
   const [expanded,setExpanded]=useState(false);
   const [progress,setProgress]=useState(0);
-  const userPaused=useRef(false),mutedRef=useRef(true);
+  const userPaused=useRef(isNativeMediaRuntime()),mutedRef=useRef(true); // Android: video note only on tap
   const freezeFrame=(video:HTMLVideoElement)=>{preserveVisibleChatFrame(video,path,setPoster,true);};
   useVisibleVideo(ref,src,userPaused,mutedRef,freezeFrame);
   const circumference=2*Math.PI*47;
@@ -1126,6 +1128,7 @@ export default function Home() {
     const preview=photoPreviews[path];
     if(!supportsPhotoPreview(path))return attachmentUrls[path];
     if(preview===undefined)return undefined; // Do not download a 10MB original while locating its thumb.
+    if(isNativeMediaRuntime()&&preview===null)return undefined;
     return preview||attachmentUrls[path];
   }
   const failedPhotoPreview=(path:string)=>{
@@ -1704,36 +1707,52 @@ export default function Home() {
     finally{setBusy(false);}
   }
   const directoryOwner=useRef(user?.id);directoryOwner.current=user?.id;
+  const avatarDirectoryCache=useRef(createAvatarDirectoryCache());
+  const directoryInFlight=useRef<{user:string;pending:Promise<void>}|null>(null);
   const loadDirectory = useCallback(async () => {
     if (!supabase || !user) return;
     const viewer=user.id;
-    const [p, c] = await Promise.all([
-      supabase.from('profiles').select('id,display_name,is_blocked,bio,avatar_path,last_seen_at,online_until'),
-      supabase.from('conversations').select('id,user_a,user_b,created_at').order('created_at', { ascending: false }),
-    ]);
-    if(directoryOwner.current!==viewer)return;
-    if(!c.error)setConversations((c.data||[]) as Conversation[]);setDirectoryReady(true);
-    if(!p.error&&!c.error){void readNativeCatalog(viewer,'inbox').then(snapshot=>{if(directoryOwner.current===viewer)return writeNativeCatalog(viewer,'inbox',{profiles:p.data||[],conversations:c.data||[]},snapshot.epoch);}).catch(()=>{});}
-    if (p.error) setNotice(p.error.message); else {
-      const directory = (p.data || []) as Profile[];
-      setProfiles(directory);
-      setPresence(Object.fromEntries(directory.map(p=>[p.id,{last_seen_at:p.last_seen_at,online_until:p.online_until}])));
-      const urls:Record<string,string>={},missing:string[]=[];
-      for(const person of directory.filter(x=>x.avatar_path)){
-        const local=await resolveCachedStorageFile(viewer,'connect-avatars',person.avatar_path!);
-        if(local)urls[person.id]=local;else missing.push(person.avatar_path!);
-      }
+    // Focus, Android lifecycle and periodic presence events can overlap. One
+    // directory request is enough; keep distinct accounts isolated.
+    if(directoryInFlight.current?.user===viewer)return directoryInFlight.current.pending;
+    const request=(async()=>{
+      const [p,c]=await Promise.all([
+        supabase.from('profiles').select('id,display_name,is_blocked,bio,avatar_path,last_seen_at,online_until'),
+        supabase.from('conversations').select('id,user_a,user_b,created_at').order('created_at',{ascending:false}),
+      ]);
       if(directoryOwner.current!==viewer)return;
-      setAvatarUrls(old=>({...old,...urls}));
-      if(missing.length){const batch=await supabase.storage.from('connect-avatars').createSignedUrls([...new Set(missing)],3600);
-        const signed=new Map((batch.data||[]).filter(x=>x.path&&x.signedUrl).map(x=>[x.path,x.signedUrl]));
-        for(const person of directory){const url=person.avatar_path&&signed.get(person.avatar_path);if(url)urls[person.id]=mediaUrl(url);}
+      if(!c.error)setConversations((c.data||[]) as Conversation[]);
+      setDirectoryReady(true);
+      if(!p.error&&!c.error)void readNativeCatalog(viewer,'inbox').then(snapshot=>{
+        if(directoryOwner.current===viewer)return writeNativeCatalog(viewer,'inbox',{profiles:p.data||[],conversations:c.data||[]},snapshot.epoch);
+      }).catch(()=>{});
+      if(p.error)setNotice(p.error.message);
+      else{
+        const directory=(p.data||[]) as Profile[];
+        setProfiles(directory);
+        setPresence(Object.fromEntries(directory.map(p=>[p.id,{last_seen_at:p.last_seen_at,online_until:p.online_until}])));
+        const avatars=await avatarDirectoryCache.current.resolve(viewer,directory,{
+          readCached:path=>resolveCachedStorageFile(viewer,'connect-avatars',path),
+          signBatch:async paths=>{
+            if(!paths.length)return {};
+            const batch=await supabase.storage.from('connect-avatars').createSignedUrls(paths,3600);
+            if(batch.error)throw batch.error;
+            return Object.fromEntries((batch.data||[]).filter(x=>x.path&&x.signedUrl).map(x=>[x.path!,mediaUrl(x.signedUrl!)]));
+          },
+          warm:async url=>prefetchCachedMedia(url,viewer),
+        });
+        if(directoryOwner.current===viewer)setAvatarUrls(old=>{
+          const a=Object.keys(old),b=Object.keys(avatars);
+          return a.length===b.length&&b.every(k=>old[k]===avatars[k])?old:avatars;
+        });
       }
-      if(directoryOwner.current===viewer)setAvatarUrls(urls);
-    }
-    if (c.error) setNotice(c.error.message); else setConversations((c.data || []) as Conversation[]);
-    setDirectoryReady(true);
-  }, [user?.id]);
+      if(c.error)setNotice(c.error.message);
+      else setConversations((c.data||[]) as Conversation[]);
+      setDirectoryReady(true);
+    })();
+    const pending={user:viewer,pending:request};directoryInFlight.current=pending;
+    try{await request;}finally{if(directoryInFlight.current===pending)directoryInFlight.current=null;}
+  },[user?.id]);
   useEffect(()=>{
     let alive=true;setHydratedOwner(null);setDirectoryReady(false);setActiveChat(null);setProfileView(null);setProfiles([]);setConversations([]);setMessages([]);setLatest({});setAvatarUrls({});setUnread({});readCache.current={};
     if(!user?.id)return;
@@ -3357,7 +3376,7 @@ export default function Home() {
                       {replied && <button type="button" className="quote-box" onClick={e=>{e.stopPropagation();document.getElementById('msg-'+replied.id)?.scrollIntoView({behavior:'smooth',block:'center'});}} onTouchStart={e=>e.stopPropagation()} aria-label="Перейти к исходному сообщению"><strong>{replied.sender_id === user.id ? 'Вы' : currentName}</strong><span>{messagePreview(replied,user.id)}</span></button>}
                       <div className="bubble-body"><>
                         {forwardedMessage(m.body).from && <div className="connect-forward-compact" title={`Переслано от ${forwardedMessage(m.body).from}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 5l6 6-6 6"/><path d="M20 11H9a6 6 0 0 0-6 6v2"/></svg><span>от {forwardedMessage(m.body).from}</span></div>}
-                        {parseAlbum(m.body).length>0 && <div className="connect-album-grid">{parseAlbum(m.body).map((item,i)=><button type="button" key={item.path} className="connect-media-thumb" onClick={e=>{e.stopPropagation();if(attachmentUrls[item.path])setMediaViewer({...item,url:attachmentUrls[item.path]})}} aria-label={`Открыть файл ${i+1}`}>{attachmentUrls[item.path]?(item.kind==='image'?(imageInChat(item.path)?<img src={imageInChat(item.path)} alt={item.name} loading="lazy" onError={()=>failedPhotoPreview(item.path)}/>:<span>Миниатюра…</span>):<><VideoThumbnail src={attachmentUrls[item.path]} path={item.path}/><span className="connect-media-play">▶</span></>):<span>Загрузка…</span>}</button>)}</div>}
+                        {parseAlbum(m.body).length>0 && <div className="connect-album-grid">{parseAlbum(m.body).map((item,i)=><button type="button" key={item.path} className="connect-media-thumb" onClick={e=>{e.stopPropagation();if(attachmentUrls[item.path])setMediaViewer({...item,url:attachmentUrls[item.path]})}} aria-label={`Открыть файл ${i+1}`}>{attachmentUrls[item.path]?(item.kind==='image'?(imageInChat(item.path)?<img src={imageInChat(item.path)} alt={item.name} loading="lazy" onError={()=>failedPhotoPreview(item.path)}/>:<span>{photoPreviews[item.path]===null?'Открыть фото':'Миниатюра…'}</span>):<><VideoThumbnail src={attachmentUrls[item.path]} path={item.path}/><span className="connect-media-play">▶</span></>):<span>Загрузка…</span>}</button>)}</div>}
                         {m.attachment_path && <div className={isKeyboardSticker(m) ? "attachment-preview keyboard-sticker-preview" : m.attachment_kind==='image' ? "attachment-preview connect-adaptive-photo" : m.attachment_kind==='video' && !isVideoNote(m) ? "attachment-preview connect-adaptive-video" : "attachment-preview"} style={m.attachment_kind==='image' && !isKeyboardSticker(m) ? connectPhotoFrameStyle(m.attachment_path) : m.attachment_kind==='video' && !isVideoNote(m) ? connectVideoFrameStyle(m.attachment_path) : undefined}>
                           {!attachmentUrls[m.attachment_path] ? (isKeyboardSticker(m) ? <span className="connect-keyboard-sticker-loading" aria-label="Загрузка стикера"/> : (isNativeMediaRuntime()?<span>Загрузка вложения…</span>:<span className="connect-media-unavailable" aria-label="Подготовка вложения">{m.attachment_kind==='video'?'▶':m.attachment_kind==='audio'?'♪':m.attachment_kind==='image'?'▧':'◇'}</span>))
                             : m.attachment_kind==='image' ? (isKeyboardSticker(m)
@@ -3366,7 +3385,7 @@ export default function Home() {
                                  ? <img src={imageInChat(m.attachment_path!)} alt={m.attachment_name || 'Фото'} loading="lazy"
                                      onError={()=>failedPhotoPreview(m.attachment_path!)}
                                      onLoad={e=>{if(!supportsPhotoPreview(m.attachment_path!))connectUpdatePhotoSize(e.currentTarget,m.attachment_path!);}}/>
-                                 : <span>Миниатюра…</span>}</button>)
+                                 : <span>{photoPreviews[m.attachment_path!]===null?'Открыть фото':'Миниатюра…'}</span>}</button>)
                             : isVideoNote(m) ? <VideoNoteBubble src={attachmentUrls[m.attachment_path]} name={m.attachment_name||'Видеокружок'} path={m.attachment_path} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/>
                             : m.attachment_kind==='video' ? <ConnectInlineAutoplayVideo src={attachmentUrls[m.attachment_path]} path={m.attachment_path} onOpen={()=>setMediaViewer({url:attachmentUrls[m.attachment_path!],path:m.attachment_path!,name:m.attachment_name || 'Видео.mp4',kind:'video'})}/>
                             : m.attachment_kind==='audio' ? <div className="connect-audio-download"><VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} sentAt={m.created_at} mine={mine} delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/></div>
