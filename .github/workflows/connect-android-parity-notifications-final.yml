@@ -32,10 +32,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s native/package-lock.json
-          test -s native/src/App.tsx
-          test -s native/web/hybrid/runtime.ts
-          test -s native/PARITY_SOURCE_LOCK.json
+          for required in native/package-lock.json native/src/App.tsx native/web/hybrid/runtime.ts native/PARITY_SOURCE_LOCK.json; do
+            if [[ ! -s "$required" ]]; then
+              echo "::error::Missing required source: $required. Install the complete source update before running verification."
+              exit 1
+            fi
+          done
           if [[ '${{ github.event_name }}' == workflow_dispatch ]]; then
             test '${{ github.ref }}' = refs/heads/main
             test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" || { echo '::error::SOURCE_DRIFT: Android main moved'; exit 1; }
@@ -81,8 +83,8 @@ jobs:
           set -euo pipefail
           npx --no-install expo prebuild --platform android --no-install --clean
           node scripts/check-parity-source.mjs --tools > verification/parity/android-tools.json
-          readarray -t sdk < <(node -e "const v=require('./verification/parity/android-tools.json');console.log(v.compileSdk);console.log(v.buildTools);console.log(v.ndk)")
-          sdkmanager --channel=3 "platforms;android-${sdk[0]}" "build-tools;${sdk[1]}" "ndk;${sdk[2]}" 'cmake;3.22.1' 'platform-tools'
+          readarray -t sdk < <(node -e "const v=require('./verification/parity/android-tools.json');console.log(v.sdkPlatform);console.log(v.buildTools);console.log(v.ndk)")
+          sdkmanager --channel=3 "${sdk[0]}" "build-tools;${sdk[1]}" "ndk;${sdk[2]}" 'cmake;3.22.1' 'platform-tools'
       - name: Native compilation, JVM tests and Android lint (no APK)
         working-directory: native/android
         shell: bash
