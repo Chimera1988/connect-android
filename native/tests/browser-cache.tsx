@@ -135,38 +135,71 @@ await test('music selection obtains a network URL after its cached blob was clea
   assert(container.querySelector('audio')?.getAttribute('src')?.includes('token=refreshed'),'player source not refreshed');
  }finally{root.unmount();container.remove();HTMLMediaElement.prototype.play=play;}
 });
-await test('Android sound settings retain legacy choice, reset to MP3 default and stop preview on close',async()=>{
- const previousBridge=window.ConnectNative;window.ConnectNative={request:async command=>{assert(command==='notification:diagnostics','unexpected diagnostic command');return [{stage:'received',at:'2026-11-15T10:00:00Z'}];}};
+await test('Android compact Connect sounds migrate legacy choice and use native actions',async()=>{
+ const previousBridge=window.ConnectNative;
+ window.ConnectNative={request:async command=>{assert(command==='notification:diagnostics','unexpected diagnostic command');return [{stage:'received',at:'2026-11-15T10:00:00Z'}];}};
  const commands:{kind:string;value?:any}[]=[],writes:any[]=[];
  const previous=window.ConnectAndroid;
  (window as any).ConnectAndroid={
   getSoundSettings:()=>JSON.stringify({message:'Connect — сообщение',call:'Connect — звонок',messageCustom:false,callCustom:false,messageSilent:false,callSilent:false}),
-  canShowFullScreenCalls:()=>true,setPreferences:(value:string)=>commands.push({kind:'preferences',value:JSON.parse(value)}),
-  resetSound:(value:string)=>commands.push({kind:'reset',value}),previewBuiltInSound:(value:string)=>commands.push({kind:'preview',value}),stopPreviewSound:()=>commands.push({kind:'stop'}),
+  canShowFullScreenCalls:()=>true,
+  setPreferences:(value:string)=>commands.push({kind:'preferences',value:JSON.parse(value)}),
+  pickSound:(value:string)=>commands.push({kind:'pick',value}),
+  previewSound:(value:string)=>commands.push({kind:'preview',value}),
+  resetSound:(value:string)=>commands.push({kind:'reset',value}),
+  setSilent:(kind:string,muted:boolean)=>commands.push({kind:'mute',value:kind+':'+muted}),
+  stopPreviewSound:()=>commands.push({kind:'stop'}),
+  openCallNotificationSettings:()=>commands.push({kind:'system'}),
  };
  localStorage.setItem('connect-notification-prefs-'+viewer,JSON.stringify({enabled:true,sound:'legacy-soft',vibrate:true}));
  const client:any={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{enabled:true,sound:'soft',vibrate:true}})})}),upsert:async(value:any)=>{writes.push(value);return{};}})};
  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+ let unmounted=false;
  try{
   root.render(<ConnectNotificationSettings supabase={client} userId={viewer}/>);
-  for(let i=0;i<100&&(!container.querySelector('#connect-sound')||commands.filter(x=>x.kind==='preferences').length<2);i++)await new Promise(r=>setTimeout(r,5));
-  const selector=container.querySelector('#connect-sound') as HTMLSelectElement;
-  for(let i=0;i<100&&selector.value!=='legacy-soft';i++)await new Promise(r=>setTimeout(r,5));
-  assert(selector.value==='legacy-soft','remote soft overwrote Android legacy choice: '+JSON.stringify(commands));
-  assert(Array.from(selector.options).some(x=>x.value==='soft'&&x.textContent==='Connect — сообщение'),'new default label missing');
-  assert(container.textContent?.includes('Connect — звонок'),'new call default label missing');
-  const message=Array.from(container.querySelectorAll('strong')).find(x=>x.textContent==='Сообщение')!.parentElement!;
-  (Array.from(message.querySelectorAll('button')).find(x=>x.textContent==='Сбросить') as HTMLButtonElement).click();
-  for(let i=0;i<25&&!writes.length;i++)await delay();
-  assert(selector.value==='soft'&&writes.at(-1)?.sound==='soft','reset not persisted with existing server enum');
-  assert(commands.some(x=>x.kind==='reset'&&x.value==='message'),'native reset missing');
-  const preview=Array.from(container.querySelectorAll('button')).find(x=>x.textContent==='Прослушать') as HTMLButtonElement;preview.click();
-  assert(commands.some(x=>x.kind==='preview'&&x.value==='soft'),'preview did not select new default');
-  const journal=Array.from(container.querySelectorAll('button')).find(x=>x.textContent==='Журнал уведомлений') as HTMLButtonElement;assert(journal,'native journal action missing');journal.click();
- for(let i=0;i<30&&!container.querySelector('pre');i++)await delay();assert(container.querySelector('pre')?.textContent?.includes('received'),'journal was not shown from native boundary');
- const before=commands.filter(x=>x.kind==='stop').length;root.unmount();
+  for(let i=0;i<100&&(container.querySelectorAll('.connect-sound-card').length!==2||commands.filter(x=>x.kind==='preferences').length<2);i++)await delay();
+  const cards=Array.from(container.querySelectorAll('.connect-sound-card')) as HTMLElement[];
+  assert(cards.length===2,'expected exactly two Connect sound controls');
+  assert(!container.querySelector('#connect-sound'),'obsolete standard tone dropdown is still present');
+  assert(!container.textContent?.includes('Яркий')&&!container.textContent?.includes('Нежный')&&!container.textContent?.includes('Мягкий (прежний)'),'obsolete presets are exposed');
+  assert(container.textContent?.includes('Connect — звонок')&&container.textContent?.includes('Connect — сообщение'),'Connect default sound labels missing');
+  assert(commands.filter(x=>x.kind==='preferences').at(-1)?.value?.sound==='soft','legacy preset was not normalized to Connect default');
+  assert(JSON.parse(localStorage.getItem('connect-notification-prefs-'+viewer)||'{}').sound==='soft','normalized sound was not stored locally');
+  for(const card of cards){
+   assert(card.querySelectorAll('.connect-sound-icon-button').length===4,'sound actions must be four icon buttons');
+   assert(Array.from(card.querySelectorAll('.connect-sound-icon-button')).every(x=>!x.textContent?.trim()),'icon actions unexpectedly show text labels');
+  }
+  const call=cards.find(x=>x.querySelector('strong')?.textContent==='Входящий аудиозвонок')!;
+  const message=cards.find(x=>x.querySelector('strong')?.textContent==='Сообщение')!;
+  assert(call&&message,'call or message sound section missing');
+  const action=(card:HTMLElement,start:string)=>card.querySelector(`button[aria-label^="${start}"]`) as HTMLButtonElement|null;
+  const selectCall=action(call,'Выбрать'),previewCall=action(call,'Прослушать'),stopCall=action(call,'Остановить');
+  if(!selectCall||!previewCall||!stopCall)throw new Error('native call sound controls missing');
+  selectCall.click();previewCall.click();stopCall.click();
+  assert(commands.some(x=>x.kind==='pick'&&x.value==='call'),'native call melody picker not called');
+  assert(commands.some(x=>x.kind==='preview'&&x.value==='call'),'native call melody preview not called');
+  assert(commands.some(x=>x.kind==='stop'),'native sound preview stop not called');
+  const mute=message.querySelector('.connect-sound-mute input[type="checkbox"]') as HTMLInputElement|null;
+  if(!mute)throw new Error('message mute checkbox missing');mute.click();
+  assert(commands.some(x=>x.kind==='mute'&&x.value==='message:true'),'native message mute was not applied');
+  const reset=action(message,'Сбросить');if(!reset)throw new Error('message reset icon missing');reset.click();
+  for(let i=0;i<50&&!writes.length;i++)await delay();
+  assert(writes.at(-1)?.sound==='soft','Connect default sound was not persisted with existing server enum');
+  assert(commands.some(x=>x.kind==='reset'&&x.value==='message'),'native default reset missing');
+  const advanced=container.querySelector('details.connect-android-advanced') as HTMLDetailsElement|null;
+  if(!advanced)throw new Error('native diagnostic settings are missing');advanced.open=true;
+  const journal=Array.from(advanced.querySelectorAll('button')).find(x=>x.textContent==='Журнал уведомлений') as HTMLButtonElement|undefined;
+  if(!journal)throw new Error('native journal action missing');journal.click();
+  for(let i=0;i<30&&!container.querySelector('pre');i++)await delay();
+  assert(container.querySelector('pre')?.textContent?.includes('received'),'journal was not shown from native boundary');
+  const before=commands.filter(x=>x.kind==='stop').length;
+  root.unmount();unmounted=true;
   assert(commands.filter(x=>x.kind==='stop').length>before,'unmount left preview playing');
- }finally{root.unmount();container.remove();window.ConnectAndroid=previous;window.ConnectNative=previousBridge;localStorage.removeItem('connect-notification-prefs-'+viewer);}
+ }finally{
+  if(!unmounted)root.unmount();container.remove();
+  window.ConnectAndroid=previous;window.ConnectNative=previousBridge;
+  localStorage.removeItem('connect-notification-prefs-'+viewer);
+ }
 });
 await test('personal sticker bytes survive new signatures and are isolated to the owner',async()=>{
  stop();activeOwner=viewer;stop=installMediaCache(viewer);

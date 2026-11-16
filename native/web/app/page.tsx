@@ -1447,6 +1447,10 @@ export default function Home() {
   const stickerCatalogEpoch=useRef(0);
   const stickerPriority=useRef<Set<string>>(new Set());
   const [stickerCatalogReady,setStickerCatalogReady]=useState(false);
+  // A referenced personal sticker can be readable through a sent message even
+  // when the recipient cannot enumerate its owner's private sticker pack.
+  const [stickerUnavailableIds,setStickerUnavailableIds]=useState<string[]>([]);
+  const stickerLookupAt=useRef<Map<string,number>>(new Map());
   useEffect(()=>{
     const ids=new Set<string>();
     for(const m of messages){
@@ -1455,7 +1459,7 @@ export default function Home() {
     }
     stickerPriority.current=ids;
   },[messages]);
-  useEffect(()=>{stickerCatalogEpoch.current++;setStickerCatalogReady(false);setCustomStickerUrls({});},[user?.id]);
+  useEffect(()=>{stickerCatalogEpoch.current++;stickerLookupAt.current.clear();setStickerUnavailableIds([]);setStickerCatalogReady(false);setCustomStickerUrls({});},[user?.id]);
   const loadCustomStickers=useCallback(async()=>{
     if(!supabase||!user)return;
     const epoch=++stickerCatalogEpoch.current;
@@ -1498,6 +1502,53 @@ export default function Home() {
     await Promise.all(Array.from({length:Math.min(4,queue.length)},()=>worker()));
   },[user?.id]);
   useEffect(()=>{void loadCustomStickers()},[loadCustomStickers]);
+  // CONNECT_ANDROID_REFERENCED_STICKER_RECOVERY_20261116
+  // The pack catalog is deliberately RLS-filtered. Resolve only IDs already
+  // present in the user's received chat messages, never browse private packs.
+  useEffect(()=>{
+    const client=supabase,owner=user?.id;
+    if(!client||!owner||!stickerCatalogReady)return;
+    const current=Date.now();
+    const known=new Set(customStickers.map(st=>st.id));
+    const missing=[...stickerPriority.current].filter(id=>
+      !known.has(id)&&current-(stickerLookupAt.current.get(id)||0)>=20000
+    ).slice(0,24);
+    if(!missing.length)return;
+    for(const id of missing)stickerLookupAt.current.set(id,current);
+    let alive=true;
+    void (async()=>{
+      const {data,error}=await client.from('connect_stickers')
+        .select('id,pack_id,name,storage_path,position').in('id',missing);
+      if(!alive||error)return;
+      const found=(data||[]) as CustomSticker[];
+      const foundIds=new Set(found.map(st=>st.id));
+      const urls=await Promise.all(found.map(async st=>{
+        try{
+          const identity='/storage/v1/object/sign/connect-stickers/'+st.storage_path;
+          const local=await resolveCachedMedia(identity,owner);
+          if(local.startsWith('blob:'))return [st.id,local] as const;
+          const {data:signed}=await client.storage.from('connect-stickers').createSignedUrl(st.storage_path,3600);
+          if(!signed?.signedUrl)return null;
+          const url=mediaUrl(signed.signedUrl);
+          void prefetchStickerWebp(url,owner).catch(()=>{});
+          return [st.id,url] as const;
+        }catch{return null;}
+      }));
+      if(!alive)return;
+      setStickerUnavailableIds(prev=>[...new Set([...prev.filter(id=>!foundIds.has(id)),...missing.filter(id=>!foundIds.has(id))])].slice(-150));
+      if(found.length)setCustomStickers(prev=>{
+        const byId=new Map(prev.map(st=>[st.id,st]));
+        for(const st of found)byId.set(st.id,st);
+        return [...byId.values()];
+      });
+      if(urls.some(Boolean))setCustomStickerUrls(prev=>{
+        const next={...prev};
+        for(const entry of urls)if(entry)next[entry[0]]=entry[1];
+        return next;
+      });
+    })();
+    return()=>{alive=false;};
+  },[messages,stickerCatalogReady,customStickers,user?.id]);
   useEffect(()=>{if(user)void authenticatedRequest('/api/admin/invite').then(r=>setAdmin(Boolean(r.admin))).catch(()=>setAdmin(false));else setAdmin(false)},[user?.id]);
   async function createCustomPack(){
     if(!supabase||!user||!packName.trim()||busy)return;
@@ -3322,7 +3373,7 @@ export default function Home() {
                             : isPlayableAudioFile(m) ? <VoicePlayer src={attachmentUrls[m.attachment_path]} path={m.attachment_path} sentAt={m.created_at} mine={mine} fileName={m.attachment_name||'Аудиофайл'} onSave={()=>void saveAttachment(m.attachment_path!,m.attachment_name||'Аудиофайл')} delivered={Boolean(currentPeerState?.delivered&&currentPeerState.delivered>=m.created_at||currentPeerState?.read&&currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read&&currentPeerState.read>=m.created_at)}/>
                             : <button type="button" className="attachment-file" onClick={e=>{e.stopPropagation();void saveAttachment(m.attachment_path!,m.attachment_name || 'Файл')}}><Icon name="file" size={23}/><span>{m.attachment_name || 'Файл'}<small>{m.attachment_size ? (m.attachment_size/1048576).toFixed(1)+' МБ' : ''} · Скачать</small></span></button>}
                         </div>}
-                        {/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/.test(forwardedMessage(m.body).text) ? (()=>{const id=forwardedMessage(m.body).text.match(/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/)?.[1];const st=customStickers.find(x=>x.id===id);const link=st?customStickerUrl(st):'';return link?<img className="sent-sticker" src={link} alt="Стикер" loading="lazy"/>:(!st&&stickerCatalogReady?<span>Стикер недоступен</span>:<span className="connect-sticker-loading" role="status" aria-label="Загрузка стикера"><i/></span>)})() : stickerFromBody(forwardedMessage(m.body).text) ? <img className="sent-sticker" src={stickerUrl(stickerFromBody(forwardedMessage(m.body).text)!)} alt="Стикер" loading="lazy"/> : (parseAlbum(m.body).length ? null : forwardedMessage(m.body).text ? highlightMessage(forwardedMessage(m.body).text) : null)}
+                        {/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/.test(forwardedMessage(m.body).text) ? (()=>{const id=forwardedMessage(m.body).text.match(/^\[\[connect-custom-sticker:([0-9a-f-]{36})\]\]$/)?.[1];const st=customStickers.find(x=>x.id===id);const link=st?customStickerUrl(st):'';return link?<img className="sent-sticker" src={link} alt="Стикер" loading="lazy"/>:(!st&&stickerUnavailableIds.includes(id||'')?<span>Стикер удалён или недоступен</span>:<span className="connect-sticker-loading" role="status" aria-label="Загрузка стикера"><i/></span>)})() : stickerFromBody(forwardedMessage(m.body).text) ? <img className="sent-sticker" src={stickerUrl(stickerFromBody(forwardedMessage(m.body).text)!)} alt="Стикер" loading="lazy"/> : (parseAlbum(m.body).length ? null : forwardedMessage(m.body).text ? highlightMessage(forwardedMessage(m.body).text) : null)}
                       </></div>
                       {m.attachment_kind!=='audio' && !isPlayableAudioFile(m) && !isVideoNote(m) && <div className="bubble-meta">{!m.deleted_at && isPlayableAudioFile(m) && <button type="button" className="connect-inline-audio-save" onClick={e=>{e.stopPropagation();void saveAttachment(m.attachment_path!,m.attachment_name || 'Аудиофайл')}}>Сохранить</button>}{m.edited_at && !m.deleted_at && <span>изменено · </span>}{timeLabel(m.created_at)}{mine && <MessageChecks delivered={Boolean(currentPeerState?.delivered && currentPeerState.delivered>=m.created_at || currentPeerState?.read && currentPeerState.read>=m.created_at)} read={Boolean(currentPeerState?.read && currentPeerState.read>=m.created_at)}/>}</div>}
                     </div>
@@ -3469,7 +3520,7 @@ export default function Home() {
                   {settingsPage==='members' && admin && <div className="settings-group data-settings"><strong>Приглашения</strong><p className="settings-hint">Создавайте одноразовые коды для новых участников. Код действует 24 часа.</p><button type="button" className="settings-action" onClick={()=>window.dispatchEvent(new Event('connect:open-invitations'))}>Коды приглашений</button><button type="button" className="settings-action" onClick={()=>window.dispatchEvent(new Event('connect:open-hidden-invitations'))}>Коды для скрытых</button><div style={{marginTop:20}}><ConnectHiddenMembers request={authenticatedRequest} onChanged={()=>void loadDirectory()}/></div></div>}
                   {settingsPage==='data' && <><CacheSettings userId={user.id}/><div className="settings-group data-settings"><strong>Локальные данные</strong><p className="settings-hint">Сбросит тему, цвет, фон и настройки стикеров на этом устройстве. Переписки, файлы и голосовые на сервере останутся.</p><button type="button" className="settings-action secondary" onClick={clearLocalPreferences}>Очистить локальные настройки</button></div><div className="settings-group data-settings"><strong>Экспорт переписки</strong><p className="settings-hint">Экспорт всех доступных переписок в JSON (до 50 000 сообщений). Файлы вложений в архив не входят.</p><button type="button" className="settings-action" disabled={busy||conversations.length===0} onClick={()=>void exportChats()}>Экспортировать переписки</button></div></>}
                   {settingsPage==='privacy' && <><div className="settings-group data-settings"><strong>Личные переписки</strong><p className="settings-hint">Сообщения доступны участникам диалога в рамках настроенных правил доступа. Это не означает сквозное шифрование.</p></div><div className="settings-group data-settings"><strong>Удаление аккаунта</strong><p className="settings-hint">Учётная запись и личные данные будут удалены. Отправленные сообщения останутся у собеседников от имени «Удалённый пользователь».</p><button type="button" className="settings-action secondary" disabled={busy} onClick={()=>void deleteMyAccount()}>Удалить аккаунт навсегда</button></div></>}
-                  {settingsPage==='about' && <div className="settings-group data-settings"><strong>Connect Messenger</strong><p>Версия 2.2.5</p><p><strong>Разработчики: Алина и Кирилл</strong></p><p className="settings-hint">Мессенджер для личного общения.</p></div>}
+                  {settingsPage==='about' && <div className="settings-group data-settings"><strong>Connect Messenger</strong><p>Версия 3.0.6 (24)</p><p><strong>Разработчики: Алина и Кирилл</strong></p><p className="settings-hint">Мессенджер для личного общения.</p></div>}
                 </div>
               </>}
             </div><nav className="bottom-nav" aria-label="Основная навигация">

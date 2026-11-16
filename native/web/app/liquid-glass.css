@@ -2682,3 +2682,115 @@
   border-radius:50%;
   overflow:hidden;
 }
+
+
+/* CONNECT_ANDROID_STATIC_DOCK_UI_20261116
+   Four fixed grid slots also before the Calls portal mounts. No sliding ghost
+   highlight: the selected button receives its own steady liquid-glass tile. */
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav {
+  display:grid !important;
+  grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+  align-items:stretch;
+  justify-content:stretch;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav::before {
+  display:none !important;
+  content:none !important;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab {
+  width:100%; min-width:0; max-width:none;
+  transition:none !important;
+}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab:nth-child(1) {grid-column:1;}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab:nth-child(2) {grid-column:2;}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .connect-calls-tab {grid-column:3;}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab:nth-child(3):not(.connect-calls-tab) {grid-column:4;}
+.connect-app[data-connect-pwa-list-parity="true"] .bottom-nav > .nav-tab.selected {
+  background:linear-gradient(145deg,
+    color-mix(in srgb,var(--accent) 18%,rgba(150,174,206,.18)),
+    color-mix(in srgb,var(--accent) 8%,rgba(28,45,71,.35))) !important;
+  border:1px solid color-mix(in srgb,var(--accent) 35%,var(--glass-stroke-hi)) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16) !important;
+  border-radius:17px;
+}
+/* CONNECT_ANDROID_CALL_LIST_CLEAR_UI_20261116
+   Let the chosen wave wallpaper show through: no second backdrop or opaque
+   group slab below call records; separators remain for readability. */
+.connect-app .main-view .connect-call-history-screen {
+  background:transparent !important;
+  -webkit-backdrop-filter:none !important;
+  backdrop-filter:none !important;
+}
+.connect-app .main-view .connect-call-history-list {
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+  border-radius:0 !important;
+  overflow:visible !important;
+}
+.connect-app .main-view .connect-call-history-item {
+  background:transparent !important;
+  border-bottom:1px solid color-mix(in srgb,var(--glass-stroke-hi) 48%,transparent) !important;
+}
+/* CONNECT_ANDROID_SOUND_MENU_UI_20261116 */
+.connect-app .connect-android-notification-settings {
+  display:flex; flex-direction:column; gap:14px;
+  padding:8px 4px 20px; min-width:0;
+}
+.connect-app .connect-android-notification-settings .connect-sound-options {
+  display:flex; flex-direction:column; gap:3px;
+  padding:12px 15px; border-radius:20px;
+  background:color-mix(in srgb,var(--glass-surface-strong,var(--panel)) 75%,transparent);
+  border:1px solid var(--v4-border,var(--border));
+}
+.connect-app .connect-android-notification-settings .connect-sound-toggle,
+.connect-app .connect-android-notification-settings .connect-sound-mute {
+  display:flex; align-items:center; gap:11px; padding:10px 0;
+  color:var(--text);font-size:14px;
+}
+.connect-app .connect-android-notification-settings input[type="checkbox"] {width:20px;height:20px;flex:0 0 20px;}
+.connect-app .connect-android-notification-settings .connect-android-sounds {
+  display:flex;flex-direction:column;gap:12px;min-width:0;
+}
+.connect-app .connect-android-notification-settings .connect-android-sounds h3 {margin:4px 4px 0;font-size:17px;color:var(--text);}
+.connect-app .connect-android-notification-settings .connect-sound-hint {
+  margin:0 4px;color:var(--muted);font-size:12px;line-height:1.45;
+}
+.connect-app .connect-android-notification-settings .connect-sound-card {
+  display:flex; flex-direction:column; gap:10px; padding:16px;
+  border-radius:22px;border:1px solid var(--v4-border,var(--border));
+  background:linear-gradient(135deg,
+    color-mix(in srgb,var(--wave-primary,var(--accent)) 9%,var(--glass-surface-strong,var(--panel))),
+    color-mix(in srgb,var(--wave-secondary,var(--accent)) 6%,var(--glass-surface-strong,var(--panel))));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+}
+.connect-app .connect-android-notification-settings .connect-sound-heading {display:flex; flex-direction:column; gap:4px;min-width:0;}
+.connect-app .connect-android-notification-settings .connect-sound-heading strong {font-size:15px;color:var(--text);}
+.connect-app .connect-android-notification-settings .connect-sound-heading small {font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.connect-app .connect-android-notification-settings .connect-sound-icon-row {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;
+}
+.connect-app .connect-android-notification-settings button.connect-sound-icon-button {
+  display:grid;place-items:center;min-width:0;width:100%;height:47px;min-height:47px;
+  padding:0;border-radius:15px;
+  color:var(--text);border:1px solid var(--v4-border,var(--border));
+  background:color-mix(in srgb,var(--wave-primary,var(--accent)) 10%,var(--v4-control,var(--panel)));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14);
+}
+.connect-app .connect-android-notification-settings button.connect-sound-icon-button:active {transform:scale(.96);}
+.connect-app .connect-android-notification-settings .connect-sound-mute {
+  padding:0;margin-top:2px;color:var(--muted);font-size:12px;
+}
+.connect-app .connect-android-notification-settings button.connect-sound-register {
+  width:100%; min-height:47px; border-radius:16px;
+  color:#fff; background:var(--accent);font-weight:650;
+}
+.connect-app .connect-android-notification-settings .connect-sound-status {margin:0 4px;font-size:12px;color:var(--muted);}
+.connect-app .connect-android-notification-settings .connect-android-advanced {
+  border:1px solid var(--v4-border,var(--border));border-radius:18px;
+  background:var(--glass-surface-strong,var(--panel));padding:10px 12px;
+  color:var(--muted);font-size:12px;
+}
+.connect-app .connect-android-notification-settings .connect-android-advanced summary {cursor:pointer;color:var(--text);padding:8px 4px;font-size:13px;}
+.connect-app .connect-android-notification-settings .connect-android-advanced button {display:block;margin:9px 0;width:100%;}
+.connect-app .connect-android-notification-settings .connect-sound-diagnostics {font-size:10px;max-height:220px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;}

@@ -165,7 +165,7 @@
     "src/theme.ts": "741e153f30f4b0e89c79fc2a11e19824572eb92c405d324ec1fc4459e5eee743",
     "tests/android-compatibility.test.cjs": "126f706e6c7c4b24966cdf78f56be5c81546b7e1ad3b0c915b68e2f57993734e",
     "tests/app-utils.test.cjs": "94549ead346d3535f3234ba34da1a19b491181e0c3385565e814f321b5d8c140",
-    "tests/browser-cache.tsx": "74906de86c0cfe3b88c53a5b9cdf2807fef1b056355491da95c0763f490d1e37",
+    "tests/browser-cache.tsx": "13d7a60dd762372b0273b54fb3f71a5896cbd79e768c2fca592c0eada69f9516",
     "tests/call-bridge-timeout.test.cjs": "7410dfac83c1b85f5bd4ef14b6aae83be4eb8ad2627dce92dfb7cbcb6a25c976",
     "tests/call-history-status.test.cjs": "f8449f7fcee49751efae6460ffb6c5424284839d8b6f7a027773f5b2f422732a",
     "tests/call-runtime.test.cjs": "938f18341c0e28cb497e57ab7e6a5c2941158561608f83063493601697476dde",
@@ -202,9 +202,9 @@
     "web/app/connect-splash.css": "f7974c4c5d713dfbd8df956a27e47310f68cd8398c6293fa5d45e44601f3a2ff",
     "web/app/connect-unified-chat.css": "48e7eea81b435f538434da2aba9b27e10099cff4c295d1c1a4ff4011634e4177",
     "web/app/globals.css": "29c312acbcda32fdd4fff3eba85ac68383f5ae9c4fc450332896a6f09f5845cc",
-    "web/app/liquid-glass.css": "49d704b3992b0c49984ac35a80ec7701816117e2ccd868bc5b2a5c5488303cdb",
+    "web/app/liquid-glass.css": "f85de50139ff3562b7e0f6050874765e3484a7d5f0eb10cc40cdcf1966f28e8a",
     "web/app/music-system.css": "785aa2a3f387ea0fe71892549dd1fec493b5c0f37f642e3079828889d7f3e367",
-    "web/app/page.tsx": "3d82a02dd1e20e2b30da55512cacbb1221ddc2207c910372e266c98fc1b2e85b",
+    "web/app/page.tsx": "3ad5593d3eb3f3fb8887496c379a227a49bf3f1cc74fa0c4b802f61dc0cdce06",
     "web/app/profile-media.css": "0115f2ccd489a4a362a58313e5da9921c895bbe821dc67866fb91918d79cb5e2",
     "web/components/ConnectAudioCalls.tsx": "8424af1ec46ccbf6b6a928d6929bb98acad7b9e32c3942c3d0cd5c4f9255d015",
     "web/components/ConnectCacheSettings.tsx": "d5e27bf0827b4e913de7663491da6e16edfd414701a7be1140297748f780f0ab",
@@ -215,7 +215,7 @@
     "web/components/ConnectGalleryViewer.tsx": "88e590923beeea881ee928b5333eb3208a3a6bb859a69913ef15942594ae7e1d",
     "web/components/ConnectHiddenMembers.tsx": "8fddffd939046b67f82a46bb5fe257ffe9b8e8299ecbf97f02135be6b28e10cb",
     "web/components/ConnectMusicSystem.tsx": "81860e92f68b78a2b0ada837712267815d6b8048249dd5aaa1b3c0459b3022bd",
-    "web/components/ConnectNotificationSettings.tsx": "e9cecbcfe1ad3f225ad01cb168b9ebd8bb2a5015d70e393f25c2d508dd7a9899",
+    "web/components/ConnectNotificationSettings.tsx": "f322b1b0ec8e6b214c4e5bd4643cc455add9676c54be19181c012ac5d9f772e3",
     "web/components/ConnectProfileMedia.tsx": "5cb2ec10462e6069477480b4c4a5e123ef8144d257916d5eb921fcdc6f5a5073",
     "web/components/ConnectPushGuardian.tsx": "9556e6c438e0ef1eae4dfc260e11778075c06dd24b02f28f49d42b0754f2f8a7",
     "web/components/ConnectRecordingBar.tsx": "4603cc7a5090d6ef18b673f948d2ad15d0981248270327a4fc5b0c1549f680c6",
@@ -375,6 +375,7 @@
     "web/public/stickers/speed/yes.webp": "e72eec1a3aa12525ac36ef440c90edddb4fe8d7a40188d6210b544cebbe146cd",
     "web/public/sw.js": "7bc41fb1cde74da8cf16e305eddea6b33c74ea856b8598aae26265c13e054060",
     "web/tsconfig.json": "e353b30d4833ff1c145dfb54594f9517e9b3777d776b84c955c49e24775e04a4",
-    "web/vite.config.ts": "4b3dc10a049b2e7f8e8a3bb0b87ba8a9b005d2553e84958c928baea6d8fdf239"
+    "web/vite.config.ts": "4b3dc10a049b2e7f8e8a3bb0b87ba8a9b005d2553e84958c928baea6d8fdf239",
+    "tests/android-ui-polish.test.cjs": "7cb210f6d255ff0a4aff50942a7764cdc2c1ff3c5b5bc436752f934f0688be4f"
   }
 }
