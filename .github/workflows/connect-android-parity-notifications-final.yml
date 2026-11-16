@@ -1,0 +1,160 @@
+name: Connect Android — PWA parity and notification verification
+on:
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Build one signed candidate after all checks (requires existing release key)
+        type: boolean
+        default: true
+  pull_request:
+    paths: ['native/**', '.github/workflows/connect-android-parity-notifications-final.yml']
+permissions:
+  contents: read
+concurrency:
+  group: connect-parity-notifications-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
+      EXPO_PUBLIC_CONNECT_URL: https://connect-chat.duckdns.org
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require current sources and locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s native/package-lock.json
+          test -s native/src/App.tsx
+          test -s native/web/hybrid/runtime.ts
+          test -s native/PARITY_SOURCE_LOCK.json
+          if [[ '${{ github.event_name }}' == workflow_dispatch ]]; then
+            test '${{ github.ref }}' = refs/heads/main
+            test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" || { echo '::error::SOURCE_DRIFT: Android main moved'; exit 1; }
+          fi
+          expected=$(python3 -c "import json; print(json.load(open('native/PARITY_SOURCE_LOCK.json'))['pwaSha'])")
+          actual=$(git ls-remote https://github.com/Chimera1988/connect-messenger.git refs/heads/main | cut -f1)
+          test "$actual" = "$expected" || { echo '::error::SOURCE_DRIFT: PWA main changed; review parity before release'; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Verify source lock, web bundle, types and regressions
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verification/parity
+          node scripts/check-parity-source.mjs
+          npm ci --no-audit --no-fund
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm run build:web
+          npm run typecheck:web
+          npm run typecheck
+          npx --no-install playwright-core install --with-deps chromium
+          CHROMIUM_PATH=$(node -p "require('playwright-core').chromium.executablePath()")
+          export CHROMIUM_PATH
+          test -x "$CHROMIUM_PATH"
+          python3 -m unittest discover -s scripts -p test_release_signing.py
+          npm test 2>&1 | tee verification/parity/node-tests.txt
+          npm run test:browser 2>&1 | tee verification/parity/browser-tests.txt
+          git diff --check
+      - name: Generate native project and derive SDK from installed Gradle sources
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install expo prebuild --platform android --no-install --clean
+          node scripts/check-parity-source.mjs --tools > verification/parity/android-tools.json
+          readarray -t sdk < <(node -e "const v=require('./verification/parity/android-tools.json');console.log(v.compileSdk);console.log(v.buildTools);console.log(v.ndk)")
+          sdkmanager --channel=3 "platforms;android-${sdk[0]}" "build-tools;${sdk[1]}" "ndk;${sdk[2]}" 'cmake;3.22.1' 'platform-tools'
+      - name: Native compilation, JVM tests and Android lint (no APK)
+        working-directory: native/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest :app:lintRelease --no-daemon --max-workers=2
+      - name: Verify sources remain unchanged
+        working-directory: native
+        run: node scripts/check-parity-source.mjs
+      - name: Require existing release signing material
+        if: github.event_name == 'workflow_dispatch' && inputs.release_candidate
+        shell: bash
+        env:
+          KEY: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEY" || -z "$STORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo '::error::Existing release key is unavailable. No debug fallback APK will be built or published.'
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/connect-existing-release.jks"
+      - name: Build and verify the single signed release candidate
+        if: github.event_name == 'workflow_dispatch' && inputs.release_candidate
+        working-directory: native
+        shell: bash
+        env:
+          CONNECT_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/connect-existing-release.jks
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+          CONNECT_PREVIOUS_CERT_SHA256: ${{ vars.CONNECT_PREVIOUS_CERT_SHA256 || 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c' }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" || { echo '::error::SOURCE_DRIFT: Android main moved'; exit 1; }
+          expected=$(python3 -c "import json; print(json.load(open('PARITY_SOURCE_LOCK.json'))['pwaSha'])")
+          actual=$(git ls-remote https://github.com/Chimera1988/connect-messenger.git refs/heads/main | cut -f1)
+          test "$actual" = "$expected" || { echo '::error::SOURCE_DRIFT: PWA main moved during verification'; exit 1; }
+          node scripts/check-parity-source.mjs
+          python3 scripts/check_release_signing.py
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=2
+          cd ..
+          mkdir -p ../release/Connect-3.0.6
+          cp android/app/build/outputs/apk/release/app-release.apk ../release/Connect-3.0.6/Connect.apk
+          python3 scripts/verify-apk.py ../release/Connect-3.0.6/Connect.apk ../release/Connect-3.0.6
+          cp PARITY_NOTIFICATIONS_REPORT.md NOTIFICATION_DIAGNOSIS.md PARITY_SOURCE_LOCK.json ../release/Connect-3.0.6/
+          git rev-parse HEAD > ../release/Connect-3.0.6/SOURCE-COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.release_candidate
+        with:
+          name: Connect-3.0.6-signed-candidate
+          path: release/Connect-3.0.6/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload actual test results and parity reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Connect-parity-verification-${{ github.run_id }}
+          path: |
+            native/verification/parity/
+            native/android/app/build/reports/
+            native/android/app/build/test-results/
+            native/PARITY_NOTIFICATIONS_REPORT.md
+            native/NOTIFICATION_DIAGNOSIS.md
+            native/PARITY_SOURCE_LOCK.json
+          if-no-files-found: error
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/connect-existing-release.jks"
