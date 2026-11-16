@@ -3,11 +3,12 @@
   "pwaSha": "55a5314043e604bdd2f21d35a032bc34fc1ce075",
   "androidTools": {
     "compileSdk": "37",
+    "sdkPlatform": "platforms;android-37.0",
     "buildTools": "37.0.0",
     "ndk": "27.1.12297006"
   },
   "files": {
-    "../.github/workflows/connect-android-parity-notifications-final.yml": "c1a69dd5478a0722b3831676cc52d8af4f55266cddcb1f402e2a1375f154ea3c",
+    "../.github/workflows/connect-android-parity-notifications-final.yml": "eb5c05df2db840a15b878177db09c097780118b068a229078dbce6381df43c0b",
     ".env.example": "953ced803b9459769981a57149179eb76d7a534962d79c13083cbdb7f70735c9",
     ".gitignore": "e3255b10f7e61507ac08b215056195f61cc634cb42d0882def50818269faeb08",
     "app.json": "22e91086a49a795ac6862faae588e3ac6f018135d986198bb59722d001e09742",
@@ -107,7 +108,7 @@
     "plugins/withConnectTelecom.js": "75b2d0ef8c95d21160fa0c444d192955966523965279762aac3c21d85c925969",
     "plugins/withConnectWaveform.js": "07d6c578dba1e02dc04529d7f2856150d522762f934424f980cf2470809ad9fa",
     "plugins/withConnectWebAssets.js": "7626c785bd73988ecb8f6249bb16895b779bdec42db14edec0e932f02d1c1ecc",
-    "scripts/check-parity-source.mjs": "8d100ae34007b6ae1e587fe05df5945012dee86b83a85203812f9b3744e755c9",
+    "scripts/check-parity-source.mjs": "6c06a0596f32c43082abca4050aa4a9e4beaf480a41787a8ffcf3bab4041ecb8",
     "scripts/check_release_signing.py": "66b587fae54de6118069382c9a48744c97ff0ce3fdadf5e1fb821adf7ce40f79",
     "scripts/embed-web.mjs": "948f184c341821bf5e3667b819abb25829d8060ec7cea034fa7af3af9699a92c",
     "scripts/generate-call-policy.cjs": "f445667273a33e9481decade64a922e303552e84434591c55ea7bb4673faec5b",
@@ -188,7 +189,7 @@
     "tests/recorder-permission.test.cjs": "22019eee251648f02867a9349c19a94980c502a003e78365a2276f6d5b20b070",
     "tests/release-config.test.cjs": "f2bebd049fd7f09651ef7739bca4943415e467102ff1eac9d405ed90514f1601",
     "tests/scenes.test.cjs": "ec7961dc196453a802e88f23128f70169f946ed1b11deee2ea4b955a91b01ba7",
-    "tests/source-lock.test.cjs": "cbd551c00808e20ea9068c000363722b6e2365649e63ed319451a927351d29b1",
+    "tests/source-lock.test.cjs": "e099e5e72a17ff05e630884c0f567f7b81b69f7d5cb307a9b6121842d93e8a5e",
     "tests/telecom-race.test.cjs": "29b29903479e705ae8d4b197abf034965590c7ffbe8a6e2794c0ed62142d61b5",
     "tests/voice-controller.test.cjs": "7f8c31297007b8e9b6c734a7e81df2b614cba5c107c9487f442907bcdde829f6",
     "tests/waveform.test.cjs": "0156ed9629aaf011ebd325dd3046f4847a6c2e2fb5353fa6e7f5771c7169b7af",

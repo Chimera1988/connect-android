@@ -1,4 +1,8 @@
-# Результаты проверок 15 ноября 2026
+# Результаты проверок
+
+Повторная проверка **16 ноября** после исправления SDK в итоговом workflow: Node **170/170**, browser **15/15**, signing **4/4**, JVM **77/77**, build/web/native types и clean prebuild успешны, native compilation/lint успешны (0 errors / 107 warnings). Первопричины двух упавших GitHub runs и границы проверки: [CI_SDK_REPAIR_REPORT.md](CI_SDK_REPAIR_REPORT.md).
+
+## Перенос PWA — 15 ноября 2026
 
 Все числа ниже взяты из завершённых запусков этого задания. Эмулятор и физический Android не использовались.
 
