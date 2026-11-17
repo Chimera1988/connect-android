@@ -3,10 +3,14 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const root=path.resolve(__dirname,'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 
-test('about screen identifies installed Android 3.0.6 (24), not legacy 2.2.5',()=>{
+test('about screen displays installed Android version rather than hardcoded build',()=>{
  const page=read('web/app/page.tsx');
- assert.match(page,/Версия 3\.0\.6 \(24\)/);
+ const ui=read('web/components/ConnectOtaSettings.tsx');
+ assert.match(page,/<ConnectOtaSettings\s*\/>/);
+ assert.doesNotMatch(page,/Версия 3\.0\.6 \(24\)/);
  assert.doesNotMatch(page,/Версия 2\.2\.5/);
+ assert.match(ui,/info\?\.version/);
+ assert.match(ui,/info\.build/);
 });
 test('Android sound menu contains only Connect defaults and native custom picker actions',()=>{
  const menu=read('web/components/ConnectNotificationSettings.tsx');

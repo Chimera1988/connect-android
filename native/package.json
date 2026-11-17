@@ -47,7 +47,8 @@
     "react-native-webrtc": "155.0.1",
     "react-native-webview": "13.16.0",
     "tus-js-client": "4.3.1",
-    "tweetnacl": "1.0.3"
+    "tweetnacl": "1.0.3",
+    "expo-constants": "58.0.15"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",

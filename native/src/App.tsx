@@ -5,6 +5,8 @@ import {StatusBar} from 'expo-status-bar';
 import * as Crypto from 'expo-crypto';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import {WebView,WebViewMessageEvent} from 'react-native-webview';
 import notifee from '@notifee/react-native';
 import {db,mediaUrl,type Profile} from './backend';
@@ -37,6 +39,8 @@ function HybridConnect(){
   const mounted=useRef(true),fileTransfers=useRef(new Map<string,FileTransfer>());
   const loaded=useRef(false),seen=useRef(new Set<string>()),active=useRef(''),queued=useRef<Array<[string,unknown]>>([]);
   const voice=useConnectNativeVoice(ownerId,profiles,avatars),voiceRef=useRef(voice);voiceRef.current=voice;
+  const otaState=Updates.useUpdates(),otaStateRef=useRef(otaState);otaStateRef.current=otaState;
+  const otaDownloaded=useRef(false),recordingActive=useRef(false);
   const currentToken=useRef(''),authQueue=useRef(Promise.resolve()),busy=useRef(new Set<string>());
   const send=useCallback((type:string,data:unknown)=>{
     if(!mounted.current)return;
@@ -168,7 +172,7 @@ function HybridConnect(){
       return;
     }
     if(command!=='bridge:ready'&&!loaded.current)return;
-    const category=command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command==='calls:dial'?'call-dial':command==='calls:accept'?'call-answer':null;
+    const category=command.startsWith('updates:')?'ota':command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command==='calls:dial'?'call-dial':command==='calls:accept'?'call-answer':null;
     if(category&&busy.current.has(category)){respond(false,undefined,'Предыдущее действие ещё выполняется');return;}
     if(category)busy.current.add(category);
     const traceCall=(stage:string)=>{if(command.startsWith('calls:')&&command!=='calls:journal')void NativeModules.ConnectCallCoordinator.traceBridge(command,id,stage).catch(()=>{});};
@@ -179,6 +183,32 @@ function HybridConnect(){
       if(v.phase!=='idle'&&['sounds:preview','sounds:previewBuiltin'].includes(command))throw Error('Прослушивание доступно после завершения аудиозвонка');
       if(command.startsWith('calls:')&&command!=='calls:accept'&&p.callId&&p.callId!==v.shown?.id)throw Error('Этот звонок уже завершён');
       switch(command){
+        case 'updates:info':{
+          result={version:Constants.expoConfig?.version||'неизвестна',build:Constants.platform?.android?.versionCode??null,
+            enabled:Updates.isEnabled,pending:otaStateRef.current.isUpdatePending||otaDownloaded.current,
+            channel:Updates.channel||null,runtime:Updates.runtimeVersion||null,embedded:Updates.isEmbeddedLaunch};break;
+        }
+        case 'updates:check':{
+          if(!Updates.isEnabled)throw Error('Обновления Expo недоступны в этой версии Connect');
+          if(otaStateRef.current.isUpdatePending||otaDownloaded.current){result={state:'ready'};break;}
+          const checked=await Updates.checkForUpdateAsync();
+          result={state:checked.isAvailable||checked.isRollBackToEmbedded?'available':'current'};break;
+        }
+        case 'updates:download':{
+          if(!Updates.isEnabled)throw Error('Обновления Expo недоступны');
+          if(otaStateRef.current.isUpdatePending||otaDownloaded.current){result={state:'ready'};break;}
+          const fetched=await Updates.fetchUpdateAsync();
+          if(!fetched.isNew&&!fetched.isRollBackToEmbedded){result={state:'current'};break;}
+          otaDownloaded.current=true;result={state:'ready'};break;
+        }
+        case 'updates:apply':{
+          if(!Updates.isEnabled||!(otaDownloaded.current||otaStateRef.current.isUpdatePending))throw Error('Новое обновление ещё не загружено');
+          if(voiceRef.current.phase!=='idle'||recordingActive.current||saves.current.size||fileTransfers.current.size||AppState.currentState!=='active')
+            throw Error('Завершите звонок, запись или передачу файла перед перезапуском.');
+          respond(true,{state:'restarting'});
+          void Updates.reloadAsync().catch(error=>send('error',error instanceof Error?error.message:'Не удалось перезапустить Connect.'));
+          return;
+        }
         case 'notification:diagnostics':if(!ownerId)throw Error('Войдите в Connect');result=await getNativePushDiagnostics();break;
         case 'media:waveform':{
           const viewer=ownerId;if(!viewer)throw Error('Войдите в Connect');
@@ -279,7 +309,7 @@ function HybridConnect(){
   const injected=useMemo(()=>`window.__CONNECT_NONCE__=${JSON.stringify(nonce)};window.__CONNECT_INITIAL_SESSION__=${JSON.stringify(initial||null)};true;`,[initial,nonce]);
   if(!source)return <View style={{flex:1,justifyContent:'center'}}><ActivityIndicator color="#ccd5df"/></View>;
   if(failure)return <View style={{flex:1,justifyContent:'center',padding:24,gap:16}}><Text style={{color:'#fff'}}>{failure}</Text><Pressable onPress={()=>{loaded.current=false;seen.current.clear();queued.current=[];abortTransfers();setFailure('');setRevision(r=>r+1);}}><Text style={{color:'#cfd8e1'}}>Повторить</Text></Pressable></View>;
-  return <><ConnectHybridRecorder ref={recorder} onLevel={level=>send('record-level',level)} onRecordingChange={(recording,kind)=>send('record-state',{recording,kind})}/><WebView ref={web} key={revision} source={source} style={{flex:1,backgroundColor:'#080b11'}}
+  return <><ConnectHybridRecorder ref={recorder} onLevel={level=>send('record-level',level)} onRecordingChange={(recording,kind)=>{recordingActive.current=recording;send('record-state',{recording,kind});}}/><WebView ref={web} key={revision} source={source} style={{flex:1,backgroundColor:'#080b11'}}
     originWhitelist={[CONNECT_ORIGIN]} injectedJavaScriptBeforeContentLoaded={injected}
     javaScriptEnabled domStorageEnabled allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false}
     allowFileAccess={false} allowFileAccessFromFileURLs={false} allowUniversalAccessFromFileURLs={false}
