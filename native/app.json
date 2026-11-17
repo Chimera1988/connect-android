@@ -3,12 +3,12 @@
     "name": "Connect",
     "slug": "connect-native-v2",
     "scheme": "connect",
-    "version": "3.0.6",
+    "version": "3.0.7",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.connect.messenger",
-      "versionCode": 24,
+      "versionCode": 25,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",

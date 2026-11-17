@@ -10,6 +10,37 @@ import sys
 import zipfile
 from check_release_signing import validate_certificate
 
+def audit_packaged_signing_material(archive):
+    """Reject any private credentials; permit only parseable public X.509/PEM keys."""
+    blocked_ext = ('.jks', '.keystore', '.p12', '.pfx', '.key')
+    pem_pattern = re.compile(rb'-----BEGIN (CERTIFICATE|PUBLIC KEY|RSA PUBLIC KEY)-----\s*'
+                             rb'[A-Za-z0-9+/=\s]+?-----END \1-----')
+    for info in archive.infolist():
+        entry = info.filename
+        name = entry.lower()
+        if name.endswith(blocked_ext):
+            raise AssertionError('APK contains forbidden credential file: ' + entry)
+        if not name.endswith('.pem'):
+            continue
+        content = archive.read(info)
+        if len(content) > 1048576 or b'PRIVATE KEY' in content.upper():
+            raise AssertionError('APK contains private or oversized PEM: ' + entry)
+        blocks = list(pem_pattern.finditer(content))
+        if not blocks or pem_pattern.sub(b'', content).strip():
+            raise AssertionError('APK contains unrecognized PEM material: ' + entry)
+        for match in blocks:
+            typ = match.group(1)
+            if typ == b'CERTIFICATE':
+                command = ['openssl', 'x509', '-inform', 'PEM', '-noout']
+            else:
+                command = ['openssl', 'pkey', '-pubin', '-inform', 'PEM', '-noout']
+            result = subprocess.run(command, input=match.group(0),
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, check=False)
+            if result.returncode != 0:
+                raise AssertionError('APK contains malformed public PEM: ' + entry)
+        print('APK_PUBLIC_PEM_ONLY:', entry, '(', len(blocks), 'validated public certificate/key blocks)')
+
 apk = Path(sys.argv[1]).resolve()
 output = Path(sys.argv[2] if len(sys.argv) > 2 else apk.parent).resolve()
 output.mkdir(parents=True, exist_ok=True)
@@ -18,7 +49,7 @@ tools = sdk / 'build-tools' / '37.0.0'
 badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
 assert "package: name='com.connect.messenger'" in badging, 'Wrong application ID'
 assert "application-label:'Connect'" in badging, 'Wrong visible name'
-assert "versionCode='24'" in badging and "versionName='3.0.6'" in badging, 'Wrong release version'
+assert "versionCode='25'" in badging and "versionName='3.0.7'" in badging, 'Wrong release version'
 assert "sdkVersion:'29'" in badging, 'Android 10 minimum not enforced'
 assert 'application-debuggable' not in badging, 'Release must not be debuggable'
 with zipfile.ZipFile(apk) as z:
@@ -57,7 +88,7 @@ with zipfile.ZipFile(apk) as z:
         resource_path = re.search(r'\(file\) (\S+)', block)[1]
         source = Path(__file__).resolve().parents[1]/('assets/notification_sounds/connect_'+name+'.wav')
         assert hashlib.sha256(z.read(resource_path)).digest() == hashlib.sha256(source.read_bytes()).digest(), 'Legacy sound removed: '+name
-    assert not any(n.lower().endswith(('.jks','.keystore','.p12','.pem')) for n in z.namelist()), 'Signing material must not be shipped'
+    audit_packaged_signing_material(z)
     assert sorted({n.split('/')[1] for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')})==['arm64-v8a','armeabi-v7a']
 signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
 fingerprint = re.search(r'(?:Signer #1|V2 Signer|V3 Signer):? certificate SHA-256 digest: ([0-9a-fA-F]+)', signature)
@@ -73,7 +104,7 @@ if compatible is False:
     raise SystemExit('Certificate differs from configured previous release; refusing incompatible update artifact')
 report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
-    'version': '3.0.6', 'versionCode': 24, 'minSdk': 29,
+    'version': '3.0.7', 'versionCode': 25, 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
     'signerSha256': fingerprint[1],
     'signing': 'supplied-release-key' if os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE') else 'Android debug key (fallback)',

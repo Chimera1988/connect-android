@@ -8,8 +8,8 @@ const read=(name)=>fs.readFileSync(path.join(root,name));
 const app=JSON.parse(read('app.json')).expo;
 test('existing production Connect Android package and version remain intact',()=>{
   assert.equal(app.android.package,'com.connect.messenger');
-  assert.equal(app.version,'3.0.6');
-  assert.equal(app.android.versionCode,24);
+  assert.equal(app.version,'3.0.7');
+  assert.equal(app.android.versionCode,25);
 });
 test('Expo project ID and matching update endpoint are fixed',()=>{
   assert.equal(app.extra.eas.projectId,'430c7f08-3921-48d5-96d1-f7c3d686d3bf');
