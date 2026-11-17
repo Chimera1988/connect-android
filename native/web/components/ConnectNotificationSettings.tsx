@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import ConnectWebPushDiagnostics from './ConnectWebPushDiagnostics';
+import ConnectNativePushStatus from './ConnectNativePushStatus';
 
 import {isNotificationTone,serverNotificationPrefs,mergeServerNotificationPrefs,type NotificationTone as Sound} from '../lib/android-sound-policy';
 type Prefs = { enabled: boolean; sound: Sound; vibrate: boolean };
@@ -186,7 +187,13 @@ function ConnectAndroidNotificationSettings({supabase,userId}:{supabase:Supabase
         </div>;
       })}
     </div>
-    <button type="button" className="connect-sound-register" disabled={busy} onClick={()=>void activate()}>{busy?'Подключаем…':'Подключить уведомления'}</button>
+    {window.ConnectNative?<ConnectNativePushStatus userId={userId} prefsEnabled={prefs.enabled} onEnable={async()=>{
+      if(latest.current.enabled)return;
+      const next={...latest.current,enabled:true};
+      await persist(next);
+      await window.ConnectNative!.request('preferences',next);
+      revision.current++;apply(next);
+    }}/>:<button type="button" className="connect-sound-register" disabled={busy} onClick={()=>void activate()}>{busy?'Подключаем…':'Подключить уведомления'}</button>}
     <p role="status" className="connect-sound-status">{status}</p>
     <details className="connect-android-advanced"><summary>Системные настройки и диагностика</summary>
       {!fullScreenAllowed && <p role="alert">Android запрещает полноэкранный показ звонков. Проверьте системные разрешения.</p>}

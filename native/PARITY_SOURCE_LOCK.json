@@ -119,7 +119,7 @@
     "scripts/verify-call-resources.py": "cfe785d9a7692eb39abe251fc10b02301f1a345c5695dfb5ffbe8af652628980",
     "shared/call-missed-fixtures.tsv": "0709375ba37a6302c2ce6b3dbf8abc9d82ec1be20ea9b806c076a1ecf8fb6a00",
     "shared/call-missed-policy.json": "5289083182fbbb93de4cbd9d9987dac0ecfb21b86339468f09d25a2dd41122a8",
-    "src/App.tsx": "23213b8b4a72c38ec88e204ff67032ce46f39aecebb89f9668dd002e2f7a2432",
+    "src/App.tsx": "fd8c87dc4284dcdaa90a02ae99e538294fff46487dddc2aa12b60ed865dc7fbc",
     "src/ConnectHybridFiles.ts": "d18520aeba19011df591489da0fd9aff068d8d1f0eb9161671ccdf13a40237bc",
     "src/ConnectHybridRecorder.tsx": "277c5bf7bc244ae46d210609d3c450cefc991a3f7c2d6500b7facd41c8445c74",
     "src/ConnectNativeAlbum.tsx": "64f6603bfd13b0993f19085c101d09be8cc4b013f9669430402466eebd21b9b7",
@@ -138,7 +138,7 @@
     "src/ConnectNativeMusic.tsx": "d73e19f0a78b7b01a0e42715fffd45e784fde88cf702defb26ea1f06175d9bc6",
     "src/ConnectNativePasswordSetup.tsx": "6b3d0f34daa6aecff342626e8f4b2bf25eccfcbdb32a875d787b80b2886e7626",
     "src/ConnectNativePresence.ts": "a5c88fbc094a252e4de0a81e0b95ba9ebfdb7e04cab3fc20925f7d1c7bd1b267",
-    "src/ConnectNativePush.ts": "797840674b7d706cf6254a29367f4ea0b22171c819d32379e660f7c3642316b2",
+    "src/ConnectNativePush.ts": "2229f55c0c4a6dd412cf74ac02d17637e9661da55e5279e5bd838598174657e0",
     "src/ConnectNativeReadSync.ts": "e93d3fe7bb6895f0904fdc4464e834f06339bfe8f9c754ccc0dbdb9368f5892f",
     "src/ConnectNativeScene.ts": "ca7e075537d696d3f4b92c7d26d096f55598e318e4b2df36af58d23884db874b",
     "src/ConnectNativeSettings.tsx": "7f0723d89443241a9573920fceaaa1db4a93f374c345737ee8aface2d17fc938",
@@ -156,7 +156,7 @@
     "src/call-journal.ts": "5e2e41b75340de126281df21eced7c7143c8bcc4080b3c35a8551b9aa681ecd3",
     "src/call-missed.ts": "446b5ba2322135d7685e57d0fa5adb5ece29978c1fb900730d51286c09cde520",
     "src/hybridMigration.ts": "12fe6b2c80300d9210f4ca679aef040afa0012e142dec38031290e65fdfa1be9",
-    "src/hybridProtocol.ts": "bbc6ecf232e8cbba05a5a22ad34198123e08c038bad023666087396be1134dc3",
+    "src/hybridProtocol.ts": "b29cbee384258dfc91de2d858c31f894f4201798c71ce372d40ebfa31dac97f9",
     "src/nativeAppUtils.ts": "da6d42c3b2041a19abb8527ebbeda2bc913f60f656530b597768b86f83c9248f",
     "src/nativeColorUtils.ts": "793dbc2419216e7ca5ba202f17b514967eb52553921ab470f4ed12c7afdd3c5c",
     "src/nativeMediaPreview.ts": "e35a3bfa73ecee52f2018d91c6aac6c3af9e4322ff3f56accfa876993620316a",
@@ -215,7 +215,7 @@
     "web/components/ConnectGalleryViewer.tsx": "88e590923beeea881ee928b5333eb3208a3a6bb859a69913ef15942594ae7e1d",
     "web/components/ConnectHiddenMembers.tsx": "8fddffd939046b67f82a46bb5fe257ffe9b8e8299ecbf97f02135be6b28e10cb",
     "web/components/ConnectMusicSystem.tsx": "81860e92f68b78a2b0ada837712267815d6b8048249dd5aaa1b3c0459b3022bd",
-    "web/components/ConnectNotificationSettings.tsx": "f322b1b0ec8e6b214c4e5bd4643cc455add9676c54be19181c012ac5d9f772e3",
+    "web/components/ConnectNotificationSettings.tsx": "fa4c877294fe2ab9ccdc65b302cf868849547f9d7a3f7d2a2bb3b01576d3b777",
     "web/components/ConnectProfileMedia.tsx": "5cb2ec10462e6069477480b4c4a5e123ef8144d257916d5eb921fcdc6f5a5073",
     "web/components/ConnectPushGuardian.tsx": "9556e6c438e0ef1eae4dfc260e11778075c06dd24b02f28f49d42b0754f2f8a7",
     "web/components/ConnectRecordingBar.tsx": "4603cc7a5090d6ef18b673f948d2ad15d0981248270327a4fc5b0c1549f680c6",
@@ -384,6 +384,8 @@
     "web/components/ConnectOtaSettings.tsx": "42e305e1328ebcd8a887de220a2e5131f52916bbd0dc1f1f5bee452d968dcf30",
     "tests/connect-ota-about-20261117.test.cjs": "6cd76182e46d704044c156a96282cd85a84ad2b3de0fe8b170dca1b3d27a7700",
     "src/ConnectApkUpdates.ts": "4be722db05c1ddf843eb80bee0696518a194bc991d196ceee2b78b89fc9fdda3",
-    "tests/connect-apk-update-20261117.test.cjs": "6516ad063f4a56824b53474575870dddd9b8a5c68c30d65f876c242a1ec6b0f9"
+    "tests/connect-apk-update-20261117.test.cjs": "6516ad063f4a56824b53474575870dddd9b8a5c68c30d65f876c242a1ec6b0f9",
+    "web/components/ConnectNativePushStatus.tsx": "cb9e1b37b407b4257666546237f35bbe69e0f4aab1c0d24d4cd7807ab3b34d05",
+    "tests/connect-native-push-status-20261118.test.cjs": "6f0687d532ae127512145d9897b082369fac5c9312af23f45fde9f7ddd0bdf6f"
   }
 }

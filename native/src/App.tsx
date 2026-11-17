@@ -13,7 +13,7 @@ import notifee from '@notifee/react-native';
 import {db,mediaUrl,type Profile} from './backend';
 import {parseHybridMessage,CONNECT_ORIGIN} from './hybridProtocol';
 import {useConnectNativeVoice} from './ConnectNativeVoice';
-import {subscribeNativePush,registerNativePushNow,getNativePushDiagnostics,disableNativePush,setVisibleConversation,rememberReadAt,dismissChatPush} from './ConnectNativePush';
+import {subscribeNativePush,registerNativePushNow,getNativePushSubscriptionStatus,testNativeMessagePush,getNativePushDiagnostics,disableNativePush,setVisibleConversation,rememberReadAt,dismissChatPush} from './ConnectNativePush';
 import {chooseConnectSound,getConnectSoundLabel,getConnectSoundPreference,getConnectSoundSilence,setConnectSoundSilence,previewConnectSound,resetConnectSound,previewBuiltinSound,stopSoundPreview,type BuiltinNotificationTone} from './ConnectNativeSoundSettings';
 import pwa from './generated/pwa';
 import {getAudioWaveform} from './nativeWaveform';
@@ -174,7 +174,7 @@ function HybridConnect(){
       return;
     }
     if(command!=='bridge:ready'&&!loaded.current)return;
-    const category=command.startsWith('updates:')?'ota':command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command==='calls:dial'?'call-dial':command==='calls:accept'?'call-answer':null;
+    const category=command.startsWith('updates:')?'ota':command==='notification:status'||command==='notification:connect'||command==='notification:test'?'push':command==='sounds:pick'||command==='files:begin'?'picker':command==='register'?'register':command==='recordVideo:open'||command==='recordVoice:start'?'capture':command==='calls:dial'?'call-dial':command==='calls:accept'?'call-answer':null;
     if(category&&busy.current.has(category)){respond(false,undefined,'Предыдущее действие ещё выполняется');return;}
     if(category)busy.current.add(category);
     const traceCall=(stage:string)=>{if(command.startsWith('calls:')&&command!=='calls:journal')void NativeModules.ConnectCallCoordinator.traceBridge(command,id,stage).catch(()=>{});};
@@ -227,6 +227,14 @@ function HybridConnect(){
           await Linking.openURL(apk.url);
           result={state:'opened'};
           break;
+        }
+        case 'notification:status':case 'notification:connect':{
+          if(!ownerId)throw Error('Войдите в Connect');
+          result=await getNativePushSubscriptionStatus(ownerId,command==='notification:connect');break;
+        }
+        case 'notification:test':{
+          if(!ownerId)throw Error('Войдите в Connect');
+          result={message:await testNativeMessagePush(ownerId)};break;
         }
         case 'notification:diagnostics':if(!ownerId)throw Error('Войдите в Connect');result=await getNativePushDiagnostics();break;
         case 'media:waveform':{

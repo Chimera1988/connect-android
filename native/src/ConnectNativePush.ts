@@ -183,14 +183,65 @@ export async function registerNativePushNow(ownerId:string){
   const token=await getToken(getMessaging());if(!token)throw Error('Firebase не выдал токен устройства.');
   await sendRegistration(token,'POST',ownerId);
   await SecureStore.setItemAsync(DEVICE_ACTIVE_KEY,'yes');
+  await SecureStore.setItemAsync(LAST_REGISTERED_KEY,new Date().toISOString()).catch(()=>{});
 }
+
+export type NativePushSubscriptionStatus={state:'active'|'permission'|'disabled'|'unregistered'|'temporary';verifiedAt?:string};
+/** A registration acknowledgement confirms this account/device in the Connect server.
+ * Do not expose FCM tokens, endpoints or auth headers to the embedded WebView.
+ * A successful POST is NOT proof an FCM push reached the device.
+ */
+export async function getNativePushSubscriptionStatus(ownerId:string,manual=false):Promise<NativePushSubscriptionStatus>{
+  if(!UUID.test(ownerId))return {state:'unregistered'};
+  try{
+    const permission=manual?await notifee.requestPermission():await notifee.getNotificationSettings();
+    if(permission.authorizationStatus<=0)return {state:'permission'};
+    const local=await notificationPrefs();
+    if(!local.enabled)return {state:'disabled'};
+    const remote=await db.from('notification_preferences').select('enabled').eq('user_id',ownerId).maybeSingle();
+    if(remote.error)return {state:'temporary'};
+    if(remote.data?.enabled===false)return {state:'disabled'};
+    const token=await getToken(getMessaging());
+    if(!token)return {state:'unregistered'};
+    await sendRegistration(token,'POST',ownerId);
+    const verifiedAt=new Date().toISOString();
+    await SecureStore.setItemAsync(DEVICE_ACTIVE_KEY,'yes');
+    await SecureStore.setItemAsync(LAST_REGISTERED_KEY,verifiedAt).catch(()=>{});
+    return {state:'active',verifiedAt};
+  }catch{return {state:'temporary'};}
+}
+
 /** Register a signed-in user with the existing Connect push_devices server API. */
 export function subscribeNativePush(ownerId:string,open:(route:NativePushDestination)=>void,onError:(error:string)=>void):()=>void{
   let alive=true;
   onOpen=open;
+  let lastRepair=Date.now(),repairRunning=false,retryTimer:ReturnType<typeof setTimeout>|null=null;
+  let retryCount=0;
+  const scheduleRetry=()=>{
+    if(!alive||retryTimer!==null)return;
+    const delay=[30000,60000,120000,240000][Math.min(retryCount++,3)];
+    retryTimer=setTimeout(()=>{retryTimer=null;void repair();},delay);
+  };
+  const repair=async()=>{
+    if(!alive||repairRunning||AppState.currentState!=='active'||Date.now()-lastRepair<12000)return;
+    lastRepair=Date.now();repairRunning=true;
+    try{
+      // No Android permission dialog from background retry, unlike explicit user action.
+      const permission=await notifee.getNotificationSettings();
+      if(permission.authorizationStatus<=0)return;
+      const token=await getToken(getMessaging());
+      if(!alive||!token)return;
+      await sendRegistration(token,'POST',ownerId);
+      await SecureStore.setItemAsync(LAST_REGISTERED_KEY,new Date().toISOString()).catch(()=>{});
+      retryCount=0;
+      if(retryTimer!==null){clearTimeout(retryTimer);retryTimer=null;}
+    }catch{if(alive)scheduleRetry();}
+    finally{repairRunning=false;}
+  };
   const drainOpen=async()=>{try{if(await NativeModules?.ConnectCallCoordinator?.consumeMissedOpen?.(ownerId)){if(alive)open({kind:'calls'});}const raw=await SecureStore.getItemAsync(OPEN_KEY);if(!raw||!alive)return;await SecureStore.deleteItemAsync(OPEN_KEY);const saved=JSON.parse(raw);if(Date.now()-saved.time<120000)deliverOpen(saved.raw);}catch{}};
   const missedPress=DeviceEventEmitter?.addListener?.('connect:missed-changed',(event:any)=>{if(event?.userId===ownerId)void drainOpen();});
-  const resumes=AppState.addEventListener('change',state=>{if(state==='active')void drainOpen();});
+  const resumes=AppState.addEventListener('change',state=>{if(state==='active'){void drainOpen();void repair();}});
+  const periodic=setInterval(()=>{void repair();},15*60*1000);
   void drainOpen();
   if(bufferedOpen){open(bufferedOpen);bufferedOpen=null;}
   const foreground=onMessage(getMessaging(), async message=>{try{await handleNativePush(normalizeFcmData(message.data)||undefined);}catch(e){console.warn('Connect native notification:',e);}});
@@ -201,7 +252,7 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
     }
     if(type===EventType.PRESS||type===EventType.ACTION_PRESS)deliverOpen(detail.notification?.data);
   });
-  const tokenRefresh=onTokenRefresh(getMessaging(), token=>{void sendRegistration(token,'POST',ownerId).catch(e=>{if(alive)onError(String(e));});});
+  const tokenRefresh=onTokenRefresh(getMessaging(), token=>{void sendRegistration(token,'POST',ownerId).then(()=>SecureStore.setItemAsync(LAST_REGISTERED_KEY,new Date().toISOString())).catch(e=>{if(alive){onError(String(e));scheduleRetry();}});});
   void (async()=>{
     try{
       await SecureStore.setItemAsync(DEVICE_ACTIVE_KEY,'yes');
@@ -225,10 +276,10 @@ export function subscribeNativePush(ownerId:string,open:(route:NativePushDestina
           await handleCallNotificationAction('connect-answer',initial.notification.data);
         deliverOpen(initial.notification.data);
       }
-    }catch(e){if(alive)onError('Ошибка регистрации уведомлений: '+String(e));}
+    }catch(e){if(alive){onError('Ошибка регистрации уведомлений: '+String(e));scheduleRetry();}}
   })();
   return ()=>{
-    alive=false;foreground();presses();tokenRefresh();resumes.remove();missedPress?.remove();
+    alive=false;if(retryTimer!==null)clearTimeout(retryTimer);clearInterval(periodic);foreground();presses();tokenRefresh();resumes.remove();missedPress?.remove();
     if(onOpen===open)onOpen=null;
   };
 }
