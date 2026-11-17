@@ -1,0 +1,378 @@
+name: Connect Android | Notifications layout and production OTA
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: connect-android-notifications-layout-ota
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Patch Android notification UI, verify and publish Expo OTA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
+      NEXT_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
+      EXPO_PUBLIC_CONNECT_URL: https://connect-chat.duckdns.org
+    steps:
+      - name: Checkout Connect Android main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Preflight production Expo OTA and signing-safe runtime
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test -n "${EXPO_TOKEN:-}" || { echo '::error::Missing EXPO_TOKEN secret; no release will be attempted'; exit 1; }
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          expo=json.loads(Path('native/app.json').read_text(encoding='utf-8'))['expo']
+          assert expo['version']=='3.0.7' and expo['android']['versionCode']==25
+          assert expo['android']['package']=='com.connect.messenger'
+          assert expo['runtimeVersion']=='connect-android-ota-v1-sdk58'
+          assert expo['extra']['eas']['projectId']=='430c7f08-3921-48d5-96d1-f7c3d686d3bf'
+          assert expo['updates']['url']=='https://u.expo.dev/430c7f08-3921-48d5-96d1-f7c3d686d3bf'
+          assert expo['updates']['requestHeaders']['expo-channel-name']=='production'
+          assert expo['updates']['enabled']
+          print('Preflight OK: same installed Android APK and Expo runtime, no native module changes')
+          PY
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Install locked dependencies and verify pristine sources
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/check-parity-source.mjs
+      - name: Apply the single approved notification screen redesign
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+
+          root = Path('native')
+          relpaths = {
+              'menu':'web/components/ConnectNotificationSettings.tsx',
+              'push':'web/components/ConnectNativePushStatus.tsx',
+              'css':'web/app/liquid-glass.css',
+              'tests':'tests/android-ui-polish.test.cjs',
+          }
+          manifest = root / 'PARITY_SOURCE_LOCK.json'
+          lock = json.loads(manifest.read_text(encoding='utf-8'))
+          text = {k: (root / p).read_text(encoding='utf-8') for k, p in relpaths.items()}
+
+          def checksum(content):
+              return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+          def replace_once(source, old, new, label):
+              count = source.count(old)
+              if count != 1:
+                  raise RuntimeError(f'SOURCE_SHAPE_CHANGED ({label}): expected one match, got {count}; no changes written')
+              return source.replace(old, new, 1)
+
+          marker = 'CONNECT_ANDROID_NOTIFICATIONS_LAYOUT_20261118'
+          if marker in text['css']:
+              assert 'className="connect-sound-card connect-sound-combined"' in text['menu']
+              assert 'className="connect-native-push-actions"' in text['push']
+              assert 'Android notification layout uses accessible switches' in text['tests']
+              for k, rel in relpaths.items():
+                  assert lock['files'][rel] == checksum(text[k]), f'SOURCE_LOCK_MISMATCH: {rel}'
+              print('ALREADY_APPLIED: layout and source lock agree; safe OTA retry')
+          else:
+              # Start only from the locked reviewed project, not from unknown drift.
+              for k, rel in relpaths.items():
+                  if lock['files'][rel] != checksum(text[k]):
+                      raise RuntimeError(f'SOURCE_DRIFT_BEFORE_PATCH: {rel}')
+
+              menu = text['menu']
+              menu = replace_once(menu,
+                  '      <label className="connect-sound-toggle"><input type="checkbox" checked={prefs.enabled} onChange={e=>save({...latest.current,enabled:e.target.checked})}/> Уведомления включены</label>',
+                  '      <label className="connect-sound-toggle connect-sound-switch-row"><span>Уведомления включены</span><input type="checkbox" role="switch" checked={prefs.enabled} onChange={e=>save({...latest.current,enabled:e.target.checked})}/><span className="connect-sound-switch-track" aria-hidden="true"/></label>',
+                  'notification switch')
+              menu = replace_once(menu,
+                  '      <label className="connect-sound-toggle"><input type="checkbox" checked={prefs.vibrate} onChange={e=>save({...latest.current,vibrate:e.target.checked})}/> Вибрация сообщений</label>',
+                  '      <label className="connect-sound-toggle connect-sound-switch-row"><span>Вибрация сообщений</span><input type="checkbox" role="switch" checked={prefs.vibrate} onChange={e=>save({...latest.current,vibrate:e.target.checked})}/><span className="connect-sound-switch-track" aria-hidden="true"/></label>',
+                  'vibration switch')
+              menu = replace_once(menu,
+                  "      {sounds && (['call','message'] as const).map(kind=>{",
+                  "      {sounds && <div className=\"connect-sound-card connect-sound-combined\">\n        {(['call','message'] as const).map(kind=>{",
+                  'unified sound card open')
+              menu = replace_once(menu,
+                  '        return <div key={kind} className="connect-sound-card">',
+                  '        return <div key={kind} className="connect-sound-entry">',
+                  'sound entry inside unified card')
+              menu = replace_once(menu,
+                  '          <div className="connect-sound-heading"><strong>{title}</strong><small>{silent?\'Без звука\':custom?current:defaultName}</small></div>',
+                  '''          <div className="connect-sound-topline">
+                      <div className="connect-sound-heading"><strong>{title}</strong><small>{custom?current:defaultName}</small></div>
+                      <label className="connect-sound-mute connect-sound-switch-row">
+                        <span>Без звука</span>
+                        <input type="checkbox" role="switch" checked={silent} onChange={e=>{
+                          const checked=e.currentTarget.checked;
+                          setSounds(prev=>prev?{...prev,[isCall?'callSilent':'messageSilent']:checked}:prev);
+                          window.ConnectAndroid?.setSilent(kind,checked);
+                        }}/>
+                        <span className="connect-sound-switch-track" aria-hidden="true"/>
+                      </label>
+                    </div>''',
+                  'right-aligned mute switch')
+              menu = replace_once(menu,
+                  '''          <label className="connect-sound-mute"><input type="checkbox" checked={silent} onChange={e=>{
+                      const checked=e.currentTarget.checked;
+                      setSounds(prev=>prev?{...prev,[isCall?'callSilent':'messageSilent']:checked}:prev);
+                      window.ConnectAndroid?.setSilent(kind,checked);
+                    }}/> Без звука</label>
+          ''', '', 'remove obsolete mute row')
+              menu = replace_once(menu,
+                  '      })}\n    </div>\n    {window.ConnectNative?',
+                  '        })}\n      </div>}\n    </div>\n    {window.ConnectNative?',
+                  'unified sound card close')
+              menu = replace_once(menu,
+                  '      <small>Android может ограничивать звук и вибрацию системными настройками. Приложение не обходит запреты устройства.</small>',
+                  '      <small>Android может ограничивать звук и вибрацию системными настройками. Приложение не обходит запреты устройства.</small>\n      <small>Проверка системного уведомления проверяет только локальный канал Android, но не доставку сообщений с сервера FCM.</small>',
+                  'preserve local-only test explanation in diagnostics')
+
+              push = text['push']
+              start = push.find(' return <div className="connect-native-push-check">')
+              end = push.rfind('\n}')
+              if start < 0 or end <= start:
+                  raise RuntimeError('SOURCE_SHAPE_CHANGED: subscription status return')
+              push = push[:start] + ''' return <div className="connect-native-push-check">
+             <div className="connect-web-push-state" role="status" aria-live="polite">
+               <span className={'connect-web-push-indicator is-'+(state==='active'?'active':state==='checking'?'checking':state==='temporary'?'temporary':'unregistered')} aria-hidden="true"/>
+               <div><strong>{labels[state]}</strong><small>{details[state]}</small>{state==='active'&&time&&<small>Подтверждено сервером: {time}</small>}</div>
+             </div>
+             {testInfo&&<p role="status" className="connect-sound-status">{testInfo}</p>}
+             <div className="connect-native-push-actions" role="group" aria-label="Управление подпиской на уведомления">
+               <button type="button" className="connect-sound-register connect-native-push-action connect-native-push-action-primary"
+                 aria-label={state==='active'?'Переподключить уведомления':'Подключить уведомления'}
+                 disabled={busy||state==='checking'} onClick={()=>void connect()}>
+                 <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.5 9a7.5 7.5 0 0 1 13-2L20 12"/><path d="M18.5 15a7.5 7.5 0 0 1-13 2L4 12"/></svg>
+                 <span>{busy?'Подключаем…':state==='active'?'Переподключить':'Подключить'}</span>
+               </button>
+               <button type="button" className="connect-web-push-secondary connect-native-push-action"
+                 title="Проверка локального канала Android, а не доставки уведомлений с сервера FCM"
+                 aria-label="Проверить системное уведомление"
+                 disabled={busy||state!=='active'} onClick={()=>void testLocal()}>
+                 <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7"/></svg>
+                 <span>Проверить</span>
+               </button>
+             </div>
+           </div>;''' + push[end:]
+
+              css = text['css'].rstrip() + '\n\n' + '''/* CONNECT_ANDROID_NOTIFICATIONS_LAYOUT_20261118
+             Only the Android notification screen; leave all PWA diagnostics and navigation untouched. */
+          .connect-app .connect-android-notification-settings .connect-sound-options {gap:0;padding:8px 16px;}
+          .connect-app .connect-android-notification-settings .connect-sound-options .connect-sound-toggle {
+            display:flex;align-items:center;justify-content:space-between;flex-wrap:nowrap;
+            width:100%;min-height:52px;gap:12px;padding:8px 2px;box-sizing:border-box;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-options .connect-sound-toggle + .connect-sound-toggle {
+            border-top:1px solid color-mix(in srgb,var(--v4-border,var(--border)) 65%,transparent);
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-row {
+            position:relative;display:flex;align-items:center;flex-wrap:nowrap;
+            gap:9px;cursor:pointer;user-select:none;min-width:0;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"] {
+            position:absolute;right:0;top:50%;transform:translateY(-50%);
+            width:46px;height:28px;margin:0;opacity:0;z-index:1;cursor:pointer;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-track {
+            display:inline-block;position:relative;flex:0 0 46px;width:46px;height:28px;
+            border-radius:999px;background:color-mix(in srgb,var(--glass-surface-strong,var(--panel)) 78%,#748194);
+            border:1px solid var(--v4-border,var(--border));box-sizing:border-box;
+            transition:background-color .18s ease,border-color .18s ease;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-track::after {
+            content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;
+            background:#f4f7ff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.26);
+            transition:transform .18s ease;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:checked + .connect-sound-switch-track {
+            background:var(--accent);border-color:var(--accent);
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:checked + .connect-sound-switch-track::after {
+            transform:translateX(18px);
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:focus-visible + .connect-sound-switch-track {
+            outline:2px solid var(--accent);outline-offset:3px;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:disabled + .connect-sound-switch-track {opacity:.55;}
+          .connect-app .connect-android-notification-settings .connect-sounds-combined {gap:0;}
+          .connect-app .connect-android-notification-settings .connect-sound-entry {display:flex;flex-direction:column;gap:12px;min-width:0;}
+          .connect-app .connect-android-notification-settings .connect-sound-entry + .connect-sound-entry {
+            border-top:1px solid color-mix(in srgb,var(--v4-border,var(--border)) 70%,transparent);
+            margin-top:16px;padding-top:16px;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-topline {
+            display:flex;align-items:flex-start;justify-content:space-between;gap:9px;min-width:0;
+          }
+          .connect-app .connect-android-notification-settings .connect-sound-topline .connect-sound-heading {flex:1;min-width:0;}
+          .connect-app .connect-android-notification-settings .connect-sound-topline .connect-sound-mute {
+            flex:0 0 auto;margin:0;padding:2px 0;white-space:nowrap;font-size:12px;color:var(--muted);
+          }
+          .connect-app .connect-android-notification-settings > .connect-native-push-check {
+            display:flex;flex-direction:column;align-items:stretch;flex-wrap:nowrap;
+            width:100%;gap:13px;padding:16px;border-radius:22px;box-sizing:border-box;
+            border:1px solid var(--v4-border,var(--border));
+            background:linear-gradient(135deg,
+              color-mix(in srgb,var(--wave-primary,var(--accent)) 9%,var(--glass-surface-strong,var(--panel))),
+              color-mix(in srgb,var(--wave-secondary,var(--accent)) 6%,var(--glass-surface-strong,var(--panel))));
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+          }
+          .connect-app .connect-android-notification-settings .connect-native-push-check .connect-web-push-state {
+            border:0;background:transparent;box-shadow:none;padding:0;
+            -webkit-backdrop-filter:none;backdrop-filter:none;
+          }
+          .connect-app .connect-android-notification-settings .connect-native-push-actions {
+            display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;width:100%;min-width:0;
+          }
+          .connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action {
+            display:flex!important;align-items:center!important;justify-content:center!important;gap:6px;
+            box-sizing:border-box;min-width:0;width:100%!important;min-height:44px!important;
+            padding:9px 6px!important;border-radius:14px!important;font-size:12px!important;
+            font-weight:650!important;line-height:1.2!important;white-space:nowrap;
+          }
+          .connect-app .connect-android-notification-settings .connect-native-push-actions .connect-native-push-action svg {flex:0 0 19px;}
+          .connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action-primary {
+            color:white!important;background:var(--accent)!important;
+          }
+          .connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action:disabled {opacity:.52!important;}
+          @media(max-width:380px) {
+            .connect-app .connect-android-notification-settings .connect-sound-topline .connect-sound-mute {gap:5px;font-size:11px;}
+            .connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action {font-size:11px!important;gap:4px;}
+          }
+          '''
+              tests = text['tests'].rstrip() + '\n\n' + r'''test('Android notification layout uses accessible switches, one melodies card and inset push controls',()=>{
+           const menu=read('web/components/ConnectNotificationSettings.tsx');
+           const push=read('web/components/ConnectNativePushStatus.tsx');
+           const css=read('web/app/liquid-glass.css');
+           assert.match(menu,/role="switch" checked=\{prefs\.enabled\}/);
+           assert.match(menu,/role="switch" checked=\{prefs\.vibrate\}/);
+           assert.match(menu,/role="switch" checked=\{silent\}/);
+           assert.match(menu,/className="connect-sound-card connect-sound-combined"/);
+           assert.match(menu,/className="connect-sound-entry"/);
+           assert.doesNotMatch(menu,/className="connect-sound-mute"><input type="checkbox"/);
+           assert.match(push,/className="connect-native-push-actions"/);
+           assert.match(push,/onClick=\{\(\)=>void connect\(\)\}/);
+           assert.match(push,/onClick=\{\(\)=>void testLocal\(\)\}/);
+           assert.match(css,/CONNECT_ANDROID_NOTIFICATIONS_LAYOUT_20261118/);
+          });
+          '''
+              update = {'menu':menu,'push':push,'css':css,'tests':tests}
+              for k, rel in relpaths.items():
+                  lock['files'][rel] = checksum(update[k])
+              # Write only after all guarded string edits succeed.
+              for k, rel in relpaths.items():
+                  (root / rel).write_text(update[k],encoding='utf-8')
+              manifest.write_text(json.dumps(lock,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+              print('PATCHED: two main switches; single melodies card; two mute switches; inset push actions')
+
+          for key, rel in relpaths.items():
+              actual = checksum((root/rel).read_text(encoding='utf-8'))
+              expected = json.loads(manifest.read_text(encoding='utf-8'))['files'][rel]
+              assert actual == expected, f'AFTER_PATCH_LOCK_MISMATCH: {rel}'
+          print('SOURCE_HASHES_OK: 4 reviewed files')
+          PY
+          git diff --check
+          (cd native && node scripts/check-parity-source.mjs)
+      - name: Verify UI behavior, source lock, types and integrated WebView
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/android-ui-polish.test.cjs tests/connect-native-push-status-20261118.test.cjs tests/source-lock.test.cjs
+          npm run build:web
+          test -s src/generated/pwa.ts
+          npm run typecheck:web
+          npm run typecheck
+          npm test
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/check-parity-source.mjs
+      - name: Validate rendered screen in headless Chromium
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install playwright-core install --with-deps chromium
+          export CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          test -x "$CHROMIUM_PATH"
+          npm run test:browser
+      - name: Export Android OTA bundle matching the installed APK
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install expo export --platform android --output-dir "$RUNNER_TEMP/connect-notifications-layout-export"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          folder=Path(os.environ['RUNNER_TEMP'])/'connect-notifications-layout-export'
+          assert (folder/'metadata.json').is_file(),'Expo OTA metadata missing'
+          assert any(p.stat().st_size>100000 for p in [*folder.rglob('*.hbc'),*folder.rglob('*.js')]),'Android JS bundle missing'
+          expo=json.loads(Path('app.json').read_text(encoding='utf-8'))['expo']
+          assert expo['runtimeVersion']=='connect-android-ota-v1-sdk58'
+          assert expo['version']=='3.0.7' and expo['android']['versionCode']==25
+          assert expo['updates']['requestHeaders']['expo-channel-name']=='production'
+          assert Path('src/generated/pwa.ts').stat().st_size>100000
+          print('ANDROID_OTA_EXPORT_VERIFIED; no APK build required')
+          PY
+      - name: Commit all reviewed UI changes once after successful checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd native && node scripts/check-parity-source.mjs)
+          git add -- native/web/components/ConnectNotificationSettings.tsx native/web/components/ConnectNativePushStatus.tsx native/web/app/liquid-glass.css native/tests/android-ui-polish.test.cjs native/PARITY_SOURCE_LOCK.json
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'UI already installed; publishing a verified OTA retry.'
+          else
+            test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" || { echo '::error::main changed during CI; refusing to publish a stale build'; exit 1; }
+            git -c user.name='Connect CI' -c user.email='actions@users.noreply.github.com' commit -m 'Android: consolidate notification controls and status actions'
+            git push origin HEAD:main
+          fi
+      - name: Publish Android-only Expo OTA to production
+        working-directory: native
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}"
+          npx --yes eas-cli@27.6.0 channel:view production --non-interactive
+          npx --yes eas-cli@27.6.0 update --channel production --platform android --environment production --input-dir "$RUNNER_TEMP/connect-notifications-layout-export" --skip-bundler --message 'Connect Android: compact notification settings, sounds and status actions' --non-interactive
+          echo CONNECT_NOTIFICATIONS_LAYOUT_OTA_PUBLISHED=yes >> "$GITHUB_ENV"
+      - name: Release result
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Connect Android — notification screen redesign'
+            echo '- Two main switches; one sound block with separate sound controls and mute switches; two subscription actions inside the status card.'
+            echo '- PWA unaffected. Android signing, runtime, native binary and APK are unchanged.'
+            if [[ "${CONNECT_NOTIFICATIONS_LAYOUT_OTA_PUBLISHED:-}" == yes ]]; then
+              echo '- Expo Android OTA production: PUBLISHED. Restart Connect to fetch and apply the update.'
+            else
+              echo '- Expo Android OTA production: NOT CONFIRMED. Check the failed step; do not assume it reached a phone.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
