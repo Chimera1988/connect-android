@@ -7,6 +7,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
+import {checkConnectApkRelease,type ConnectApkCandidate} from './ConnectApkUpdates';
 import {WebView,WebViewMessageEvent} from 'react-native-webview';
 import notifee from '@notifee/react-native';
 import {db,mediaUrl,type Profile} from './backend';
@@ -41,6 +42,7 @@ function HybridConnect(){
   const voice=useConnectNativeVoice(ownerId,profiles,avatars),voiceRef=useRef(voice);voiceRef.current=voice;
   const otaState=Updates.useUpdates(),otaStateRef=useRef(otaState);otaStateRef.current=otaState;
   const otaDownloaded=useRef(false),recordingActive=useRef(false);
+  const apkCandidate=useRef<ConnectApkCandidate|null>(null);
   const currentToken=useRef(''),authQueue=useRef(Promise.resolve()),busy=useRef(new Set<string>());
   const send=useCallback((type:string,data:unknown)=>{
     if(!mounted.current)return;
@@ -184,7 +186,7 @@ function HybridConnect(){
       if(command.startsWith('calls:')&&command!=='calls:accept'&&p.callId&&p.callId!==v.shown?.id)throw Error('Этот звонок уже завершён');
       switch(command){
         case 'updates:info':{
-          result={version:Constants.expoConfig?.version||'неизвестна',build:Constants.platform?.android?.versionCode??null,
+          result={version:Constants.expoConfig?.version||'неизвестна',build:Constants.platform?.android?.versionCode??Constants.expoConfig?.android?.versionCode??null,
             enabled:Updates.isEnabled,pending:otaStateRef.current.isUpdatePending||otaDownloaded.current,
             channel:Updates.channel||null,runtime:Updates.runtimeVersion||null,embedded:Updates.isEmbeddedLaunch};break;
         }
@@ -208,6 +210,23 @@ function HybridConnect(){
           respond(true,{state:'restarting'});
           void Updates.reloadAsync().catch(error=>send('error',error instanceof Error?error.message:'Не удалось перезапустить Connect.'));
           return;
+        }
+        case 'updates:apk-check':{
+          const installedBuild=Number(Constants.platform?.android?.versionCode??Constants.expoConfig?.android?.versionCode??0);
+          const checked=await checkConnectApkRelease(installedBuild);
+          apkCandidate.current=checked.candidate??null;
+          result={state:checked.state,version:checked.version??null,build:checked.build??null,size:checked.size??null};
+          break;
+        }
+        case 'updates:apk-open':{
+          const apk=apkCandidate.current;
+          if(!apk||Date.now()-apk.checkedAt>10*60*1000)throw Error('Сначала заново проверьте обновление Android');
+          if(voiceRef.current.phase!=='idle'||recordingActive.current||saves.current.size||fileTransfers.current.size||AppState.currentState!=='active')
+            throw Error('Завершите звонок, запись или передачу файла перед открытием APK.');
+          // The URL was validated inside checkConnectApkRelease; WebView cannot supply a download URL.
+          await Linking.openURL(apk.url);
+          result={state:'opened'};
+          break;
         }
         case 'notification:diagnostics':if(!ownerId)throw Error('Войдите в Connect');result=await getNativePushDiagnostics();break;
         case 'media:waveform':{

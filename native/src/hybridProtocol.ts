@@ -12,7 +12,7 @@ const TONES = new Set(['soft', 'bright', 'gentle', 'silent', 'legacy-soft']);
 const KINDS = new Set(['call', 'message']);
 
 export type HybridCommand =
-  | 'updates:info' | 'updates:check' | 'updates:download' | 'updates:apply'
+  | 'updates:info' | 'updates:check' | 'updates:download' | 'updates:apply' | 'updates:apk-check' | 'updates:apk-open'
   | 'notification:diagnostics'
   | 'media:waveform'
   | 'calls:journal'
@@ -83,7 +83,7 @@ function payloadValid(command: string, value: unknown): boolean {
   if (command === 'session' && value === null) return true;
   if (!record(value)) return false;
   switch (command) {
-    case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':return fields(value,[]);
+    case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields(value,[]);
     case 'notification:diagnostics':return fields(value,[]);
     case 'media:waveform':return fields(value,['path'])&&text(value.path,1000,1)&&/^[a-fA-F0-9-]{36}\/[a-zA-Z0-9_./-]+$/.test(value.path as string)&&!(value.path as string).includes('..');
     case 'calls:journal':return fields(value,['userId','action'],['rows','at'])&&uuid(value.userId)&&['state','seed','view','close','reconcile'].includes(value.action as string)&&(value.rows===undefined||Array.isArray(value.rows)&&value.rows.length<=200&&value.rows.every(r=>record(r)&&fields(r,['id','conversation_id','caller_id','callee_id','status','created_at','answered_at','ended_at'],['hidden'])&&uuid(r.id)&&uuid(r.callee_id)&&uuid(r.caller_id)&&text(r.created_at,48,20)&&text(r.status,20)&&(r.answered_at===null||text(r.answered_at,48))&&(r.ended_at===null||text(r.ended_at,48))&&(r.hidden===undefined||typeof r.hidden==='boolean')))&&(value.at===undefined||Number.isFinite(value.at));

@@ -119,7 +119,7 @@
     "scripts/verify-call-resources.py": "cfe785d9a7692eb39abe251fc10b02301f1a345c5695dfb5ffbe8af652628980",
     "shared/call-missed-fixtures.tsv": "0709375ba37a6302c2ce6b3dbf8abc9d82ec1be20ea9b806c076a1ecf8fb6a00",
     "shared/call-missed-policy.json": "5289083182fbbb93de4cbd9d9987dac0ecfb21b86339468f09d25a2dd41122a8",
-    "src/App.tsx": "45f57d7cdfd62aa0e54d33331a24dee0df48041237b99eceea0db5e0dcc8518b",
+    "src/App.tsx": "23213b8b4a72c38ec88e204ff67032ce46f39aecebb89f9668dd002e2f7a2432",
     "src/ConnectHybridFiles.ts": "d18520aeba19011df591489da0fd9aff068d8d1f0eb9161671ccdf13a40237bc",
     "src/ConnectHybridRecorder.tsx": "277c5bf7bc244ae46d210609d3c450cefc991a3f7c2d6500b7facd41c8445c74",
     "src/ConnectNativeAlbum.tsx": "64f6603bfd13b0993f19085c101d09be8cc4b013f9669430402466eebd21b9b7",
@@ -156,7 +156,7 @@
     "src/call-journal.ts": "5e2e41b75340de126281df21eced7c7143c8bcc4080b3c35a8551b9aa681ecd3",
     "src/call-missed.ts": "446b5ba2322135d7685e57d0fa5adb5ece29978c1fb900730d51286c09cde520",
     "src/hybridMigration.ts": "12fe6b2c80300d9210f4ca679aef040afa0012e142dec38031290e65fdfa1be9",
-    "src/hybridProtocol.ts": "24d4bae9f50731f729be04681c87bcfbf50922ead53a15ea2f93c8f35ddfe4b8",
+    "src/hybridProtocol.ts": "bbc6ecf232e8cbba05a5a22ad34198123e08c038bad023666087396be1134dc3",
     "src/nativeAppUtils.ts": "da6d42c3b2041a19abb8527ebbeda2bc913f60f656530b597768b86f83c9248f",
     "src/nativeColorUtils.ts": "793dbc2419216e7ca5ba202f17b514967eb52553921ab470f4ed12c7afdd3c5c",
     "src/nativeMediaPreview.ts": "e35a3bfa73ecee52f2018d91c6aac6c3af9e4322ff3f56accfa876993620316a",
@@ -381,7 +381,9 @@
     "web/lib/avatar-directory-cache.ts": "4216e0f6ea2e30470509f9c0d5050f80eb6595b59eb3a512f51d50cb193fdd4b",
     "tests/android-media-egress.test.cjs": "fc4aa5cf7fb3409d58c99f9681fa01e813687699870cbc15fab209dd04d179fe",
     "tests/android-incoming-waveform.test.cjs": "89e46bd39844e870787560bb5c634641a6d2248a15c90d1528385c11c323a604",
-    "web/components/ConnectOtaSettings.tsx": "c439edc8c767f22f543ef34b40088fd2ef2c454fe8b4cb4317a63d85627e6166",
-    "tests/connect-ota-about-20261117.test.cjs": "76f33d3fe9e948a4df8bda9c0e346f6402488141064f12f401f9fe4058d967bb"
+    "web/components/ConnectOtaSettings.tsx": "42e305e1328ebcd8a887de220a2e5131f52916bbd0dc1f1f5bee452d968dcf30",
+    "tests/connect-ota-about-20261117.test.cjs": "6cd76182e46d704044c156a96282cd85a84ad2b3de0fe8b170dca1b3d27a7700",
+    "src/ConnectApkUpdates.ts": "4be722db05c1ddf843eb80bee0696518a194bc991d196ceee2b78b89fc9fdda3",
+    "tests/connect-apk-update-20261117.test.cjs": "6516ad063f4a56824b53474575870dddd9b8a5c68c30d65f876c242a1ec6b0f9"
   }
 }

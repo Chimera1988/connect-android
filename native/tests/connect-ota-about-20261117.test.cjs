@@ -14,7 +14,7 @@ test('strict nonce-bound bridge validates all four OTA commands with no arbitrar
     assert.match(proto,new RegExp("'updates:"+op+"'"));
     assert.match(app,new RegExp("case 'updates:"+op+"'"));
   }
-  assert.match(proto,/case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':return fields\(value,\[\]\)/);
+  assert.match(proto,/case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields\(value,\[\]\)/);
   assert.match(proto,/isTrustedHybridUrl\(sourceUrl\)/);
 });
 test('Expo OTA uses the installed production channel and unchanged 3.0.7 runtime',()=>{
