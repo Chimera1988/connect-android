@@ -75,6 +75,7 @@ jobs:
               'push':'web/components/ConnectNativePushStatus.tsx',
               'css':'web/app/liquid-glass.css',
               'tests':'tests/android-ui-polish.test.cjs',
+              'browser':'tests/browser-cache.tsx',
           }
           manifest = root / 'PARITY_SOURCE_LOCK.json'
           lock = json.loads(manifest.read_text(encoding='utf-8'))
@@ -279,7 +280,26 @@ jobs:
            assert.match(css,/CONNECT_ANDROID_NOTIFICATIONS_LAYOUT_20261118/);
           });
           '''
-              update = {'menu':menu,'push':push,'css':css,'tests':tests}
+              # Legacy integration test assumed two separate cards. Keep two independently
+              # functional sound controls while asserting ONE shared Liquid Glass card.
+              browser = text['browser']
+              browser = replace_once(browser,
+                  "for(let i=0;i<100&&(container.querySelectorAll('.connect-sound-card').length!==2||commands.filter(x=>x.kind==='preferences').length<2);i++)await delay();",
+                  "for(let i=0;i<100&&(container.querySelectorAll('.connect-sound-card.connect-sound-combined > .connect-sound-entry').length!==2||commands.filter(x=>x.kind==='preferences').length<2);i++)await delay();",
+                  'wait for two sound controls inside one card')
+              browser = replace_once(browser,
+                  "const cards=Array.from(container.querySelectorAll('.connect-sound-card')) as HTMLElement[];",
+                  "const cards=Array.from(container.querySelectorAll('.connect-sound-card.connect-sound-combined > .connect-sound-entry')) as HTMLElement[];",
+                  'query sound entries instead of top-level cards')
+              browser = replace_once(browser,
+                  "assert(cards.length===2,'expected exactly two Connect sound controls');",
+                  "assert(cards.length===2,'expected exactly two Connect sound controls inside one card');\n  assert(container.querySelectorAll('.connect-sound-card.connect-sound-combined').length===1,'sound controls must share one Liquid Glass card');\n  assert(container.querySelectorAll('.connect-sound-options input[role=\"switch\"]').length===2,'notification and vibration must be switches');\n  assert(cards.every(card=>card.querySelector('.connect-sound-mute input[role=\"switch\"]')),'each sound must have its own silent switch');",
+                  'check one card, two controls, four accessible switches')
+              browser = replace_once(browser,
+                  "if(!mute)throw new Error('message mute checkbox missing');mute.click();",
+                  "if(!mute)throw new Error('message mute switch missing');mute.click();",
+                  'updated silent switch description')
+              update = {'menu':menu,'push':push,'css':css,'tests':tests,'browser':browser}
               for k, rel in relpaths.items():
                   lock['files'][rel] = checksum(update[k])
               # Write only after all guarded string edits succeed.
@@ -292,7 +312,7 @@ jobs:
               actual = checksum((root/rel).read_text(encoding='utf-8'))
               expected = json.loads(manifest.read_text(encoding='utf-8'))['files'][rel]
               assert actual == expected, f'AFTER_PATCH_LOCK_MISMATCH: {rel}'
-          print('SOURCE_HASHES_OK: 4 reviewed files')
+          print('SOURCE_HASHES_OK: 5 reviewed files including Chromium integration')
           PY
           git diff --check
           (cd native && node scripts/check-parity-source.mjs)
@@ -347,7 +367,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd native && node scripts/check-parity-source.mjs)
-          git add -- native/web/components/ConnectNotificationSettings.tsx native/web/components/ConnectNativePushStatus.tsx native/web/app/liquid-glass.css native/tests/android-ui-polish.test.cjs native/PARITY_SOURCE_LOCK.json
+          git add -- native/web/components/ConnectNotificationSettings.tsx native/web/components/ConnectNativePushStatus.tsx native/web/app/liquid-glass.css native/tests/android-ui-polish.test.cjs native/tests/browser-cache.tsx native/PARITY_SOURCE_LOCK.json
           git diff --cached --check
           if git diff --cached --quiet; then
             echo 'UI already installed; publishing a verified OTA retry.'
