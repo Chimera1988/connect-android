@@ -136,6 +136,67 @@ jobs:
           node scripts/check-parity-source.mjs
           git diff --check
 
+      - name: Verify any packaged PEM is public X.509, never private signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, ast, re, subprocess, tempfile, io, zipfile
+
+          path=Path('native/scripts/verify-apk.py')
+          src=path.read_text()
+          old="    assert not any(n.lower().endswith(('.jks','.keystore','.p12','.pem')) for n in z.namelist()), 'Signing material must not be shipped'"
+          if src.count(old)!=1:
+              raise SystemExit('SOURCE_DRIFT: exact legacy APK credential verifier changed')
+          function='def audit_packaged_signing_material(archive):\n    """Reject any private credentials; permit only parseable public X.509/PEM keys."""\n    blocked_ext = (\'.jks\', \'.keystore\', \'.p12\', \'.pfx\', \'.key\')\n    pem_pattern = re.compile(rb\'-----BEGIN (CERTIFICATE|PUBLIC KEY|RSA PUBLIC KEY)-----\\s*\' \n                             rb\'[A-Za-z0-9+/=\\s]+?-----END \\1-----\')\n    for info in archive.infolist():\n        entry = info.filename\n        name = entry.lower()\n        if name.endswith(blocked_ext):\n            raise AssertionError(\'APK contains forbidden credential file: \' + entry)\n        if not name.endswith(\'.pem\'):\n            continue\n        content = archive.read(info)\n        if len(content) > 1048576 or b\'PRIVATE KEY\' in content.upper():\n            raise AssertionError(\'APK contains private or oversized PEM: \' + entry)\n        blocks = list(pem_pattern.finditer(content))\n        if not blocks or pem_pattern.sub(b\'\', content).strip():\n            raise AssertionError(\'APK contains unrecognized PEM material: \' + entry)\n        for match in blocks:\n            typ = match.group(1)\n            if typ == b\'CERTIFICATE\':\n                command = [\'openssl\', \'x509\', \'-inform\', \'PEM\', \'-noout\']\n            else:\n                command = [\'openssl\', \'pkey\', \'-pubin\', \'-inform\', \'PEM\', \'-noout\']\n            result = subprocess.run(command, input=match.group(0),\n                                    stdout=subprocess.DEVNULL,\n                                    stderr=subprocess.DEVNULL, check=False)\n            if result.returncode != 0:\n                raise AssertionError(\'APK contains malformed public PEM: \' + entry)\n        print(\'APK_PUBLIC_PEM_ONLY:\', entry, \'(\', len(blocks), \'validated public certificate/key blocks)\')'
+          marker="apk = Path(sys.argv[1]).resolve()"
+          if src.count(marker)!=1:
+              raise SystemExit('SOURCE_DRIFT: verifier entrypoint changed')
+          src=src.replace(marker,function+'\n\n'+marker,1)
+          src=src.replace(old,'    audit_packaged_signing_material(z)',1)
+          ast.parse(src)
+          path.write_text(src)
+          manifest=Path('native/PARITY_SOURCE_LOCK.json')
+          data=json.loads(manifest.read_text())
+          assert 'scripts/verify-apk.py' in data['files']
+          data['files']['scripts/verify-apk.py']=hashlib.sha256(path.read_bytes()).hexdigest()
+          manifest.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+
+          # Test the installed function independently using synthetic APK archives.
+          node=next(x for x in ast.parse(src).body if isinstance(x,ast.FunctionDef) and x.name=='audit_packaged_signing_material')
+          scope={'re':re,'subprocess':subprocess}
+          exec(compile(ast.Module(body=[node],type_ignores=[]),str(path),'exec'),scope)
+          audit=scope['audit_packaged_signing_material']
+          def check(member,payload,should_pass):
+              buff=io.BytesIO()
+              with zipfile.ZipFile(buff,'w') as z:
+                  z.writestr(member,payload)
+              buff.seek(0)
+              failed=False
+              with zipfile.ZipFile(buff) as z:
+                  try: audit(z)
+                  except AssertionError: failed=True
+              assert failed != should_pass, ('unexpected APK credential audit result',member,should_pass)
+          check('assets/my-private.jks',b'fake',False)
+          check('assets/my-private.p12',b'fake',False)
+          check('assets/my-private.pem',b'-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----',False)
+          check('assets/garbage.pem',b'fake',False)
+          check('assets/icons.png',b'ok',True)
+          with tempfile.TemporaryDirectory() as d:
+              from pathlib import Path as P
+              cert=P(d)/'public.pem'
+              key=P(d)/'private.key'
+              subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes',
+                              '-keyout',str(key),'-out',str(cert),'-subj','/CN=Connect Test',
+                              '-days','1'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+              check('assets/public-cert.pem',cert.read_bytes(),True)
+              check('assets/cert-in-disguise.pem',cert.read_bytes()+b'\nprivate key pasted',False)
+          print('Credential audit regression: 7 cases passed. Private material always rejected.')
+          PY
+          (cd native && node scripts/check-parity-source.mjs)
+          git diff --check
+
       - name: Install exact 3.0.7 package lock and check identity regressions
         shell: bash
         working-directory: native
