@@ -70,11 +70,21 @@ export default function ConnectNativePushStatus({userId,prefsEnabled,onEnable}:{
      <span className={'connect-web-push-indicator is-'+(state==='active'?'active':state==='checking'?'checking':state==='temporary'?'temporary':'unregistered')} aria-hidden="true"/>
      <div><strong>{labels[state]}</strong><small>{details[state]}</small>{state==='active'&&time&&<small>Подтверждено сервером: {time}</small>}</div>
    </div>
-   <button type="button" className="connect-sound-register" disabled={busy||state==='checking'} onClick={()=>void connect()}>
-     {busy?'Подключаем…':state==='active'?'Переподключить уведомления':'Подключить уведомления'}
-   </button>
-   {state==='active'&&<button type="button" className="connect-web-push-secondary" disabled={busy} onClick={()=>void testLocal()}>Проверить системное уведомление</button>}
    {testInfo&&<p role="status" className="connect-sound-status">{testInfo}</p>}
-   <small>Тест проверяет локальный канал уведомлений Android, а не доставку сообщения с сервера FCM.</small>
+   <div className="connect-native-push-actions" role="group" aria-label="Управление подпиской на уведомления">
+     <button type="button" className="connect-sound-register connect-native-push-action connect-native-push-action-primary"
+       aria-label={state==='active'?'Переподключить уведомления':'Подключить уведомления'}
+       disabled={busy||state==='checking'} onClick={()=>void connect()}>
+       <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.5 9a7.5 7.5 0 0 1 13-2L20 12"/><path d="M18.5 15a7.5 7.5 0 0 1-13 2L4 12"/></svg>
+       <span>{busy?'Подключаем…':state==='active'?'Переподключить':'Подключить'}</span>
+     </button>
+     <button type="button" className="connect-web-push-secondary connect-native-push-action"
+       title="Проверка локального канала Android, а не доставки уведомлений с сервера FCM"
+       aria-label="Проверить системное уведомление"
+       disabled={busy||state!=='active'} onClick={()=>void testLocal()}>
+       <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7"/></svg>
+       <span>Проверить</span>
+     </button>
+   </div>
  </div>;
 }

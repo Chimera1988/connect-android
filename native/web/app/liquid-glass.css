@@ -2867,3 +2867,87 @@
   width:100%;
   grid-template-columns:repeat(4,minmax(0,1fr));
 }
+
+/* CONNECT_ANDROID_NOTIFICATIONS_LAYOUT_20261118
+   Only the Android notification screen; leave all PWA diagnostics and navigation untouched. */
+.connect-app .connect-android-notification-settings .connect-sound-options {gap:0;padding:8px 16px;}
+.connect-app .connect-android-notification-settings .connect-sound-options .connect-sound-toggle {
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:nowrap;
+  width:100%;min-height:52px;gap:12px;padding:8px 2px;box-sizing:border-box;
+}
+.connect-app .connect-android-notification-settings .connect-sound-options .connect-sound-toggle + .connect-sound-toggle {
+  border-top:1px solid color-mix(in srgb,var(--v4-border,var(--border)) 65%,transparent);
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-row {
+  position:relative;display:flex;align-items:center;flex-wrap:nowrap;
+  gap:9px;cursor:pointer;user-select:none;min-width:0;
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"] {
+  position:absolute;right:0;top:50%;transform:translateY(-50%);
+  width:46px;height:28px;margin:0;opacity:0;z-index:1;cursor:pointer;
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-track {
+  display:inline-block;position:relative;flex:0 0 46px;width:46px;height:28px;
+  border-radius:999px;background:color-mix(in srgb,var(--glass-surface-strong,var(--panel)) 78%,#748194);
+  border:1px solid var(--v4-border,var(--border));box-sizing:border-box;
+  transition:background-color .18s ease,border-color .18s ease;
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-track::after {
+  content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;
+  background:#f4f7ff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.26);
+  transition:transform .18s ease;
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:checked + .connect-sound-switch-track {
+  background:var(--accent);border-color:var(--accent);
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:checked + .connect-sound-switch-track::after {
+  transform:translateX(18px);
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:focus-visible + .connect-sound-switch-track {
+  outline:2px solid var(--accent);outline-offset:3px;
+}
+.connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:disabled + .connect-sound-switch-track {opacity:.55;}
+.connect-app .connect-android-notification-settings .connect-sound-combined {gap:0;}
+.connect-app .connect-android-notification-settings .connect-sound-entry {display:flex;flex-direction:column;gap:12px;min-width:0;}
+.connect-app .connect-android-notification-settings .connect-sound-entry + .connect-sound-entry {
+  border-top:1px solid color-mix(in srgb,var(--v4-border,var(--border)) 70%,transparent);
+  margin-top:16px;padding-top:16px;
+}
+.connect-app .connect-android-notification-settings .connect-sound-topline {
+  display:flex;align-items:flex-start;justify-content:space-between;gap:9px;min-width:0;
+}
+.connect-app .connect-android-notification-settings .connect-sound-topline .connect-sound-heading {flex:1;min-width:0;}
+.connect-app .connect-android-notification-settings .connect-sound-topline .connect-sound-mute {
+  flex:0 0 auto;margin:0;padding:2px 0;white-space:nowrap;font-size:12px;color:var(--muted);
+}
+.connect-app .connect-android-notification-settings > .connect-native-push-check {
+  display:flex;flex-direction:column;align-items:stretch;flex-wrap:nowrap;
+  width:100%;gap:13px;padding:16px;border-radius:22px;box-sizing:border-box;
+  border:1px solid var(--v4-border,var(--border));
+  background:linear-gradient(135deg,
+    color-mix(in srgb,var(--wave-primary,var(--accent)) 9%,var(--glass-surface-strong,var(--panel))),
+    color-mix(in srgb,var(--wave-secondary,var(--accent)) 6%,var(--glass-surface-strong,var(--panel))));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+}
+.connect-app .connect-android-notification-settings .connect-native-push-check .connect-web-push-state {
+  border:0;background:transparent;box-shadow:none;padding:0;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+}
+.connect-app .connect-android-notification-settings .connect-native-push-actions {
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;width:100%;min-width:0;
+}
+.connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action {
+  display:flex!important;align-items:center!important;justify-content:center!important;gap:6px;
+  box-sizing:border-box;min-width:0;width:100%!important;min-height:44px!important;
+  padding:9px 6px!important;border-radius:14px!important;font-size:12px!important;
+  font-weight:650!important;line-height:1.2!important;white-space:nowrap;
+}
+.connect-app .connect-android-notification-settings .connect-native-push-actions .connect-native-push-action svg {flex:0 0 19px;}
+.connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action-primary {
+  color:white!important;background:var(--accent)!important;
+}
+.connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action:disabled {opacity:.52!important;}
+@media(max-width:380px) {
+  .connect-app .connect-android-notification-settings .connect-sound-topline .connect-sound-mute {gap:5px;font-size:11px;}
+  .connect-app .connect-android-notification-settings .connect-native-push-actions button.connect-native-push-action {font-size:11px!important;gap:4px;}
+}

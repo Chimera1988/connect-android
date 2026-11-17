@@ -159,33 +159,41 @@ function ConnectAndroidNotificationSettings({supabase,userId}:{supabase:Supabase
   }
   return <section className="connect-notifications connect-android-notification-settings" aria-label="Звуки и уведомления">
     <div className="connect-sound-options">
-      <label className="connect-sound-toggle"><input type="checkbox" checked={prefs.enabled} onChange={e=>save({...latest.current,enabled:e.target.checked})}/> Уведомления включены</label>
-      <label className="connect-sound-toggle"><input type="checkbox" checked={prefs.vibrate} onChange={e=>save({...latest.current,vibrate:e.target.checked})}/> Вибрация сообщений</label>
+      <label className="connect-sound-toggle connect-sound-switch-row"><span>Уведомления включены</span><input type="checkbox" role="switch" checked={prefs.enabled} onChange={e=>save({...latest.current,enabled:e.target.checked})}/><span className="connect-sound-switch-track" aria-hidden="true"/></label>
+      <label className="connect-sound-toggle connect-sound-switch-row"><span>Вибрация сообщений</span><input type="checkbox" role="switch" checked={prefs.vibrate} onChange={e=>save({...latest.current,vibrate:e.target.checked})}/><span className="connect-sound-switch-track" aria-hidden="true"/></label>
     </div>
     <div className="connect-android-sounds">
       <h3>Мелодии Connect</h3>
       <p className="connect-sound-hint">По умолчанию используются звуки Connect. При желании можно выбрать свою мелодию из файлов телефона.</p>
-      {sounds && (['call','message'] as const).map(kind=>{
+      {sounds && <div className="connect-sound-card connect-sound-combined">
+        {(['call','message'] as const).map(kind=>{
         const isCall=kind==='call',silent=isCall?sounds.callSilent:sounds.messageSilent;
         const custom=isCall?sounds.callCustom:sounds.messageCustom;
         const title=isCall?'Входящий аудиозвонок':'Сообщение';
         const current=isCall?sounds.call:sounds.message;
         const defaultName=isCall?'Connect — звонок':'Connect — сообщение';
-        return <div key={kind} className="connect-sound-card">
-          <div className="connect-sound-heading"><strong>{title}</strong><small>{silent?'Без звука':custom?current:defaultName}</small></div>
+        return <div key={kind} className="connect-sound-entry">
+          <div className="connect-sound-topline">
+            <div className="connect-sound-heading"><strong>{title}</strong><small>{custom?current:defaultName}</small></div>
+            <label className="connect-sound-mute connect-sound-switch-row">
+              <span>Без звука</span>
+              <input type="checkbox" role="switch" checked={silent} onChange={e=>{
+                const checked=e.currentTarget.checked;
+                setSounds(prev=>prev?{...prev,[isCall?'callSilent':'messageSilent']:checked}:prev);
+                window.ConnectAndroid?.setSilent(kind,checked);
+              }}/>
+              <span className="connect-sound-switch-track" aria-hidden="true"/>
+            </label>
+          </div>
           <div className="connect-sound-icon-row" role="group" aria-label={'Управление: '+title}>
             <button type="button" className="connect-sound-icon-button" title="Выбрать свою мелодию" aria-label={`Выбрать ${isCall?'мелодию звонка':'звук сообщения'}`} onClick={()=>window.ConnectAndroid?.pickSound(kind)}><SoundActionIcon name="choose"/></button>
             <button type="button" className="connect-sound-icon-button" title="Прослушать" aria-label={`Прослушать ${title.toLowerCase()}`} disabled={silent} onClick={()=>window.ConnectAndroid?.previewSound(kind)}><SoundActionIcon name="play"/></button>
             <button type="button" className="connect-sound-icon-button" title="Остановить" aria-label={`Остановить ${title.toLowerCase()}`} onClick={()=>window.ConnectAndroid?.stopPreviewSound()}><SoundActionIcon name="stop"/></button>
             <button type="button" className="connect-sound-icon-button" title="Вернуть звук Connect" aria-label={`Сбросить ${title.toLowerCase()} на звук Connect`} onClick={()=>{if(!isCall)save({...latest.current,sound:'soft'});window.ConnectAndroid?.resetSound(kind);}}><SoundActionIcon name="reset"/></button>
           </div>
-          <label className="connect-sound-mute"><input type="checkbox" checked={silent} onChange={e=>{
-            const checked=e.currentTarget.checked;
-            setSounds(prev=>prev?{...prev,[isCall?'callSilent':'messageSilent']:checked}:prev);
-            window.ConnectAndroid?.setSilent(kind,checked);
-          }}/> Без звука</label>
         </div>;
-      })}
+        })}
+      </div>}
     </div>
     {window.ConnectNative?<ConnectNativePushStatus userId={userId} prefsEnabled={prefs.enabled} onEnable={async()=>{
       if(latest.current.enabled)return;
@@ -203,6 +211,7 @@ function ConnectAndroidNotificationSettings({supabase,userId}:{supabase:Supabase
         {diagnostics&&<pre className="connect-sound-diagnostics">{diagnostics}</pre>}
       </>}
       <small>Android может ограничивать звук и вибрацию системными настройками. Приложение не обходит запреты устройства.</small>
+      <small>Проверка системного уведомления проверяет только локальный канал Android, но не доставку сообщений с сервера FCM.</small>
     </details>
   </section>;
 }

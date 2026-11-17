@@ -157,9 +157,12 @@ await test('Android compact Connect sounds migrate legacy choice and use native 
  let unmounted=false;
  try{
   root.render(<ConnectNotificationSettings supabase={client} userId={viewer}/>);
-  for(let i=0;i<100&&(container.querySelectorAll('.connect-sound-card').length!==2||commands.filter(x=>x.kind==='preferences').length<2);i++)await delay();
-  const cards=Array.from(container.querySelectorAll('.connect-sound-card')) as HTMLElement[];
-  assert(cards.length===2,'expected exactly two Connect sound controls');
+  for(let i=0;i<100&&(container.querySelectorAll('.connect-sound-card.connect-sound-combined > .connect-sound-entry').length!==2||commands.filter(x=>x.kind==='preferences').length<2);i++)await delay();
+  const cards=Array.from(container.querySelectorAll('.connect-sound-card.connect-sound-combined > .connect-sound-entry')) as HTMLElement[];
+  assert(cards.length===2,'expected exactly two Connect sound controls inside one card');
+  assert(container.querySelectorAll('.connect-sound-card.connect-sound-combined').length===1,'sound controls must share one Liquid Glass card');
+  assert(container.querySelectorAll('.connect-sound-options input[role="switch"]').length===2,'notification and vibration must be switches');
+  assert(cards.every(card=>card.querySelector('.connect-sound-mute input[role="switch"]')),'each sound must have its own silent switch');
   assert(!container.querySelector('#connect-sound'),'obsolete standard tone dropdown is still present');
   assert(!container.textContent?.includes('Яркий')&&!container.textContent?.includes('Нежный')&&!container.textContent?.includes('Мягкий (прежний)'),'obsolete presets are exposed');
   assert(container.textContent?.includes('Connect — звонок')&&container.textContent?.includes('Connect — сообщение'),'Connect default sound labels missing');
@@ -180,7 +183,7 @@ await test('Android compact Connect sounds migrate legacy choice and use native 
   assert(commands.some(x=>x.kind==='preview'&&x.value==='call'),'native call melody preview not called');
   assert(commands.some(x=>x.kind==='stop'),'native sound preview stop not called');
   const mute=message.querySelector('.connect-sound-mute input[type="checkbox"]') as HTMLInputElement|null;
-  if(!mute)throw new Error('message mute checkbox missing');mute.click();
+  if(!mute)throw new Error('message mute switch missing');mute.click();
   assert(commands.some(x=>x.kind==='mute'&&x.value==='message:true'),'native message mute was not applied');
   const reset=action(message,'Сбросить');if(!reset)throw new Error('message reset icon missing');reset.click();
   for(let i=0;i<50&&!writes.length;i++)await delay();

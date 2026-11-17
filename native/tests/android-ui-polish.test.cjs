@@ -56,3 +56,19 @@ test('unresolved custom stickers show loading rather than premature unavailable 
  assert.match(page,/connect-sticker-loading/);
  assert.doesNotMatch(page,/!st&&stickerCatalogReady\?<span>Стикер недоступен<\/span>/);
 });
+
+test('Android notification layout uses accessible switches, one melodies card and inset push controls',()=>{
+ const menu=read('web/components/ConnectNotificationSettings.tsx');
+ const push=read('web/components/ConnectNativePushStatus.tsx');
+ const css=read('web/app/liquid-glass.css');
+ assert.match(menu,/role="switch" checked=\{prefs\.enabled\}/);
+ assert.match(menu,/role="switch" checked=\{prefs\.vibrate\}/);
+ assert.match(menu,/role="switch" checked=\{silent\}/);
+ assert.match(menu,/className="connect-sound-card connect-sound-combined"/);
+ assert.match(menu,/className="connect-sound-entry"/);
+ assert.doesNotMatch(menu,/className="connect-sound-mute"><input type="checkbox"/);
+ assert.match(push,/className="connect-native-push-actions"/);
+ assert.match(push,/onClick=\{\(\)=>void connect\(\)\}/);
+ assert.match(push,/onClick=\{\(\)=>void testLocal\(\)\}/);
+ assert.match(css,/CONNECT_ANDROID_NOTIFICATIONS_LAYOUT_20261118/);
+});
