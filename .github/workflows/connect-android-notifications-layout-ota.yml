@@ -218,7 +218,7 @@ jobs:
             outline:2px solid var(--accent);outline-offset:3px;
           }
           .connect-app .connect-android-notification-settings .connect-sound-switch-row > input[type="checkbox"]:disabled + .connect-sound-switch-track {opacity:.55;}
-          .connect-app .connect-android-notification-settings .connect-sounds-combined {gap:0;}
+          .connect-app .connect-android-notification-settings .connect-sound-combined {gap:0;}
           .connect-app .connect-android-notification-settings .connect-sound-entry {display:flex;flex-direction:column;gap:12px;min-width:0;}
           .connect-app .connect-android-notification-settings .connect-sound-entry + .connect-sound-entry {
             border-top:1px solid color-mix(in srgb,var(--v4-border,var(--border)) 70%,transparent);
@@ -306,6 +306,11 @@ jobs:
           test -s src/generated/pwa.ts
           npm run typecheck:web
           npm run typecheck
+          # Full npm test includes a real Chromium media-optimizer test.
+          # Install the browser before the suite, not in the subsequent step.
+          npx --no-install playwright-core install --with-deps chromium
+          export CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          test -x "$CHROMIUM_PATH"
           npm test
           node scripts/verify-builtin-sounds.cjs
           node scripts/check-parity-source.mjs
@@ -314,7 +319,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --no-install playwright-core install --with-deps chromium
+          # Chromium was installed during the preceding full test step.
           export CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
           test -x "$CHROMIUM_PATH"
           npm run test:browser
