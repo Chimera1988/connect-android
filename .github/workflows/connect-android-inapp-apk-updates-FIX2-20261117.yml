@@ -1,0 +1,907 @@
+name: Connect Android | Trusted in-app APK releases 2026-11-17
+'on':
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: setup = first OTA + baseline release; publish-apk = promote a future signed Android build
+        type: choice
+        options:
+        - setup
+        - publish-apk
+        default: setup
+      source_run_id:
+        description: Successful signed APK workflow run ID (default verified 3.0.7)
+        type: string
+        default: '44152534236'
+      artifact_name:
+        description: Exact verified signed APK artifact name
+        type: string
+        default: Connect-Android-3.0.7-OTA-permanent-signed-candidate
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: connect-android-inapp-apk-updates
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Install trusted Android APK update checker and publish Expo OTA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
+      NEXT_PUBLIC_SUPABASE_URL: https://tpwkmoxxzjfdsqsomhhr.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tAg8rPwuBNcA2iPF7voc2Q_vsKUpyZa
+      EXPO_PUBLIC_CONNECT_URL: https://connect-chat.duckdns.org
+    steps:
+    - name: Checkout Connect Android main
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+        persist-credentials: true
+    - name: Preflight Expo credentials before changing reviewed Android sources
+      shell: bash
+      env:
+        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      run: |
+        set -euo pipefail
+        [[ -n "${EXPO_TOKEN:-}" ]] || { echo '::error::EXPO_TOKEN missing';exit 1; }
+    - name: Guard installed version, permanent runtime, and exact Expo project
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+        test "$GITHUB_REF" = 'refs/heads/main'
+        python3 - <<'PY'
+        import json
+        from pathlib import Path
+        r=Path('native')
+        for f in ['app.json','PARITY_SOURCE_LOCK.json','package-lock.json','src/App.tsx','web/app/page.tsx','src/hybridProtocol.ts']:
+         assert (r/f).is_file(),f'Missing source: {f}'
+        a=json.loads((r/'app.json').read_text())['expo']
+        assert a['android']['package']=='com.connect.messenger' and a['android']['versionCode']==25 and a['version']=='3.0.7'
+        assert a['runtimeVersion']=='connect-android-ota-v1-sdk58'
+        assert a['extra']['eas']['projectId']=='430c7f08-3921-48d5-96d1-f7c3d686d3bf'
+        assert a['updates']['url']=='https://u.expo.dev/430c7f08-3921-48d5-96d1-f7c3d686d3bf'
+        assert a['updates']['requestHeaders']['expo-channel-name']=='production' and a['updates']['enabled']
+        print('Installed Android 3.0.7 (25) and Expo production runtime unchanged')
+        PY
+    - name: Install Node.js 24
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: native/package-lock.json
+    - name: Verify existing locked Android sources
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm ci --no-audit --no-fund
+        node scripts/check-parity-source.mjs
+      working-directory: native
+    - name: Install exact native bridge, About update UI and strict source hashes
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$(dirname native/web/components/ConnectOtaSettings.tsx)"
+        base64 --decode > native/web/components/ConnectOtaSettings.tsx <<'B64_PAYLOAD_FILE'
+        aW1wb3J0IHt1c2VFZmZlY3QsdXNlU3RhdGV9IGZyb20gJ3JlYWN0JzsKCnR5cGUgT3RhSW5mbz17dmVyc2lvbjpzdHJpbmc7YnVp
+        bGQ6bnVtYmVyfG51bGw7ZW5hYmxlZDpib29sZWFuO3BlbmRpbmc6Ym9vbGVhbjtjaGFubmVsOnN0cmluZ3xudWxsO3J1bnRpbWU6
+        c3RyaW5nfG51bGw7ZW1iZWRkZWQ6Ym9vbGVhbn07CnR5cGUgT3RhU3RhdGU9J2xvYWRpbmcnfCdpZGxlJ3wnY2hlY2tpbmcnfCdj
+        dXJyZW50J3wnYXZhaWxhYmxlJ3wnZG93bmxvYWRpbmcnfCdyZWFkeSd8J3Jlc3RhcnRpbmcnfCdkaXNhYmxlZCd8J2Vycm9yJzsK
+        Ci8qKiBVc2VzIHRoZSBhdXRoZW50aWNhdGVkLCBub25jZS1ib3VuZCBBbmRyb2lkIGJyaWRnZS4gTmV2ZXIgZmV0Y2ggRXhwbyBV
+        UkxzIGZyb20gV2ViVmlldy4gKi8KZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gQ29ubmVjdE90YVNldHRpbmdzKCl7CiAgY29uc3Qg
+        W2luZm8sc2V0SW5mb109dXNlU3RhdGU8T3RhSW5mb3xudWxsPihudWxsKTsKICBjb25zdCBbc3RhdGUsc2V0U3RhdGVdPXVzZVN0
+        YXRlPE90YVN0YXRlPignbG9hZGluZycpOwogIGNvbnN0IFtlcnJvcixzZXRFcnJvcl09dXNlU3RhdGUoJycpOwogIHVzZUVmZmVj
+        dCgoKT0+ewogICAgbGV0IGFsaXZlPXRydWU7CiAgICBjb25zdCBicmlkZ2U9d2luZG93LkNvbm5lY3ROYXRpdmU7CiAgICBpZigh
+        YnJpZGdlKXtzZXRTdGF0ZSgnZGlzYWJsZWQnKTtyZXR1cm47fQogICAgdm9pZCBicmlkZ2UucmVxdWVzdCgndXBkYXRlczppbmZv
+        Jyx7fSkudGhlbigodmFsdWU6T3RhSW5mbyk9PnsKICAgICAgaWYoIWFsaXZlKXJldHVybjsKICAgICAgc2V0SW5mbyh2YWx1ZSk7
+        CiAgICAgIHNldFN0YXRlKCF2YWx1ZS5lbmFibGVkPydkaXNhYmxlZCc6dmFsdWUucGVuZGluZz8ncmVhZHknOidpZGxlJyk7CiAg
+        ICB9KS5jYXRjaCgocmVhc29uOnVua25vd24pPT57CiAgICAgIGlmKCFhbGl2ZSlyZXR1cm47CiAgICAgIHNldEVycm9yKHJlYXNv
+        biBpbnN0YW5jZW9mIEVycm9yP3JlYXNvbi5tZXNzYWdlOifQndC1INGD0LTQsNC70L7RgdGMINC/0YDQvtCy0LXRgNC40YLRjCDR
+        gdC+0YHRgtC+0Y/QvdC40LUg0L7QsdC90L7QstC70LXQvdC40LkuJyk7CiAgICAgIHNldFN0YXRlKCdlcnJvcicpOwogICAgfSk7
+        CiAgICByZXR1cm4oKT0+e2FsaXZlPWZhbHNlO307CiAgfSxbXSk7CiAgYXN5bmMgZnVuY3Rpb24gcnVuKGNvbW1hbmQ6J3VwZGF0
+        ZXM6Y2hlY2snfCd1cGRhdGVzOmRvd25sb2FkJ3wndXBkYXRlczphcHBseScpewogICAgY29uc3QgYnJpZGdlPXdpbmRvdy5Db25u
+        ZWN0TmF0aXZlOwogICAgaWYoIWJyaWRnZSlyZXR1cm47CiAgICBzZXRFcnJvcignJyk7CiAgICBzZXRTdGF0ZShjb21tYW5kPT09
+        J3VwZGF0ZXM6Y2hlY2snPydjaGVja2luZyc6Y29tbWFuZD09PSd1cGRhdGVzOmRvd25sb2FkJz8nZG93bmxvYWRpbmcnOidyZXN0
+        YXJ0aW5nJyk7CiAgICB0cnl7CiAgICAgIGNvbnN0IHJlc3BvbnNlPWF3YWl0IGJyaWRnZS5yZXF1ZXN0KGNvbW1hbmQse30pOwog
+        ICAgICBpZihjb21tYW5kPT09J3VwZGF0ZXM6YXBwbHknKXJldHVybjsgLy8gQSBzdWNjZXNzZnVsIGFwcGx5IHJlc3RhcnRzIHRo
+        ZSBuYXRpdmUgYXBwLgogICAgICBjb25zdCBuZXh0PXJlc3BvbnNlPy5zdGF0ZTsKICAgICAgaWYobmV4dD09PSdhdmFpbGFibGUn
+        fHxuZXh0PT09J3JlYWR5J3x8bmV4dD09PSdjdXJyZW50JylzZXRTdGF0ZShuZXh0KTsKICAgICAgZWxzZSB0aHJvdyBFcnJvcign
+        QW5kcm9pZCDQstC10YDQvdGD0Lsg0L3QtdC40LfQstC10YHRgtC90L7QtSDRgdC+0YHRgtC+0Y/QvdC40LUg0L7QsdC90L7QstC7
+        0LXQvdC40Y8uJyk7CiAgICB9Y2F0Y2gocmVhc29uKXsKICAgICAgc2V0RXJyb3IocmVhc29uIGluc3RhbmNlb2YgRXJyb3I/cmVh
+        c29uLm1lc3NhZ2U6J9Cd0LUg0YPQtNCw0LvQvtGB0Ywg0LLRi9C/0L7Qu9C90LjRgtGMINC+0LHQvdC+0LLQu9C10L3QuNC1Licp
+        OwogICAgICBzZXRTdGF0ZSgnZXJyb3InKTsKICAgIH0KICB9CiAgY29uc3QgcHJvZ3Jlc3M9c3RhdGU9PT0nY2hlY2tpbmcnfHxz
+        dGF0ZT09PSdkb3dubG9hZGluZyd8fHN0YXRlPT09J3Jlc3RhcnRpbmcnOwogIGNvbnN0IHN0YXR1cz1zdGF0ZT09PSdsb2FkaW5n
+        Jz8n0J/QvtC70YPRh9Cw0LXQvCDRgdCy0LXQtNC10L3QuNGPINC+INCy0LXRgNGB0LjQuOKApic6CiAgICBzdGF0ZT09PSdjaGVj
+        a2luZyc/J9Cf0YDQvtCy0LXRgNGP0LXQvCDQvtCx0L3QvtCy0LvQtdC90LjRj+KApic6c3RhdGU9PT0nZG93bmxvYWRpbmcnPyfQ
+        odC60LDRh9C40LLQsNC10Lwg0L/RgNC+0LLQtdGA0LXQvdC90L7QtSDQvtCx0L3QvtCy0LvQtdC90LjQteKApic6CiAgICBzdGF0
+        ZT09PSdyZXN0YXJ0aW5nJz8n0J/QtdGA0LXQt9Cw0L/Rg9GB0LrQsNC10LwgQ29ubmVjdOKApic6c3RhdGU9PT0nYXZhaWxhYmxl
+        Jz8n0JTQvtGB0YLRg9C/0L3QviDRgdC+0LLQvNC10YHRgtC40LzQvtC1INC+0LHQvdC+0LLQu9C10L3QuNC1INC40L3RgtC10YDR
+        hNC10LnRgdCwLic6CiAgICBzdGF0ZT09PSdyZWFkeSc/J9Ce0LHQvdC+0LLQu9C10L3QuNC1INC30LDQs9GA0YPQttC10L3QviDQ
+        uCDQs9C+0YLQvtCy0L4g0Log0L/RgNC40LzQtdC90LXQvdC40Y4uJzoKICAgIHN0YXRlPT09J2N1cnJlbnQnPyfQntCx0L3QvtCy
+        0LvQtdC90LjQuSDQuNC90YLQtdGA0YTQtdC50YHQsCDQv9C+0LrQsCDQvdC10YIuJzoKICAgIHN0YXRlPT09J2Rpc2FibGVkJz8n
+        0JDQstGC0L7QvNCw0YLQuNGH0LXRgdC60LjQtSDQvtCx0L3QvtCy0LvQtdC90LjRjyDQvdC10LTQvtGB0YLRg9C/0L3RiyDQsiDR
+        jdGC0L7QuSDRgdCx0L7RgNC60LUuJzoKICAgIHN0YXRlPT09J2Vycm9yJz9lcnJvcjon0J/RgNC+0LLQtdGA0LrQsCDQvtCx0L3Q
+        vtCy0LvQtdC90LjQuSDQtNC+0YHRgtGD0L/QvdCwLic7CiAgcmV0dXJuIDxkaXYgY2xhc3NOYW1lPSJzZXR0aW5ncy1ncm91cCBk
+        YXRhLXNldHRpbmdzIGNvbm5lY3Qtb3RhLWFib3V0Ij4KICAgIDxzdHJvbmc+Q29ubmVjdCBNZXNzZW5nZXI8L3N0cm9uZz4KICAg
+        IDxwPtCS0LXRgNGB0LjRjyB7aW5mbz8udmVyc2lvbj8oaW5mby5idWlsZD09PW51bGw/aW5mby52ZXJzaW9uOmAke2luZm8udmVy
+        c2lvbn0gKCR7aW5mby5idWlsZH0pYCk6J9C+0L/RgNC10LTQtdC70Y/QtdGC0YHRj+KApid9PC9wPgogICAgPHA+PHN0cm9uZz7Q
+        oNCw0LfRgNCw0LHQvtGC0YfQuNC60Lg6INCQ0LvQuNC90LAg0Lgg0JrQuNGA0LjQu9C7PC9zdHJvbmc+PC9wPgogICAgPHAgY2xh
+        c3NOYW1lPSJzZXR0aW5ncy1oaW50Ij7QnNC10YHRgdC10L3QtNC20LXRgCDQtNC70Y8g0LvQuNGH0L3QvtCz0L4g0L7QsdGJ0LXQ
+        vdC40Y8uPC9wPgogICAgPGRpdiBjbGFzc05hbWU9ImNvbm5lY3Qtb3RhLXJ1bGUiLz4KICAgIDxzdHJvbmc+0J7QsdC90L7QstC7
+        0LXQvdC40LUg0L/RgNC40LvQvtC20LXQvdC40Y88L3N0cm9uZz4KICAgIDxwIGNsYXNzTmFtZT0ic2V0dGluZ3MtaGludCI+0JjR
+        gdC/0YDQsNCy0LvQtdC90LjRjyDQuNC90YLQtdGA0YTQtdC50YHQsCDQt9Cw0LPRgNGD0LbQsNGO0YLRgdGPINC/0L4g0LLQvtC3
+        0LTRg9GF0YMuINCd0L7QstGL0LUg0YHQuNGB0YLQtdC80L3Ri9C1INCy0L7Qt9C80L7QttC90L7RgdGC0LggQW5kcm9pZCDQv9C+
+        LdC/0YDQtdC20L3QtdC80YMg0YLRgNC10LHRg9GO0YIg0L7RgtC00LXQu9GM0L3QvtCz0L4gQVBLLjwvcD4KICAgIDxwIGNsYXNz
+        TmFtZT0iY29ubmVjdC1vdGEtc3RhdHVzIiByb2xlPSJzdGF0dXMiIGFyaWEtbGl2ZT0icG9saXRlIj57c3RhdHVzfTwvcD4KICAg
+        IHtzdGF0ZT09PSdyZWFkeSc/PGJ1dHRvbiB0eXBlPSJidXR0b24iIGNsYXNzTmFtZT0ic2V0dGluZ3MtYWN0aW9uIiBkaXNhYmxl
+        ZD17cHJvZ3Jlc3N9IG9uQ2xpY2s9eygpPT52b2lkIHJ1bigndXBkYXRlczphcHBseScpfT7Qn9GA0LjQvNC10L3QuNGC0Ywg0Lgg
+        0L/QtdGA0LXQt9Cw0L/Rg9GB0YLQuNGC0Yw8L2J1dHRvbj46CiAgICAgIHN0YXRlPT09J2F2YWlsYWJsZSc/PGJ1dHRvbiB0eXBl
+        PSJidXR0b24iIGNsYXNzTmFtZT0ic2V0dGluZ3MtYWN0aW9uIiBkaXNhYmxlZD17cHJvZ3Jlc3N9IG9uQ2xpY2s9eygpPT52b2lk
+        IHJ1bigndXBkYXRlczpkb3dubG9hZCcpfT7QodC60LDRh9Cw0YLRjCDQvtCx0L3QvtCy0LvQtdC90LjQtTwvYnV0dG9uPjoKICAg
+        ICAgc3RhdGUhPT0nZGlzYWJsZWQnJiZzdGF0ZSE9PSdsb2FkaW5nJyYmc3RhdGUhPT0ncmVzdGFydGluZyc/PGJ1dHRvbiB0eXBl
+        PSJidXR0b24iIGNsYXNzTmFtZT0ic2V0dGluZ3MtYWN0aW9uIiBkaXNhYmxlZD17cHJvZ3Jlc3N9IG9uQ2xpY2s9eygpPT52b2lk
+        IHJ1bigndXBkYXRlczpjaGVjaycpfT7Qn9GA0L7QstC10YDQuNGC0Ywg0L7QsdC90L7QstC70LXQvdC40Y88L2J1dHRvbj46bnVs
+        bH0KICAgIHtpbmZvPy5lbmFibGVkJiY8cCBjbGFzc05hbWU9InNldHRpbmdzLWhpbnQiPtCa0LDQvdCw0Ls6IHtpbmZvLmNoYW5u
+        ZWx8fCfQvdC10LjQt9Cy0LXRgdGC0LXQvSd9LiDQn9GA0Lgg0L7QsdGL0YfQvdC+0Lwg0LfQsNC/0YPRgdC60LUgQ29ubmVjdCDR
+        gtCw0LrQttC1INCw0LLRgtC+0LzQsNGC0LjRh9C10YHQutC4INC/0YDQvtCy0LXRgNGP0LXRgiDQvdCw0LvQuNGH0LjQtSDQvtCx
+        0L3QvtCy0LvQtdC90LjQuS48L3A+fQogIDwvZGl2PjsKfQo=
+        B64_PAYLOAD_FILE
+        mkdir -p "$(dirname native/tests/connect-ota-about-20261117.test.cjs)"
+        base64 --decode > native/tests/connect-ota-about-20261117.test.cjs <<'B64_PAYLOAD_FILE'
+        Y29uc3Qge3Rlc3R9PXJlcXVpcmUoJ25vZGU6dGVzdCcpLGFzc2VydD1yZXF1aXJlKCdub2RlOmFzc2VydC9zdHJpY3QnKSxmcz1y
+        ZXF1aXJlKCdub2RlOmZzJykscGF0aD1yZXF1aXJlKCdub2RlOnBhdGgnKTsKY29uc3Qgcm9vdD1wYXRoLnJlc29sdmUoX19kaXJu
+        YW1lLCcuLicpLHJlYWQ9cD0+ZnMucmVhZEZpbGVTeW5jKHBhdGguam9pbihyb290LHApLCd1dGY4Jyk7CmNvbnN0IGFwcD1yZWFk
+        KCdzcmMvQXBwLnRzeCcpLHByb3RvPXJlYWQoJ3NyYy9oeWJyaWRQcm90b2NvbC50cycpLHdlYj1yZWFkKCd3ZWIvYXBwL3BhZ2Uu
+        dHN4JyksdWk9cmVhZCgnd2ViL2NvbXBvbmVudHMvQ29ubmVjdE90YVNldHRpbmdzLnRzeCcpOwpjb25zdCBjZmc9SlNPTi5wYXJz
+        ZShyZWFkKCdhcHAuanNvbicpKS5leHBvLGxvY2s9SlNPTi5wYXJzZShyZWFkKCdQQVJJVFlfU09VUkNFX0xPQ0suanNvbicpKTsK
+        dGVzdCgnQ29ubmVjdCBBbmRyb2lkIEFib3V0IG5ldmVyIHVzZXMgYSBzdGFsZSBsaXRlcmFsIHZlcnNpb24nLCgpPT57CiAgYXNz
+        ZXJ0LmRvZXNOb3RNYXRjaCh3ZWIsL9CS0LXRgNGB0LjRjyAzXC4wXC42IFwoMjRcKS8pOwogIGFzc2VydC5tYXRjaCh3ZWIsLzxD
+        b25uZWN0T3RhU2V0dGluZ3NcLz4vKTsKICBhc3NlcnQubWF0Y2goYXBwLC9Db25zdGFudHNcLmV4cG9Db25maWdcP1wudmVyc2lv
+        bi8pOwogIGFzc2VydC5tYXRjaChhcHAsL0NvbnN0YW50c1wucGxhdGZvcm1cP1wuYW5kcm9pZFw/XC52ZXJzaW9uQ29kZS8pOwog
+        IGFzc2VydC5tYXRjaCh1aSwv0JLQtdGA0YHQuNGPIFx7aW5mb1w/XC52ZXJzaW9uLyk7Cn0pOwp0ZXN0KCdzdHJpY3Qgbm9uY2Ut
+        Ym91bmQgYnJpZGdlIHZhbGlkYXRlcyBhbGwgZm91ciBPVEEgY29tbWFuZHMgd2l0aCBubyBhcmJpdHJhcnkgcGF5bG9hZCcsKCk9
+        PnsKICBmb3IoY29uc3Qgb3Agb2YgWydpbmZvJywnY2hlY2snLCdkb3dubG9hZCcsJ2FwcGx5J10pewogICAgYXNzZXJ0Lm1hdGNo
+        KHByb3RvLG5ldyBSZWdFeHAoIid1cGRhdGVzOiIrb3ArIiciKSk7CiAgICBhc3NlcnQubWF0Y2goYXBwLG5ldyBSZWdFeHAoImNh
+        c2UgJ3VwZGF0ZXM6IitvcCsiJyIpKTsKICB9CiAgYXNzZXJ0Lm1hdGNoKHByb3RvLC9jYXNlICd1cGRhdGVzOmluZm8nOmNhc2Ug
+        J3VwZGF0ZXM6Y2hlY2snOmNhc2UgJ3VwZGF0ZXM6ZG93bmxvYWQnOmNhc2UgJ3VwZGF0ZXM6YXBwbHknOnJldHVybiBmaWVsZHNc
+        KHZhbHVlLFxbXF1cKS8pOwogIGFzc2VydC5tYXRjaChwcm90bywvaXNUcnVzdGVkSHlicmlkVXJsXChzb3VyY2VVcmxcKS8pOwp9
+        KTsKdGVzdCgnRXhwbyBPVEEgdXNlcyB0aGUgaW5zdGFsbGVkIHByb2R1Y3Rpb24gY2hhbm5lbCBhbmQgdW5jaGFuZ2VkIDMuMC43
+        IHJ1bnRpbWUnLCgpPT57CiAgYXNzZXJ0LmVxdWFsKGNmZy5hbmRyb2lkLnBhY2thZ2UsJ2NvbS5jb25uZWN0Lm1lc3Nlbmdlcicp
+        OwogIGFzc2VydC5lcXVhbChjZmcudmVyc2lvbiwnMy4wLjcnKTthc3NlcnQuZXF1YWwoY2ZnLmFuZHJvaWQudmVyc2lvbkNvZGUs
+        MjUpOwogIGFzc2VydC5lcXVhbChjZmcucnVudGltZVZlcnNpb24sJ2Nvbm5lY3QtYW5kcm9pZC1vdGEtdjEtc2RrNTgnKTsKICBh
+        c3NlcnQuZXF1YWwoY2ZnLnVwZGF0ZXMucmVxdWVzdEhlYWRlcnNbJ2V4cG8tY2hhbm5lbC1uYW1lJ10sJ3Byb2R1Y3Rpb24nKTsK
+        ICBhc3NlcnQuZXF1YWwoY2ZnLmV4dHJhLmVhcy5wcm9qZWN0SWQsJzQzMGM3ZjA4LTM5MjEtNDhkNS05NmQxLWY3YzNkNjg2ZDNi
+        ZicpOwogIGFzc2VydC5tYXRjaChhcHAsL1VwZGF0ZXNcLmNoZWNrRm9yVXBkYXRlQXN5bmNcKFwpLyk7CiAgYXNzZXJ0Lm1hdGNo
+        KGFwcCwvVXBkYXRlc1wuZmV0Y2hVcGRhdGVBc3luY1woXCkvKTsKICBhc3NlcnQubWF0Y2goYXBwLC9VcGRhdGVzXC5yZWxvYWRB
+        c3luY1woXCkvKTsKfSk7CnRlc3QoJ0EgYnVzeSBjYWxsIG9yIHJlY29yZGluZyBwcmV2ZW50cyB1bmV4cGVjdGVkIE9UQSByZXN0
+        YXJ0JywoKT0+ewogIGFzc2VydC5tYXRjaChhcHAsL3ZvaWNlUmVmXC5jdXJyZW50XC5waGFzZSE9PVx4MjdpZGxlXHgyN1x8XHxy
+        ZWNvcmRpbmdBY3RpdmVcLmN1cnJlbnQvKTsKICBhc3NlcnQubWF0Y2goYXBwLC9zYXZlc1wuY3VycmVudFwuc2l6ZVx8XHxmaWxl
+        VHJhbnNmZXJzXC5jdXJyZW50XC5zaXplLyk7CiAgYXNzZXJ0Lm1hdGNoKHVpLC/Qn9GA0LjQvNC10L3QuNGC0Ywg0Lgg0L/QtdGA
+        0LXQt9Cw0L/Rg9GB0YLQuNGC0YwvKTsKICBhc3NlcnQubWF0Y2godWksL9Ce0LHQvdC+0LLQu9C10L3QuNGPINC/0L4g0LLQvtC3
+        0LTRg9GF0YN80J7QsdC90L7QstC70LXQvdC40LUg0L/RgNC40LvQvtC20LXQvdC40Y8vKTsKfSk7CnRlc3QoJ05vIHByaXZhdGUg
+        RXhwbyBjcmVkZW50aWFscyBvciByZW1vdGUgV2ViVmlldyBpbmplY3RlZCBpbiBPVEEgVUknLCgpPT57CiAgYXNzZXJ0LmRvZXNO
+        b3RNYXRjaCh1aSwvRVhQT19UT0tFTnxTRVJWSUNFX1JPTEVfS0VZfGZldGNoXCgvKTsKICBhc3NlcnQubWF0Y2godWksL3dpbmRv
+        d1wuQ29ubmVjdE5hdGl2ZS8pOwogIGFzc2VydC5tYXRjaChhcHAsL2Jhc2VVcmw6Q09OTkVDVF9PUklHSU4vKTsKfSk7CnRlc3Qo
+        J0FsbCBjaGFuZ2VkIGFuZCBuZXdseSBhZGRlZCBzb3VyY2VzIGFyZSBpbiB0aGUgaW50ZWdyaXR5IGxvY2snLCgpPT57CiAgY29u
+        c3QgY3J5cHRvPXJlcXVpcmUoJ25vZGU6Y3J5cHRvJyk7CiAgZm9yKGNvbnN0IG5hbWUgb2YgWydzcmMvQXBwLnRzeCcsJ3NyYy9o
+        eWJyaWRQcm90b2NvbC50cycsJ3dlYi9hcHAvcGFnZS50c3gnLCd3ZWIvaHlicmlkL2FuZHJvaWQuY3NzJywnd2ViL2NvbXBvbmVu
+        dHMvQ29ubmVjdE90YVNldHRpbmdzLnRzeCcsJ3BhY2thZ2UuanNvbicsJ3BhY2thZ2UtbG9jay5qc29uJywndGVzdHMvY29ubmVj
+        dC1vdGEtYWJvdXQtMjAyNjExMTcudGVzdC5janMnXSl7CiAgICBhc3NlcnQuZXF1YWwobG9jay5maWxlc1tuYW1lXSxjcnlwdG8u
+        Y3JlYXRlSGFzaCgnc2hhMjU2JykudXBkYXRlKGZzLnJlYWRGaWxlU3luYyhwYXRoLmpvaW4ocm9vdCxuYW1lKSkpLmRpZ2VzdCgn
+        aGV4JyksbmFtZSk7CiAgfQogIGFzc2VydC5vayhPYmplY3Qua2V5cyhsb2NrLmZpbGVzKS5sZW5ndGg+PTM3NSk7Cn0pOwo=
+        B64_PAYLOAD_FILE
+        mkdir -p "$(dirname "$RUNNER_TEMP/ota-about-patch.py")"
+        base64 --decode > "$RUNNER_TEMP/ota-about-patch.py" <<'B64_PAYLOAD_FILE'
+        ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBoYXNobGliLGpzb24sc3VicHJvY2VzcyxyZQpyb290PVBhdGgoJ25h
+        dGl2ZScpCgpkZWYgcmVwbGFjZV9vbmNlKHJlbCxvbGQsbmV3KToKICAgIGY9cm9vdC9yZWwKICAgIGNvbnRlbnQ9Zi5yZWFk
+        X3RleHQoZW5jb2Rpbmc9J3V0Zi04JykKICAgIGhpdHM9Y29udGVudC5jb3VudChvbGQpCiAgICBpZiBuZXcgaW4gY29udGVu
+        dDogcHJpbnQoJ0FMUkVBRFlfUEFUQ0hFRCcscmVsKQogICAgZWxpZiBoaXRzPT0xOiBmLndyaXRlX3RleHQoY29udGVudC5y
+        ZXBsYWNlKG9sZCxuZXcsMSksZW5jb2Rpbmc9J3V0Zi04JykKICAgIGVsc2U6IHJhaXNlIFN5c3RlbUV4aXQoZidTT1VSQ0Vf
+        RFJJRlQ6IHtyZWx9IG9sZD17aGl0c30gbmV3PXtuZXcgaW4gY29udGVudH0nKQoKYXBwPSdzcmMvQXBwLnRzeCcKcmVwbGFj
+        ZV9vbmNlKGFwcCwiaW1wb3J0ICogYXMgU2VjdXJlU3RvcmUgZnJvbSAnZXhwby1zZWN1cmUtc3RvcmUnOyIsICJpbXBvcnQg
+        KiBhcyBTZWN1cmVTdG9yZSBmcm9tICdleHBvLXNlY3VyZS1zdG9yZSc7XG5pbXBvcnQgQ29uc3RhbnRzIGZyb20gJ2V4cG8t
+        Y29uc3RhbnRzJztcbmltcG9ydCAqIGFzIFVwZGF0ZXMgZnJvbSAnZXhwby11cGRhdGVzJzsiKQpyZXBsYWNlX29uY2UoYXBw
+        LCIgIGNvbnN0IHZvaWNlPXVzZUNvbm5lY3ROYXRpdmVWb2ljZShvd25lcklkLHByb2ZpbGVzLGF2YXRhcnMpLHZvaWNlUmVm
+        PXVzZVJlZih2b2ljZSk7dm9pY2VSZWYuY3VycmVudD12b2ljZTsiLCAiICBjb25zdCB2b2ljZT11c2VDb25uZWN0TmF0aXZl
+        Vm9pY2Uob3duZXJJZCxwcm9maWxlcyxhdmF0YXJzKSx2b2ljZVJlZj11c2VSZWYodm9pY2UpO3ZvaWNlUmVmLmN1cnJlbnQ9
+        dm9pY2U7XG4gIGNvbnN0IG90YVN0YXRlPVVwZGF0ZXMudXNlVXBkYXRlcygpLG90YVN0YXRlUmVmPXVzZVJlZihvdGFTdGF0
+        ZSk7b3RhU3RhdGVSZWYuY3VycmVudD1vdGFTdGF0ZTtcbiAgY29uc3Qgb3RhRG93bmxvYWRlZD11c2VSZWYoZmFsc2UpLHJl
+        Y29yZGluZ0FjdGl2ZT11c2VSZWYoZmFsc2UpOyIpCnJlcGxhY2Vfb25jZShhcHAsImNvbnN0IGNhdGVnb3J5PWNvbW1hbmQ9
+        PT0nc291bmRzOnBpY2snfHxjb21tYW5kPT09J2ZpbGVzOmJlZ2luJz8ncGlja2VyJzoiLCAiY29uc3QgY2F0ZWdvcnk9Y29t
+        bWFuZC5zdGFydHNXaXRoKCd1cGRhdGVzOicpPydvdGEnOmNvbW1hbmQ9PT0nc291bmRzOnBpY2snfHxjb21tYW5kPT09J2Zp
+        bGVzOmJlZ2luJz8ncGlja2VyJzoiKQpjb21tYW5kcz1yIiIiICAgICAgICBjYXNlICd1cGRhdGVzOmluZm8nOnsKICAgICAg
+        ICAgIHJlc3VsdD17dmVyc2lvbjpDb25zdGFudHMuZXhwb0NvbmZpZz8udmVyc2lvbnx8J9C90LXQuNC30LLQtdGB0YLQvdCw
+        JyxidWlsZDpDb25zdGFudHMucGxhdGZvcm0/LmFuZHJvaWQ/LnZlcnNpb25Db2RlPz9udWxsLAogICAgICAgICAgICBlbmFi
+        bGVkOlVwZGF0ZXMuaXNFbmFibGVkLHBlbmRpbmc6b3RhU3RhdGVSZWYuY3VycmVudC5pc1VwZGF0ZVBlbmRpbmd8fG90YURv
+        d25sb2FkZWQuY3VycmVudCwKICAgICAgICAgICAgY2hhbm5lbDpVcGRhdGVzLmNoYW5uZWx8fG51bGwscnVudGltZTpVcGRh
+        dGVzLnJ1bnRpbWVWZXJzaW9ufHxudWxsLGVtYmVkZGVkOlVwZGF0ZXMuaXNFbWJlZGRlZExhdW5jaH07YnJlYWs7CiAgICAg
+        ICAgfQogICAgICAgIGNhc2UgJ3VwZGF0ZXM6Y2hlY2snOnsKICAgICAgICAgIGlmKCFVcGRhdGVzLmlzRW5hYmxlZCl0aHJv
+        dyBFcnJvcign0J7QsdC90L7QstC70LXQvdC40Y8gRXhwbyDQvdC10LTQvtGB0YLRg9C/0L3RiyDQsiDRjdGC0L7QuSDQstC1
+        0YDRgdC40LggQ29ubmVjdCcpOwogICAgICAgICAgaWYob3RhU3RhdGVSZWYuY3VycmVudC5pc1VwZGF0ZVBlbmRpbmd8fG90
+        YURvd25sb2FkZWQuY3VycmVudCl7cmVzdWx0PXtzdGF0ZToncmVhZHknfTticmVhazt9CiAgICAgICAgICBjb25zdCBjaGVj
+        a2VkPWF3YWl0IFVwZGF0ZXMuY2hlY2tGb3JVcGRhdGVBc3luYygpOwogICAgICAgICAgcmVzdWx0PXtzdGF0ZTpjaGVja2Vk
+        LmlzQXZhaWxhYmxlfHxjaGVja2VkLmlzUm9sbEJhY2tUb0VtYmVkZGVkPydhdmFpbGFibGUnOidjdXJyZW50J307YnJlYWs7
+        CiAgICAgICAgfQogICAgICAgIGNhc2UgJ3VwZGF0ZXM6ZG93bmxvYWQnOnsKICAgICAgICAgIGlmKCFVcGRhdGVzLmlzRW5h
+        YmxlZCl0aHJvdyBFcnJvcign0J7QsdC90L7QstC70LXQvdC40Y8gRXhwbyDQvdC10LTQvtGB0YLRg9C/0L3RiycpOwogICAg
+        ICAgICAgaWYob3RhU3RhdGVSZWYuY3VycmVudC5pc1VwZGF0ZVBlbmRpbmd8fG90YURvd25sb2FkZWQuY3VycmVudCl7cmVz
+        dWx0PXtzdGF0ZToncmVhZHknfTticmVhazt9CiAgICAgICAgICBjb25zdCBmZXRjaGVkPWF3YWl0IFVwZGF0ZXMuZmV0Y2hV
+        cGRhdGVBc3luYygpOwogICAgICAgICAgaWYoIWZldGNoZWQuaXNOZXcmJiFmZXRjaGVkLmlzUm9sbEJhY2tUb0VtYmVkZGVk
+        KXtyZXN1bHQ9e3N0YXRlOidjdXJyZW50J307YnJlYWs7fQogICAgICAgICAgb3RhRG93bmxvYWRlZC5jdXJyZW50PXRydWU7
+        cmVzdWx0PXtzdGF0ZToncmVhZHknfTticmVhazsKICAgICAgICB9CiAgICAgICAgY2FzZSAndXBkYXRlczphcHBseSc6ewog
+        ICAgICAgICAgaWYoIVVwZGF0ZXMuaXNFbmFibGVkfHwhKG90YURvd25sb2FkZWQuY3VycmVudHx8b3RhU3RhdGVSZWYuY3Vy
+        cmVudC5pc1VwZGF0ZVBlbmRpbmcpKXRocm93IEVycm9yKCfQndC+0LLQvtC1INC+0LHQvdC+0LLQu9C10L3QuNC1INC10YnR
+        kSDQvdC1INC30LDQs9GA0YPQttC10L3QvicpOwogICAgICAgICAgaWYodm9pY2VSZWYuY3VycmVudC5waGFzZSE9PSdpZGxl
+        J3x8cmVjb3JkaW5nQWN0aXZlLmN1cnJlbnR8fHNhdmVzLmN1cnJlbnQuc2l6ZXx8ZmlsZVRyYW5zZmVycy5jdXJyZW50LnNp
+        emV8fEFwcFN0YXRlLmN1cnJlbnRTdGF0ZSE9PSdhY3RpdmUnKQogICAgICAgICAgICB0aHJvdyBFcnJvcign0JfQsNCy0LXR
+        gNGI0LjRgtC1INC30LLQvtC90L7Quiwg0LfQsNC/0LjRgdGMINC40LvQuCDQv9C10YDQtdC00LDRh9GDINGE0LDQudC70LAg
+        0L/QtdGA0LXQtCDQv9C10YDQtdC30LDQv9GD0YHQutC+0LwuJyk7CiAgICAgICAgICByZXNwb25kKHRydWUse3N0YXRlOidy
+        ZXN0YXJ0aW5nJ30pOwogICAgICAgICAgdm9pZCBVcGRhdGVzLnJlbG9hZEFzeW5jKCkuY2F0Y2goZXJyb3I9PnNlbmQoJ2Vy
+        cm9yJyxlcnJvciBpbnN0YW5jZW9mIEVycm9yP2Vycm9yLm1lc3NhZ2U6J9Cd0LUg0YPQtNCw0LvQvtGB0Ywg0L/QtdGA0LXQ
+        t9Cw0L/Rg9GB0YLQuNGC0YwgQ29ubmVjdC4nKSk7CiAgICAgICAgICByZXR1cm47CiAgICAgICAgfQoiIiIKcmVwbGFjZV9v
+        bmNlKGFwcCwiICAgICAgICBjYXNlICdub3RpZmljYXRpb246ZGlhZ25vc3RpY3MnOiIsY29tbWFuZHMrIiAgICAgICAgY2Fz
+        ZSAnbm90aWZpY2F0aW9uOmRpYWdub3N0aWNzJzoiKQpyZXBsYWNlX29uY2UoYXBwLCJvblJlY29yZGluZ0NoYW5nZT17KHJl
+        Y29yZGluZyxraW5kKT0+c2VuZCgncmVjb3JkLXN0YXRlJyx7cmVjb3JkaW5nLGtpbmR9KX0iLCAib25SZWNvcmRpbmdDaGFu
+        Z2U9eyhyZWNvcmRpbmcsa2luZCk9PntyZWNvcmRpbmdBY3RpdmUuY3VycmVudD1yZWNvcmRpbmc7c2VuZCgncmVjb3JkLXN0
+        YXRlJyx7cmVjb3JkaW5nLGtpbmR9KTt9fSIpCnByb3RvY29sPSdzcmMvaHlicmlkUHJvdG9jb2wudHMnCnJlcGxhY2Vfb25j
+        ZShwcm90b2NvbCwiICB8ICdub3RpZmljYXRpb246ZGlhZ25vc3RpY3MnIiwgIiAgfCAndXBkYXRlczppbmZvJyB8ICd1cGRh
+        dGVzOmNoZWNrJyB8ICd1cGRhdGVzOmRvd25sb2FkJyB8ICd1cGRhdGVzOmFwcGx5J1xuICB8ICdub3RpZmljYXRpb246ZGlh
+        Z25vc3RpY3MnIikKcmVwbGFjZV9vbmNlKHByb3RvY29sLCIgICAgY2FzZSAnbm90aWZpY2F0aW9uOmRpYWdub3N0aWNzJzpy
+        ZXR1cm4gZmllbGRzKHZhbHVlLFtdKTsiLCAiICAgIGNhc2UgJ3VwZGF0ZXM6aW5mbyc6Y2FzZSAndXBkYXRlczpjaGVjayc6
+        Y2FzZSAndXBkYXRlczpkb3dubG9hZCc6Y2FzZSAndXBkYXRlczphcHBseSc6cmV0dXJuIGZpZWxkcyh2YWx1ZSxbXSk7XG4g
+        ICAgY2FzZSAnbm90aWZpY2F0aW9uOmRpYWdub3N0aWNzJzpyZXR1cm4gZmllbGRzKHZhbHVlLFtdKTsiKQojIFRoZSBsZWdh
+        Y3kgQW5kcm9pZCBVSSByZWdyZXNzaW9uIHNob3VsZCBlbmZvcmNlIGR5bmFtaWMgaW5zdGFsbGVkIHZlcnNpb24sCiMgbm90
+        IHRoZSBvbGQgaGFyZGNvZGVkIDMuMC42ICgyNCkgc3RyaW5nIHRoYXQgdGhpcyBPVEEgaW50ZW50aW9uYWxseSByZW1vdmVz
+        LgpsZWdhY3lfdGVzdD0ndGVzdHMvYW5kcm9pZC11aS1wb2xpc2gudGVzdC5janMnCnJlcGxhY2Vfb25jZShsZWdhY3lfdGVz
+        dCwKICAgIHIiIiJ0ZXN0KCdhYm91dCBzY3JlZW4gaWRlbnRpZmllcyBpbnN0YWxsZWQgQW5kcm9pZCAzLjAuNiAoMjQpLCBu
+        b3QgbGVnYWN5IDIuMi41JywoKT0+ewogY29uc3QgcGFnZT1yZWFkKCd3ZWIvYXBwL3BhZ2UudHN4Jyk7CiBhc3NlcnQubWF0
+        Y2gocGFnZSwv0JLQtdGA0YHQuNGPIDNcLjBcLjYgXCgyNFwpLyk7CiBhc3NlcnQuZG9lc05vdE1hdGNoKHBhZ2UsL9CS0LXR
+        gNGB0LjRjyAyXC4yXC41Lyk7Cn0pOyIiIiwKICAgIHIiIiJ0ZXN0KCdhYm91dCBzY3JlZW4gZGlzcGxheXMgaW5zdGFsbGVk
+        IEFuZHJvaWQgdmVyc2lvbiByYXRoZXIgdGhhbiBoYXJkY29kZWQgYnVpbGQnLCgpPT57CiBjb25zdCBwYWdlPXJlYWQoJ3dl
+        Yi9hcHAvcGFnZS50c3gnKTsKIGNvbnN0IHVpPXJlYWQoJ3dlYi9jb21wb25lbnRzL0Nvbm5lY3RPdGFTZXR0aW5ncy50c3gn
+        KTsKIGFzc2VydC5tYXRjaChwYWdlLC88Q29ubmVjdE90YVNldHRpbmdzXHMqXC8+Lyk7CiBhc3NlcnQuZG9lc05vdE1hdGNo
+        KHBhZ2UsL9CS0LXRgNGB0LjRjyAzXC4wXC42IFwoMjRcKS8pOwogYXNzZXJ0LmRvZXNOb3RNYXRjaChwYWdlLC/QktC10YDR
+        gdC40Y8gMlwuMlwuNS8pOwogYXNzZXJ0Lm1hdGNoKHVpLC9pbmZvXD9cLnZlcnNpb24vKTsKIGFzc2VydC5tYXRjaCh1aSwv
+        aW5mb1wuYnVpbGQvKTsKfSk7IiIiKQpwYWdlPSd3ZWIvYXBwL3BhZ2UudHN4JwpyZXBsYWNlX29uY2UocGFnZSwiaW1wb3J0
+        IENvbm5lY3ROb3RpZmljYXRpb25TZXR0aW5ncyBmcm9tICcuLi9jb21wb25lbnRzL0Nvbm5lY3ROb3RpZmljYXRpb25TZXR0
+        aW5ncyc7IiwgImltcG9ydCBDb25uZWN0Tm90aWZpY2F0aW9uU2V0dGluZ3MgZnJvbSAnLi4vY29tcG9uZW50cy9Db25uZWN0
+        Tm90aWZpY2F0aW9uU2V0dGluZ3MnO1xuaW1wb3J0IENvbm5lY3RPdGFTZXR0aW5ncyBmcm9tICcuLi9jb21wb25lbnRzL0Nv
+        bm5lY3RPdGFTZXR0aW5ncyc7IikKcmVwbGFjZV9vbmNlKHBhZ2UsIntzZXR0aW5nc1BhZ2U9PT0nYWJvdXQnICYmIDxkaXYg
+        Y2xhc3NOYW1lPVwic2V0dGluZ3MtZ3JvdXAgZGF0YS1zZXR0aW5nc1wiPjxzdHJvbmc+Q29ubmVjdCBNZXNzZW5nZXI8L3N0
+        cm9uZz48cD7QktC10YDRgdC40Y8gMy4wLjYgKDI0KTwvcD48cD48c3Ryb25nPtCg0LDQt9GA0LDQsdC+0YLRh9C40LrQuDog
+        0JDQu9C40L3QsCDQuCDQmtC40YDQuNC70Ls8L3N0cm9uZz48L3A+PHAgY2xhc3NOYW1lPVwic2V0dGluZ3MtaGludFwiPtCc
+        0LXRgdGB0LXQvdC00LbQtdGAINC00LvRjyDQu9C40YfQvdC+0LPQviDQvtCx0YnQtdC90LjRjy48L3A+PC9kaXY+fSIsIntz
+        ZXR0aW5nc1BhZ2U9PT0nYWJvdXQnICYmIDxDb25uZWN0T3RhU2V0dGluZ3MvPn0iKQpjc3M9J3dlYi9oeWJyaWQvYW5kcm9p
+        ZC5jc3MnCmV4dHJhPSIiIgovKiBBbmRyb2lkIE9UQSBBYm91dDogcmV1c2UgQ29ubmVjdCBnbGFzcyBhY3Rpb24gYnV0dG9u
+        cyBhbmQgc3BhY2luZy4gKi8KLmNvbm5lY3Qtb3RhLWFib3V0IC5jb25uZWN0LW90YS1ydWxle2hlaWdodDoxcHg7YmFja2dy
+        b3VuZDp2YXIoLS1nbGFzcy1zdHJva2UscmdiYSgyMTAsMjMwLDI1NSwuMTQpKTttYXJnaW46MTRweCAwO30KLmNvbm5lY3Qt
+        b3RhLWFib3V0IC5jb25uZWN0LW90YS1zdGF0dXN7Zm9udC1zaXplOjEzcHg7Y29sb3I6dmFyKC0tdGV4dCwjZWRmMmY3KTts
+        aW5lLWhlaWdodDoxLjU7fQouY29ubmVjdC1vdGEtYWJvdXQgLnNldHRpbmdzLWFjdGlvbjpkaXNhYmxlZHtvcGFjaXR5Oi42
+        O3BvaW50ZXItZXZlbnRzOm5vbmU7fQoiIiIKYz1yb290L2NzcwppZiAnLyogQW5kcm9pZCBPVEEgQWJvdXQ6JyBub3QgaW4g
+        Yy5yZWFkX3RleHQoKTpjLndyaXRlX3RleHQoYy5yZWFkX3RleHQoKStleHRyYSkKCiMgZXhwby1jb25zdGFudHMgd2FzIGFs
+        cmVhZHkgc2hpcHBlZCBpbiAzLjAuNyB2aWEgRXhwbzsgcGluIGV4YWN0bHkgdGhhdCBzYW1lIGluc3RhbGxlZCBtb2R1bGUu
+        CnBrZ3BhdGg9cm9vdC8ncGFja2FnZS5qc29uJwpwa2c9anNvbi5sb2Fkcyhwa2dwYXRoLnJlYWRfdGV4dCgpKQppbnN0YWxs
+        ZWQ9anNvbi5sb2Fkcygocm9vdC8nbm9kZV9tb2R1bGVzL2V4cG8tY29uc3RhbnRzL3BhY2thZ2UuanNvbicpLnJlYWRfdGV4
+        dCgpKVsndmVyc2lvbiddCmxvY2tCZWZvcmU9anNvbi5sb2Fkcygocm9vdC8ncGFja2FnZS1sb2NrLmpzb24nKS5yZWFkX3Rl
+        eHQoKSkKYXNzZXJ0IGxvY2tCZWZvcmVbJ3BhY2thZ2VzJ11bJ25vZGVfbW9kdWxlcy9leHBvLWNvbnN0YW50cyddWyd2ZXJz
+        aW9uJ109PWluc3RhbGxlZCwnRXhwbyBDb25zdGFudHMgbmF0aXZlIHZlcnNpb24gY2hhbmdlZDogbmV3IEFQSyByZXF1aXJl
+        ZCcKZXhpc3Rpbmc9cGtnWydkZXBlbmRlbmNpZXMnXS5nZXQoJ2V4cG8tY29uc3RhbnRzJykKaWYgZXhpc3Rpbmcgbm90IGlu
+        IChOb25lLGluc3RhbGxlZCk6cmFpc2UgU3lzdGVtRXhpdCgnRXhpc3RpbmcgZXhwby1jb25zdGFudHMgdmVyc2lvbiBtaXNt
+        YXRjaCcpCnBrZ1snZGVwZW5kZW5jaWVzJ11bJ2V4cG8tY29uc3RhbnRzJ109aW5zdGFsbGVkCnBrZ3BhdGgud3JpdGVfdGV4
+        dChqc29uLmR1bXBzKHBrZyxlbnN1cmVfYXNjaWk9RmFsc2UsaW5kZW50PTIpKydcbicpCnN1YnByb2Nlc3MucnVuKFsnbnBt
+        JywnaW5zdGFsbCcsJy0tcGFja2FnZS1sb2NrLW9ubHknLCctLWlnbm9yZS1zY3JpcHRzJywnLS1uby1hdWRpdCcsJy0tbm8t
+        ZnVuZCddLGN3ZD1yb290LGNoZWNrPVRydWUpCmxvY2tBZnRlcj1qc29uLmxvYWRzKChyb290LydwYWNrYWdlLWxvY2suanNv
+        bicpLnJlYWRfdGV4dCgpKQphc3NlcnQgbG9ja0FmdGVyWydwYWNrYWdlcyddWydub2RlX21vZHVsZXMvZXhwby1jb25zdGFu
+        dHMnXVsndmVyc2lvbiddPT1pbnN0YWxsZWQKYXNzZXJ0IHNldChsb2NrQmVmb3JlWydwYWNrYWdlcyddKT09c2V0KGxvY2tB
+        ZnRlclsncGFja2FnZXMnXSksJ05ldyBuYXRpdmUgZGVwZW5kZW5jaWVzIHdvdWxkIHJlcXVpcmUgQVBLIHJlYnVpbGQnCmZv
+        ciBrZXksb2xkIGluIGxvY2tCZWZvcmVbJ3BhY2thZ2VzJ10uaXRlbXMoKToKICAgIGlmIGtleSE9Jyc6YXNzZXJ0IGxvY2tB
+        ZnRlclsncGFja2FnZXMnXVtrZXldLmdldCgndmVyc2lvbicpPT1vbGQuZ2V0KCd2ZXJzaW9uJyksICdOYXRpdmUgcGFja2Fn
+        ZSB2ZXJzaW9uIHVuZXhwZWN0ZWRseSBjaGFuZ2VkOiAnK2tleQoKbWFuaWZlc3Q9cm9vdC8nUEFSSVRZX1NPVVJDRV9MT0NL
+        Lmpzb24nCm9iaj1qc29uLmxvYWRzKG1hbmlmZXN0LnJlYWRfdGV4dCgpKQpmaWxlcz1bJ3NyYy9BcHAudHN4Jywnc3JjL2h5
+        YnJpZFByb3RvY29sLnRzJywnd2ViL2FwcC9wYWdlLnRzeCcsJ3dlYi9oeWJyaWQvYW5kcm9pZC5jc3MnLCdwYWNrYWdlLmpz
+        b24nLCdwYWNrYWdlLWxvY2suanNvbicsJ3dlYi9jb21wb25lbnRzL0Nvbm5lY3RPdGFTZXR0aW5ncy50c3gnLCd0ZXN0cy9j
+        b25uZWN0LW90YS1hYm91dC0yMDI2MTExNy50ZXN0LmNqcycsJ3Rlc3RzL2FuZHJvaWQtdWktcG9saXNoLnRlc3QuY2pzJ10K
+        Zm9yIG5hbWUgaW4gZmlsZXM6CiAgICBwYXRoPXJvb3QvbmFtZQogICAgYXNzZXJ0IHBhdGguaXNfZmlsZSgpLGYnTWlzc2lu
+        ZyBsb2NrZWQgZmlsZToge25hbWV9JwogICAgb2JqWydmaWxlcyddW25hbWVdPWhhc2hsaWIuc2hhMjU2KHBhdGgucmVhZF9i
+        eXRlcygpKS5oZXhkaWdlc3QoKQptYW5pZmVzdC53cml0ZV90ZXh0KGpzb24uZHVtcHMob2JqLGVuc3VyZV9hc2NpaT1GYWxz
+        ZSxpbmRlbnQ9MikrJ1xuJykKYXNzZXJ0IGpzb24ubG9hZHMoKHJvb3QvJ2FwcC5qc29uJykucmVhZF90ZXh0KCkpWydleHBv
+        J11bJ3J1bnRpbWVWZXJzaW9uJ109PSdjb25uZWN0LWFuZHJvaWQtb3RhLXYxLXNkazU4Jwphc3NlcnQganNvbi5sb2Fkcygo
+        cm9vdC8nYXBwLmpzb24nKS5yZWFkX3RleHQoKSlbJ2V4cG8nXVsnYW5kcm9pZCddWyd2ZXJzaW9uQ29kZSddPT0yNQpwcmlu
+        dCgnQ29ubmVjdCBPVEEgQWJvdXQgcGF0Y2hlZDsgcHJlc2VydmVkIG5hdGl2ZSBydW50aW1lIGFuZCBjdXJyZW50IEFCSTsg
+        bG9ja2VkJyxsZW4ob2JqWydmaWxlcyddKSwnc291cmNlcycpCg==
+        B64_PAYLOAD_FILE
+        python3 "$RUNNER_TEMP/ota-about-patch.py"
+        git diff --check
+    - name: Add native HTTPS APK release checker and secure download UI through OTA
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$(dirname native/src/ConnectApkUpdates.ts)"
+        cat > native/src/ConnectApkUpdates.ts <<'END_CONNECT_APK_UPDATES_927'
+        /** Only releases from the project's public, pinned GitHub repository are considered.
+         * A browser/system installer performs the final Android APK signature check.
+         * No untrusted URL is accepted from the WebView. */
+        const API = 'https://api.github.com/repos/Chimera1988/connect-android/releases/latest';
+        const PREFIX = 'https://github.com/Chimera1988/connect-android/releases/download/';
+        const TAG = /^connect-android-v([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})-b([1-9][0-9]{0,8})$/;
+        const DIGEST = /^sha256:[0-9a-f]{64}$/;
+
+        export type ConnectApkCandidate = {
+          version: string;
+          build: number;
+          size: number;
+          sha256: string;
+          url: string;
+          checkedAt: number;
+        };
+        export type ConnectApkCheck = {
+          state: 'available' | 'current' | 'unpublished';
+          version?: string;
+          build?: number;
+          size?: number;
+          candidate?: ConnectApkCandidate;
+        };
+
+        function entry(value: unknown): Record<string, unknown> | null {
+          return value !== null && typeof value === 'object' && !Array.isArray(value)
+            ? value as Record<string, unknown> : null;
+        }
+
+        /** Pure validation; reject releases with missing digests, different paths or any ambiguous APK assets. */
+        export function parseConnectApkRelease(value: unknown, installedBuild: number): ConnectApkCheck {
+          const release = entry(value);
+          if (!release || release.draft !== false || release.prerelease !== false) throw Error('Некорректные данные выпуска Connect');
+          const tag = release.tag_name;
+          const match = typeof tag === 'string' ? TAG.exec(tag) : null;
+          if (!match) throw Error('Неподдерживаемый формат версии Android');
+          const version = match[1], build = Number(match[2]);
+          if (!Number.isSafeInteger(build) || build < 1 || build > 2000000000) throw Error('Некорректный номер Android-сборки');
+          if (!Array.isArray(release.assets)) throw Error('В выпуске отсутствует подписанный APK');
+          const assets = release.assets.filter(asset => entry(asset)?.name === 'Connect.apk');
+          if (assets.length !== 1) throw Error('Ожидался ровно один Connect.apk');
+          const apk = entry(assets[0])!;
+          const expected = PREFIX + tag + '/Connect.apk';
+          if (apk.state !== 'uploaded' || apk.browser_download_url !== expected ||
+              !Number.isSafeInteger(apk.size) || (apk.size as number) < 5_000_000 || (apk.size as number) > 200_000_000 ||
+              typeof apk.digest !== 'string' || !DIGEST.test(apk.digest)) {
+            throw Error('APK не прошёл проверку адреса, размера и SHA-256');
+          }
+          if (!Number.isSafeInteger(installedBuild) || installedBuild < 1) throw Error('Не удалось определить номер установленного APK');
+          if (build <= installedBuild) return {state: 'current', version, build};
+          const candidate: ConnectApkCandidate = {
+            version, build, size: apk.size as number, sha256: apk.digest.slice(7), url: expected, checkedAt: Date.now(),
+          };
+          return {state: 'available', version, build, size: candidate.size, candidate};
+        }
+
+        export async function checkConnectApkRelease(installedBuild: number): Promise<ConnectApkCheck> {
+          const timeout = new AbortController();
+          const timer = setTimeout(() => timeout.abort(), 12000);
+          try {
+            const response = await fetch(API, {
+              method: 'GET',
+              headers: {'Accept': 'application/vnd.github+json', 'User-Agent': 'Connect-Android-Updater'},
+              signal: timeout.signal,
+            });
+            if (response.status === 404) return {state: 'unpublished'};
+            if (!response.ok) throw Error('GitHub не подтвердил доступность обновлений (' + response.status + ')');
+            return parseConnectApkRelease(await response.json() as unknown, installedBuild);
+          } catch (error) {
+            if (timeout.signal.aborted) throw Error('Превышено время ожидания ответа GitHub');
+            throw error;
+          } finally {clearTimeout(timer);}
+        }
+        END_CONNECT_APK_UPDATES_927
+        mkdir -p "$(dirname native/web/components/ConnectOtaSettings.tsx)"
+        cat > native/web/components/ConnectOtaSettings.tsx <<'END_CONNECT_APK_UPDATES_927'
+        import {useEffect,useState} from 'react';
+
+        type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean};
+        type OtaState='loading'|'idle'|'checking'|'current'|'available'|'downloading'|'ready'|'restarting'|'disabled'|'error';
+        type ApkInfo={state:'unpublished'|'current'|'available';version?:string;build?:number;size?:number};
+        type ApkState='checking'|'unpublished'|'current'|'available'|'opening'|'opened'|'error';
+
+        /** Both update paths use only the nonce-bound Android bridge. WebView never chooses an APK URL. */
+        export default function ConnectOtaSettings(){
+          const [info,setInfo]=useState<OtaInfo|null>(null);
+          const [state,setState]=useState<OtaState>('loading');
+          const [error,setError]=useState('');
+          const [apkInfo,setApkInfo]=useState<ApkInfo|null>(null);
+          const [apkState,setApkState]=useState<ApkState>('checking');
+          const [apkError,setApkError]=useState('');
+          useEffect(()=>{
+            let alive=true;
+            const bridge=window.ConnectNative;
+            if(!bridge){setState('disabled');setApkState('error');setApkError('Android недоступен');return;}
+            void bridge.request('updates:info',{}).then((value:OtaInfo)=>{
+              if(!alive)return;
+              setInfo(value);
+              setState(!value.enabled?'disabled':value.pending?'ready':'idle');
+            }).catch((reason:unknown)=>{
+              if(!alive)return;
+              setError(reason instanceof Error?reason.message:'Не удалось проверить состояние обновлений.');
+              setState('error');
+            });
+            void bridge.request('updates:apk-check',{}).then((value:ApkInfo)=>{
+              if(!alive)return;
+              setApkInfo(value);setApkState(value.state);
+            }).catch((reason:unknown)=>{
+              if(!alive)return;
+              setApkError(reason instanceof Error?reason.message:'Не удалось проверить новые APK.');
+              setApkState('error');
+            });
+            return()=>{alive=false;};
+          },[]);
+          async function run(command:'updates:check'|'updates:download'|'updates:apply'){
+            const bridge=window.ConnectNative;
+            if(!bridge)return;
+            setError('');
+            setState(command==='updates:check'?'checking':command==='updates:download'?'downloading':'restarting');
+            try{
+              const response=await bridge.request(command,{});
+              if(command==='updates:apply')return;
+              const next=response?.state;
+              if(next==='available'||next==='ready'||next==='current')setState(next);
+              else throw Error('Android вернул неизвестное состояние обновления.');
+            }catch(reason){
+              setError(reason instanceof Error?reason.message:'Не удалось выполнить обновление.');
+              setState('error');
+            }
+          }
+          async function checkApk(){
+            const bridge=window.ConnectNative;
+            if(!bridge)return;
+            setApkError('');setApkState('checking');
+            try{
+              const result=await bridge.request('updates:apk-check',{}) as ApkInfo;
+              if(!['current','available','unpublished'].includes(result?.state))throw Error('Некорректный ответ Android');
+              setApkInfo(result);setApkState(result.state);
+            }catch(reason){
+              setApkError(reason instanceof Error?reason.message:'Не удалось проверить APK.');
+              setApkState('error');
+            }
+          }
+          async function openApk(){
+            const bridge=window.ConnectNative;
+            if(!bridge)return;
+            setApkError('');setApkState('opening');
+            try{
+              const result=await bridge.request('updates:apk-open',{});
+              if(result?.state!=='opened')throw Error('Android не подтвердил открытие загрузки');
+              setApkState('opened');
+            }catch(reason){
+              setApkError(reason instanceof Error?reason.message:'Не удалось открыть скачивание APK.');
+              setApkState('error');
+            }
+          }
+          const progress=state==='checking'||state==='downloading'||state==='restarting';
+          const status=state==='loading'?'Получаем сведения о версии…':
+            state==='checking'?'Проверяем обновления…':state==='downloading'?'Скачиваем проверенное обновление…':
+            state==='restarting'?'Перезапускаем Connect…':state==='available'?'Доступно совместимое обновление интерфейса.':
+            state==='ready'?'Обновление загружено и готово к применению.':
+            state==='current'?'Обновлений интерфейса пока нет.':
+            state==='disabled'?'Автоматические обновления недоступны в этой сборке.':
+            state==='error'?error:'Проверка обновлений доступна.';
+          const apkStatus=apkState==='checking'?'Проверяем выпуски Connect для Android…':
+            apkState==='unpublished'?'Подписанные APK ещё не опубликованы в разделе Releases.':
+            apkState==='current'?'Установлена последняя опубликованная версия Android.':
+            apkState==='available'?`Доступна версия ${apkInfo?.version} (${apkInfo?.build}), ${apkInfo?.size?Math.round(apkInfo.size/1048576):'?'} МиБ.`:
+            apkState==='opening'?'Открываем загрузку APK…':
+            apkState==='opened'?'Загрузка открыта. Скачайте APK и подтвердите установку в Android.':
+            apkError;
+          return <div className="settings-group data-settings connect-ota-about">
+            <strong>Connect Messenger</strong>
+            <p>Версия {info?.version?(info.build===null?info.version:`${info.version} (${info.build})`):'определяется…'}</p>
+            <p><strong>Разработчики: Алина и Кирилл</strong></p>
+            <p className="settings-hint">Мессенджер для личного общения.</p>
+            <div className="connect-ota-rule"/>
+            <strong>Обновление приложения</strong>
+            <p className="settings-hint"><strong>Обновления интерфейса</strong></p>
+            <p className="settings-hint">Совместимые изменения интерфейса загружаются по воздуху через Expo, без установки APK.</p>
+            <p className="connect-ota-status" role="status" aria-live="polite">{status}</p>
+            {state==='ready'?<button type="button" className="settings-action" disabled={progress} onClick={()=>void run('updates:apply')}>Применить и перезапустить</button>:
+              state==='available'?<button type="button" className="settings-action" disabled={progress} onClick={()=>void run('updates:download')}>Скачать обновление</button>:
+              state!=='disabled'&&state!=='loading'&&state!=='restarting'?<button type="button" className="settings-action" disabled={progress} onClick={()=>void run('updates:check')}>Проверить обновления интерфейса</button>:null}
+            {info?.enabled&&<p className="settings-hint">Канал: {info.channel||'неизвестен'}. Connect также проверяет Expo при обычном запуске.</p>}
+            <div className="connect-ota-rule"/>
+            <strong>Новая версия Android (APK)</strong>
+            <p className="settings-hint">Для изменений звонков и системных функций Connect проверяет только подписанные выпуски из официального GitHub-репозитория.</p>
+            <p className="connect-ota-status" role="status" aria-live="polite">{apkStatus}</p>
+            {apkState==='available'?<button type="button" className="settings-action" onClick={()=>void openApk()}>Скачать APK {apkInfo?.version}</button>:null}
+            {apkState!=='checking'&&apkState!=='opening'?<button type="button" className="settings-action secondary" onClick={()=>void checkApk()}>Проверить версию Android</button>:null}
+            <p className="settings-hint">APK скачивается через системный браузер. Android попросит подтвердить установку. Не удаляйте старую версию: при совпадении подписи обновление установится поверх неё.</p>
+          </div>;
+        }
+        END_CONNECT_APK_UPDATES_927
+        mkdir -p "$(dirname native/tests/connect-apk-update-20261117.test.cjs)"
+        cat > native/tests/connect-apk-update-20261117.test.cjs <<'END_CONNECT_APK_UPDATES_927'
+        'use strict';
+        const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+        const ts=require('typescript');
+        const root=path.resolve(__dirname,'..'),read=p=>fs.readFileSync(path.join(root,p),'utf8');
+        const source=read('src/ConnectApkUpdates.ts');
+        const transpiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+        const mod={exports:{}};new Function('module','exports',transpiled)(mod,mod.exports);
+        const parse=mod.exports.parseConnectApkRelease;
+        const valid=(version='3.0.8',build=26)=>({
+         tag_name:`connect-android-v${version}-b${build}`,draft:false,prerelease:false,
+         assets:[{name:'Connect.apk',state:'uploaded',size:48_000_000,digest:'sha256:'+'a'.repeat(64),
+         browser_download_url:`https://github.com/Chimera1988/connect-android/releases/download/connect-android-v${version}-b${build}/Connect.apk`}]
+        });
+        test('GitHub Releases: strictly newer verified candidate only',()=>{
+         const result=parse(valid(),25);
+         assert.equal(result.state,'available');assert.equal(result.build,26);
+         assert.equal(result.candidate.url,valid().assets[0].browser_download_url);
+         assert.equal(result.candidate.sha256,'a'.repeat(64));
+         assert.equal(parse(valid(),26).state,'current');
+         assert.equal(parse(valid('3.0.7',25),26).state,'current');
+         assert.equal(parse(valid('3.0.7',25),25).state,'current');
+        });
+        test('refuse spoofed, ambiguous, corrupt or unsigned external APK assets',()=>{
+         const attacks=[
+          x=>{x.assets[0].browser_download_url='https://evil.example/Connect.apk';},
+          x=>{x.assets[0].digest=null;},
+          x=>{x.assets[0].digest='sha256:'+'b'.repeat(60);},
+          x=>{x.assets[0].size=10;},
+          x=>{x.assets[0].state='starter';},
+          x=>{x.assets.push({...x.assets[0]});},
+          x=>{x.tag_name='connect-android-v3.0.8-b26/../../';},
+          x=>{x.tag_name='v3.0.8';},
+          x=>{x.draft=true;},
+          x=>{x.prerelease=true;},
+          x=>{x.assets[0].name='evil.apk';},
+         ];
+         for(const alter of attacks){const data=valid();alter(data);assert.throws(()=>parse(data,25));}
+         assert.throws(()=>parse(valid(),0));
+         assert.throws(()=>parse(valid(),NaN));
+        });
+        test('real Android bridge provides no arbitrary URL/payload to native APK download',()=>{
+         const app=read('src/App.tsx'),proto=read('src/hybridProtocol.ts'),ui=read('web/components/ConnectOtaSettings.tsx');
+         for(const op of ['apk-check','apk-open']){
+          assert.match(app,new RegExp(`case 'updates:${op}'`));
+          assert.match(proto,new RegExp(`'updates:${op}'`));
+          assert.match(ui,new RegExp(`updates:${op}`));
+         }
+         assert.match(app,/checkConnectApkRelease\(installedBuild\)/);
+         assert.match(app,/apkCandidate\.current/);
+         assert.match(proto,/updates:apk-check':case 'updates:apk-open':return fields\(value,\[\]\)/);
+         assert.doesNotMatch(ui,/fetch\(|EXPO_TOKEN|SERVICE_ROLE_KEY/);
+         assert.match(app,/voiceRef\.current\.phase!==['"]idle['"]\|\|recordingActive\.current/);
+        });
+        test('source integrity covers every modified and new file',()=>{
+         const lock=JSON.parse(read('PARITY_SOURCE_LOCK.json'));
+         const crypto=require('node:crypto');
+         for(const name of ['src/App.tsx','src/hybridProtocol.ts','src/ConnectApkUpdates.ts',
+           'web/components/ConnectOtaSettings.tsx','tests/connect-apk-update-20261117.test.cjs']){
+          assert.equal(lock.files[name],crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex'),name);
+         }
+         assert.equal(JSON.parse(read('app.json')).expo.android.versionCode,25);
+         assert.ok(Object.keys(lock.files).length>=377);
+        });
+        END_CONNECT_APK_UPDATES_927
+        mkdir -p "$(dirname "$RUNNER_TEMP/connect-apk-patch.py")"
+        cat > "$RUNNER_TEMP/connect-apk-patch.py" <<'END_CONNECT_APK_UPDATES_927'
+        from pathlib import Path
+        import hashlib, json
+        root=Path('native')
+
+        def replace_once(relative, before, after):
+            path=root/relative
+            src=path.read_text(encoding='utf-8')
+            if after in src:
+                print('ALREADY_PATCHED', relative)
+                return
+            if src.count(before)!=1:
+                raise SystemExit(f'SOURCE_DRIFT: {relative}: expected 1 exact anchor, found {src.count(before)}')
+            path.write_text(src.replace(before,after,1),encoding='utf-8')
+
+        app='src/App.tsx'
+        replace_once(app,
+            "import * as Updates from 'expo-updates';",
+            "import * as Updates from 'expo-updates';\nimport {checkConnectApkRelease,type ConnectApkCandidate} from './ConnectApkUpdates';")
+        replace_once(app,
+            "  const otaDownloaded=useRef(false),recordingActive=useRef(false);",
+            "  const otaDownloaded=useRef(false),recordingActive=useRef(false);\n  const apkCandidate=useRef<ConnectApkCandidate|null>(null);")
+        replace_once(app,
+            'build:Constants.platform?.android?.versionCode??null,',
+            'build:Constants.platform?.android?.versionCode??Constants.expoConfig?.android?.versionCode??null,')
+
+        commands="""        case 'updates:apk-check':{
+                  const installedBuild=Number(Constants.platform?.android?.versionCode??Constants.expoConfig?.android?.versionCode??0);
+                  const checked=await checkConnectApkRelease(installedBuild);
+                  apkCandidate.current=checked.candidate??null;
+                  result={state:checked.state,version:checked.version??null,build:checked.build??null,size:checked.size??null};
+                  break;
+                }
+                case 'updates:apk-open':{
+                  const apk=apkCandidate.current;
+                  if(!apk||Date.now()-apk.checkedAt>10*60*1000)throw Error('Сначала заново проверьте обновление Android');
+                  if(voiceRef.current.phase!=='idle'||recordingActive.current||saves.current.size||fileTransfers.current.size||AppState.currentState!=='active')
+                    throw Error('Завершите звонок, запись или передачу файла перед открытием APK.');
+                  // The URL was validated inside checkConnectApkRelease; WebView cannot supply a download URL.
+                  await Linking.openURL(apk.url);
+                  result={state:'opened'};
+                  break;
+                }
+        """
+        replace_once(app,"        case 'notification:diagnostics':",commands+"        case 'notification:diagnostics':")
+
+        protocol='src/hybridProtocol.ts'
+        replace_once(protocol,
+          "  | 'updates:info' | 'updates:check' | 'updates:download' | 'updates:apply'",
+          "  | 'updates:info' | 'updates:check' | 'updates:download' | 'updates:apply' | 'updates:apk-check' | 'updates:apk-open'")
+        replace_once(protocol,
+          "    case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':return fields(value,[]);",
+          "    case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields(value,[]);")
+
+        # Preserve exactly the source-locked ABI and all native dependencies.
+        appcfg=json.loads((root/'app.json').read_text())['expo']
+        assert appcfg['android']['package']=='com.connect.messenger'
+        assert appcfg['version']=='3.0.7' and appcfg['android']['versionCode']==25
+        assert appcfg['runtimeVersion']=='connect-android-ota-v1-sdk58'
+        assert appcfg['updates']['requestHeaders']['expo-channel-name']=='production'
+        assert appcfg['extra']['eas']['projectId']=='430c7f08-3921-48d5-96d1-f7c3d686d3bf'
+
+        manifest=root/'PARITY_SOURCE_LOCK.json'
+        obj=json.loads(manifest.read_text())
+        for file in ['src/App.tsx','src/hybridProtocol.ts','src/ConnectApkUpdates.ts',
+                     'web/components/ConnectOtaSettings.tsx','tests/connect-apk-update-20261117.test.cjs']:
+            p=root/file
+            if not p.is_file(): raise SystemExit('MISSING_ADDED_FILE: '+file)
+            obj['files'][file]=hashlib.sha256(p.read_bytes()).hexdigest()
+        assert len(obj['files'])>=377
+        manifest.write_text(json.dumps(obj,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        print('APK_CHECKER_SOURCE_LOCKED:',len(obj['files']),'files; Expo SDK and native APK identity unchanged')
+        END_CONNECT_APK_UPDATES_927
+        python3 "$RUNNER_TEMP/connect-apk-patch.py"
+        # The About-screen test was created for four Expo-only commands. Expand
+        # its exact-denylist test to the two new APK commands without weakening
+        # the nonce/origin/payload validation it protects.
+        python3 - <<'PY_COMPAT_OTA_TEST_20261117'
+        from pathlib import Path
+        import json,hashlib
+        root=Path('native')
+        file=root/'tests/connect-ota-about-20261117.test.cjs'
+        source=file.read_text(encoding='utf-8')
+        old=r"  assert.match(proto,/case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':return fields\(value,\[\]\)/);"
+        new=r"  assert.match(proto,/case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields\(value,\[\]\)/);"
+        if source.count(old)==1 and new not in source:
+            file.write_text(source.replace(old,new,1),encoding='utf-8')
+        elif source.count(new)!=1:
+            raise SystemExit('SOURCE_DRIFT: OTA protocol security test changed unexpectedly')
+        # Explicitly assert that the new bridge still has EMPTY payload schemas.
+        protocol=(root/'src/hybridProtocol.ts').read_text(encoding='utf-8')
+        expected="    case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields(value,[]);"
+        assert protocol.count(expected)==1,'Strict APK/OTA bridge validation missing'
+        manifest=root/'PARITY_SOURCE_LOCK.json'
+        lock=json.loads(manifest.read_text(encoding='utf-8'))
+        assert 'tests/connect-ota-about-20261117.test.cjs' in lock['files']
+        lock['files']['tests/connect-ota-about-20261117.test.cjs']=hashlib.sha256(file.read_bytes()).hexdigest()
+        manifest.write_text(json.dumps(lock,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        print('OTA_SECURITY_REGRESSION_UPDATED: six strict no-payload commands; source lock refreshed')
+        PY_COMPAT_OTA_TEST_20261117
+        git diff --check
+        (cd native && node scripts/check-parity-source.mjs)
+    - name: Verify refreshed dependency lock and OTA contract tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm ci --no-audit --no-fund
+        node scripts/check-parity-source.mjs
+        node --test tests/connect-apk-update-20261117.test.cjs tests/android-ui-polish.test.cjs tests/connect-ota-about-20261117.test.cjs tests/connect-ota-config-20261117.test.cjs tests/source-lock.test.cjs
+        node scripts/verify-builtin-sounds.cjs
+        node scripts/generate-call-policy.cjs --check
+      working-directory: native
+    - name: Build embedded WebView and check TypeScript, all regression and browser tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm run build:web
+        test -s src/generated/pwa.ts
+        npm run typecheck:web
+        npm run typecheck
+        npx --no-install playwright-core install --with-deps chromium
+        export CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+        test -x "$CHROMIUM_PATH"
+        npm test
+        npm run test:browser
+        node scripts/check-parity-source.mjs
+      working-directory: native
+    - name: Export real Android Hermes bundle and validate exact installed runtime
+      shell: bash
+      run: |
+        set -euo pipefail
+        npx --no-install expo export --platform android --output-dir "$RUNNER_TEMP/connect-ota-about-export"
+        python3 - <<'PY'
+        import os,json
+        from pathlib import Path
+        folder=Path(os.environ['RUNNER_TEMP'])/'connect-ota-about-export'
+        assert (folder/'metadata.json').is_file(),'Expo OTA metadata missing'
+        assert any(p.stat().st_size>100000 for p in list(folder.rglob('*.hbc'))+list(folder.rglob('*.js'))),'Android Hermes/JS bundle missing'
+        app=json.loads(Path('app.json').read_text())['expo']
+        assert app['runtimeVersion']=='connect-android-ota-v1-sdk58'
+        assert app['android']['versionCode']==25 and app['version']=='3.0.7'
+        assert app['updates']['requestHeaders']['expo-channel-name']=='production'
+        assert Path('src/generated/pwa.ts').stat().st_size>100000
+        print('OTA_EXPORT_VERIFIED: compatible Android JS + built-in WebView only; no new APK')
+        PY
+      working-directory: native
+    - name: Commit only verified OTA sources to Android main
+      shell: bash
+      run: |
+        set -euo pipefail
+        (cd native && node scripts/check-parity-source.mjs)
+        git add -- native/src/App.tsx native/src/ConnectApkUpdates.ts native/src/hybridProtocol.ts native/web/app/page.tsx native/web/hybrid/android.css native/web/components/ConnectOtaSettings.tsx native/tests/connect-ota-about-20261117.test.cjs native/tests/connect-apk-update-20261117.test.cjs native/tests/android-ui-polish.test.cjs native/package.json native/package-lock.json native/PARITY_SOURCE_LOCK.json
+        git diff --cached --check
+        if git diff --cached --quiet; then
+          echo 'OTA source was already committed; safe to retry publication'
+        else
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" || { echo '::error::Main moved during validation; refusing unsafe push';exit 1; }
+          git -c user.name='Connect CI' -c user.email='actions@users.noreply.github.com' commit -m 'Android: native About version and safe OTA update controls'
+          git push origin HEAD:main
+        fi
+    - name: Publish signed-APK checker to Expo production without new APK
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -z "${EXPO_TOKEN:-}" ]]; then
+          echo '::error::EXPO_TOKEN missing. Source validated but OTA cannot publish. Add the secret and rerun.'
+          echo 'CONNECT_OTA_PUBLISHED=no_token' >> "$GITHUB_ENV"
+          exit 1
+        fi
+        # This is a new Expo project; its production channel might not exist yet.
+        # Create it only if absent. Do not change an existing channel's branch mapping.
+        EAS='npx --yes eas-cli@27.6.0'
+        if ! $EAS channel:view production --non-interactive >/dev/null 2>&1; then
+          echo 'Expo production channel is not configured; creating it for the first release'
+          $EAS channel:create production --non-interactive
+        fi
+        # Confirm the channel now resolves before attempting to publish.
+        $EAS channel:view production --non-interactive
+        # Publish exactly the previously tested Expo Android artifact; never rebuild with a different environment.
+        npx --yes eas-cli@27.6.0 update --channel production --platform android --environment production --input-dir "$RUNNER_TEMP/connect-ota-about-export" --skip-bundler --message 'Connect Android: in-app signed APK release checker' --non-interactive
+        echo 'CONNECT_OTA_PUBLISHED=yes' >> "$GITHUB_ENV"
+      working-directory: native
+      env:
+        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    - name: Report source/deployment status without false claims
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo '## Connect Android 3.0.7 — in-app signed APK updates'
+          echo '- Installed APK, signing certificate, native runtime: unchanged.'
+          if [[ "${CONNECT_OTA_PUBLISHED:-}" == yes ]]; then
+            echo '- Expo OTA: PUBLISHED to production. Restart Connect to receive the update.'
+          elif [[ "${CONNECT_OTA_PUBLISHED:-}" == no_token ]]; then
+            echo '- Expo OTA: NOT PUBLISHED. Add GitHub secret EXPO_TOKEN and rerun this workflow.'
+          else
+            echo '- Expo OTA: NOT CONFIRMED (check publish step or publish_ota input).'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+      if: always()
+    if: ${{ inputs.mode == 'setup' }}
+  release:
+    name: Publish signed APK for in-app version discovery
+    if: ${{ always() && (inputs.mode == 'publish-apk' || (inputs.mode == 'setup' && needs.update.result == 'success')) }}
+    needs:
+    - update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - name: Checkout release source provenance
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+    - name: Setup Android SDK signature verification
+      uses: android-actions/setup-android@v4
+    - name: Prepare verified APK signature and package tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        sdkmanager --install 'build-tools;37.0.0' >/dev/null
+        test -x "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/37.0.0/apksigner"
+    - name: Create immutable GitHub Release only from verified permanent-signed Connect APK
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        RUN_ID="${{ inputs.source_run_id }}"
+        ARTIFACT="${{ inputs.artifact_name }}"
+        [[ "$RUN_ID" =~ ^[0-9]{8,12}$ ]] || { echo '::error::Expected a valid Actions run id';exit 1; }
+        [[ "$ARTIFACT" =~ ^[A-Za-z0-9._-]{5,128}$ ]] || { echo '::error::Unsafe artifact name';exit 1; }
+        mkdir -p "$RUNNER_TEMP/connect-apk-release"
+        RUN_JSON="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+        export RUN_JSON
+        python3 - <<'PY_RUN_META_879'
+        import json,os
+        r=json.loads(os.environ['RUN_JSON'])
+        assert r['conclusion']=='success' and r['status']=='completed', 'Source APK workflow must be successful'
+        assert r['head_repository']['full_name']=='Chimera1988/connect-android', 'Wrong source repository'
+        assert r['head_branch']=='main', 'Only main builds are releasable'
+        assert r['name'].startswith('Connect Android'), 'Unexpected workflow'
+        print('Audited source run',r['id'],r['head_sha'])
+        PY_RUN_META_879
+        gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir "$RUNNER_TEMP/connect-apk-release"
+        APK="$RUNNER_TEMP/connect-apk-release/Connect.apk"
+        REPORT="$RUNNER_TEMP/connect-apk-release/APK-VERIFICATION.json"
+        test -s "$APK" && test -s "$REPORT"
+        export APK REPORT RUN_ID
+        python3 - <<'PY_VERIFY_META_876'
+        import os,json,re,hashlib
+        from pathlib import Path
+        apk=Path(os.environ['APK']);report=json.loads(Path(os.environ['REPORT']).read_text())
+        assert report['applicationId']=='com.connect.messenger'
+        version=report['version'];code=report['versionCode']
+        assert re.fullmatch(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',version)
+        assert type(code) is int and 25<=code<=2000000000
+        assert report['minSdk']==29
+        assert report['signing']=='supplied-release-key'
+        assert report['compatibleWithPreviousCertificate'] is True
+        assert report['signerSha256'].lower()=='a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130'
+        sha=hashlib.sha256(apk.read_bytes()).hexdigest()
+        assert sha==report['sha256'], 'APK digest differs from audited verification report'
+        if os.environ['RUN_ID']=='44152534236':
+         assert version=='3.0.7' and code==25
+         assert sha=='5d50755822cb2fd4c9fe781cd140b9dc164cf747cab9fce5ceec5caa37e3a5a8', 'Pinned 3.0.7 APK changed'
+        assert 5_000_000<apk.stat().st_size<200_000_000
+        base=Path(os.environ['RUNNER_TEMP'],'connect-apk-release')
+        (base/'release-tag.txt').write_text(f'connect-android-v{version}-b{code}')
+        (base/'release-version.txt').write_text(version)
+        (base/'release-code.txt').write_text(str(code))
+        (base/'release-sha.txt').write_text(sha)
+        print('Verified artifact report',version,code,sha)
+        PY_VERIFY_META_876
+        TOOLS="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/37.0.0"
+        test -x "$TOOLS/apksigner" && test -x "$TOOLS/aapt"
+        "$TOOLS/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/connect-apk-release/apk-signature.txt"
+        "$TOOLS/aapt" dump badging "$APK" > "$RUNNER_TEMP/connect-apk-release/apk-badging.txt"
+        python3 - <<'PY_VERIFY_APK_873'
+        import os,re
+        from pathlib import Path
+        base=Path(os.environ['RUNNER_TEMP'],'connect-apk-release')
+        sig=(base/'apk-signature.txt').read_text()
+        badge=(base/'apk-badging.txt').read_text()
+        match=re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]{64})',sig)
+        assert match and match.group(1).lower()=='a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130', 'APK signer differs from installed Connect'
+        assert "package: name='com.connect.messenger'" in badge
+        version=(base/'release-version.txt').read_text();code=(base/'release-code.txt').read_text()
+        assert "versionCode='"+code+"'" in badge and "versionName='"+version+"'" in badge
+        assert "sdkVersion:'29'" in badge
+        assert 'application-debuggable' not in badge
+        print('Actual APK package, Android 10 compatibility and permanent certificate verified')
+        PY_VERIFY_APK_873
+        TAG="$(cat "$RUNNER_TEMP/connect-apk-release/release-tag.txt")"
+        SHA="$(cat "$RUNNER_TEMP/connect-apk-release/release-sha.txt")"
+        VERSION="$(cat "$RUNNER_TEMP/connect-apk-release/release-version.txt")"
+        CODE="$(cat "$RUNNER_TEMP/connect-apk-release/release-code.txt")"
+        if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1;then
+          echo 'Existing release: verify matching APK digest without overwriting'
+        else
+          SRC_SHA="$(python3 -c 'import json,os;print(json.loads(os.environ["RUN_JSON"])["head_sha"])')"
+          gh release create "$TAG" "$APK#Connect.apk" \
+            --repo "$GITHUB_REPOSITORY" --target "$SRC_SHA" \
+            --title "Connect Android $VERSION ($CODE)" \
+            --notes "Проверенная подписанная сборка Connect Android $VERSION ($CODE). Подпись совместима с установленной Connect. Установите поверх предыдущей версии, не удаляя приложение. Обновления интерфейса публикуются отдельно через Expo OTA."
+        fi
+        DIGEST=''
+        for attempt in 1 2 3 4 5 6;do
+          DIGEST="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.assets[] | select(.name == "Connect.apk") | .digest' || true)"
+          if [[ "$DIGEST" == "sha256:$SHA" ]];then break;fi
+          sleep 3
+        done
+        [[ "$DIGEST" == "sha256:$SHA" ]] || { echo "::error::Missing or different Release SHA-256 for $TAG";exit 1; }
+        echo "::notice::Signed APK published to https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+    - name: Report published APK to GitHub Actions
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo '### Verified Connect Android APK published in GitHub Releases' >> "$GITHUB_STEP_SUMMARY"
+        echo 'Future versions can now be discovered inside Connect without searching for a workflow artifact.' >> "$GITHUB_STEP_SUMMARY"
