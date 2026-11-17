@@ -1468,6 +1468,7 @@ export default function Home() {
     return json;
   }
   const stickerCatalogEpoch=useRef(0);
+  const stickerVisibilityRefreshedAt=useRef(0);
   const stickerPriority=useRef<Set<string>>(new Set());
   const [stickerCatalogReady,setStickerCatalogReady]=useState(false);
   // A referenced personal sticker can be readable through a sent message even
@@ -1516,9 +1517,14 @@ export default function Home() {
           if(epoch!==stickerCatalogEpoch.current)return;
           if(!data?.signedUrl)continue;
           const signed=mediaUrl(data.signedUrl);
-          setCustomStickerUrls(prev=>prev[st.id]===signed?prev:{...prev,[st.id]:signed});
-          // Queue a small, account-scoped cache write. Never block the UI on it.
-          void prefetchStickerWebp(signed,viewer).catch(()=>{});
+          // CONNECT_ANDROID_STICKER_OFFLINE_FIRST_20261117: download at most once
+          // for this account/path, then display the local Blob instead of a network URL.
+          await prefetchStickerWebp(signed,viewer);
+          if(epoch!==stickerCatalogEpoch.current)return;
+          const cached=await resolveCachedMedia(identity,viewer);
+          if(epoch!==stickerCatalogEpoch.current)return;
+          const source=cached.startsWith('blob:')?cached:signed;
+          setCustomStickerUrls(prev=>prev[st.id]===source?prev:{...prev,[st.id]:source});
         }catch{/* Retry on next login/visibility refresh; never expose private packs. */}
       }
     };
@@ -1553,8 +1559,10 @@ export default function Home() {
           const {data:signed}=await client.storage.from('connect-stickers').createSignedUrl(st.storage_path,3600);
           if(!signed?.signedUrl)return null;
           const url=mediaUrl(signed.signedUrl);
-          void prefetchStickerWebp(url,owner).catch(()=>{});
-          return [st.id,url] as const;
+          await prefetchStickerWebp(url,owner);
+          if(!alive)return null;
+          const cached=await resolveCachedMedia(identity,owner);
+          return [st.id,cached.startsWith('blob:')?cached:url] as const;
         }catch{return null;}
       }));
       if(!alive)return;
@@ -1792,7 +1800,12 @@ export default function Home() {
   useEffect(()=>{
     if(!user)return;
     const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void loadDirectory()},60000);
-    const refresh=()=>{if(document.visibilityState==='visible'){void loadDirectory();void loadCustomStickers()}};
+    const refresh=()=>{if(document.visibilityState==='visible'){
+      void loadDirectory();
+      if(Date.now()-stickerVisibilityRefreshedAt.current>10*60*1000){
+        stickerVisibilityRefreshedAt.current=Date.now();void loadCustomStickers();
+      }
+    }};
     document.addEventListener('visibilitychange',refresh);
     return()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',refresh)};
   },[user?.id,loadDirectory,loadCustomStickers]);

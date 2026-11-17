@@ -116,6 +116,9 @@ export async function trimCache() {
     let temporary = rows.filter(x => x.category !== 'system').reduce((n, x) => n + x.size, 0), avatars = rows.filter(x => x.category === 'system' && !x.key.includes(':core')).reduce((n, x) => n + x.size, 0);
     const limit = Math.max(0,(LIMITS[cacheLimit()] || LIMITS.auto)-await nativeHistoryBytes());
     for (const row of rows) {
+        // CONNECT_ANDROID_STICKERS_PINNED_20261117: app-private IndexedDB is durable device storage.
+        // Signed URLs expire, but a stored image must not be evicted on a timer.
+        if (row.key.startsWith(owner + ':connect-stickers/')) continue;
         const avatar = row.category === 'system' && !row.key.includes(':core'), expired = Boolean((window as Window & {ConnectAndroid?:unknown;ConnectNative?:unknown}).ConnectAndroid||(window as Window & {ConnectAndroid?:unknown;ConnectNative?:unknown}).ConnectNative) && Date.now() - row.used > 30 * 86400000;
         if (row.category === 'system' ? !avatar || avatars <= 64 * 1024 ** 2 : temporary <= limit && !expired)
             continue;
