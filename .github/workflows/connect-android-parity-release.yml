@@ -74,6 +74,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v4.0.4
+      # Reuse only dependency/build caches; never substitute cached test results.
+      - uses: gradle/actions/setup-gradle@v4
       - name: Install locked dependencies and compile embedded UI
         run: |
           set -euo pipefail
@@ -135,9 +137,35 @@ jobs:
           # Use a bounded, larger Gradle metaspace and isolate Lint in its own
           # short-lived daemon; do not disable any Lint detectors or tests.
           gradle_jvm='-Xmx2560m -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8'
-          ./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest :app:assembleRelease \
-            --no-daemon --max-workers=2 "-Dorg.gradle.jvmargs=$gradle_jvm" \
-            2>&1 | tee ../verification/parity/gradle-build.log
+          # Maven Central dependencies exist, but run #44544521229 received
+          # unresolved Gradle plugin artifacts on a fresh runner. Retry only
+          # dependency-resolution failures, at most twice. Never hide build or
+          # test failures, and preserve each attempt in the artifacts.
+          build_targets=(
+            :app:compileReleaseKotlin
+            :app:compileReleaseJavaWithJavac
+            :app:testReleaseUnitTest
+            :app:assembleRelease
+          )
+          refresh=()
+          for attempt in 1 2 3; do
+            build_log="../verification/parity/gradle-build-attempt-${attempt}.log"
+            if ./gradlew "${build_targets[@]}" \
+              --no-daemon --max-workers=2 "-Dorg.gradle.jvmargs=$gradle_jvm" \
+              "${refresh[@]}" 2>&1 | tee "$build_log"; then
+              cp "$build_log" ../verification/parity/gradle-build.log
+              break
+            fi
+            if (( attempt == 3 )) || ! grep -Eq \
+              'Could not resolve all artifacts for configuration|Could not find (org\.jetbrains\.kotlin|io\.github\.java-diff-utils)|Could not (GET|HEAD)|Read timed out|Connection reset' \
+              "$build_log"; then
+              echo "::error::Gradle build failed; not a recoverable dependency download failure (attempt $attempt)." >&2
+              exit 1
+            fi
+            echo "::warning::Gradle dependency resolution failed (attempt $attempt/3). Retrying with refreshed dependencies."
+            sleep "$((15 * attempt))"
+            refresh=(--refresh-dependencies)
+          done
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
           # Fresh single-worker process releases compiler and native-build memory
           # before scanning icons and other Android resources.
