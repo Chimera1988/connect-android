@@ -1,0 +1,97 @@
+name: Connect Android | Diagnose signing compatibility
+run-name: Connect signing diagnosis (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-android-signing-diagnosis
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: Compare published APK and configured release key
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - name: Verify previously published APK and extract its public signer fingerprint
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/previous"
+          gh release download connect-android-v3.0.7-b25 \
+            --repo Chimera1988/connect-android \
+            --pattern Connect.apk --dir "$RUNNER_TEMP/previous"
+          apk="$RUNNER_TEMP/previous/Connect.apk"
+          printf '%s  %s\n' \
+            '5d50755822cb2fd4c9fe781cd140b9dc164cf747cab9fce5ceec5caa37e3a5a8' "$apk" | sha256sum --check
+          sdkmanager 'build-tools;37.0.0'
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify \
+            --verbose --print-certs "$apk" > "$RUNNER_TEMP/previous-cert.txt"
+          python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          t=Path(os.environ['RUNNER_TEMP'],'previous-cert.txt').read_text()
+          m=re.search(r'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]{64})',t)
+          if not m:raise SystemExit('Cannot establish actual previous APK signer')
+          fingerprint=m.group(1).lower()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('previous_cert='+fingerprint+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+            f.write('## Connect 3.0.7 certificate diagnosis\n')
+            f.write('- Previous GitHub APK: **SHA-256 verified and APK signature verified**\n')
+            f.write('- Actual APK signer SHA-256: `'+fingerprint+'`\n')
+            f.write('- Previously pinned fingerprint: `a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130`\n')
+            f.write('- Does pinned fingerprint match? **'+str(fingerprint=='a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130')+'**\n')
+          print('Published APK certificate fingerprint:',fingerprint)
+          PY
+      - name: Compare public fingerprint of configured keystore (no secrets printed)
+        env:
+          PREVIOUS_CERT: ${{ steps.previous.outputs.previous_cert }}
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CONNECT_RELEASE_KEYSTORE_BASE64" || -z "$CONNECT_RELEASE_STORE_PASSWORD" || -z "$CONNECT_RELEASE_KEY_ALIAS" || -z "$CONNECT_RELEASE_KEY_PASSWORD" ]]; then
+            printf '%s\n' '- Signing keystore secrets: **missing at least one of the four required secrets**' '- Result: **APK release blocked; no new APK signed**' >> "$GITHUB_STEP_SUMMARY"
+            echo '::warning::Some production signing secrets are missing. Nothing has been published.'
+            exit 0
+          fi
+          umask 077
+          keyfile="$RUNNER_TEMP/connect-diagnostic-release.jks"
+          trap 'rm -f "$keyfile" "$RUNNER_TEMP/keystore-certificate.txt"' EXIT
+          printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keyfile"
+          keytool -list -v -keystore "$keyfile" \
+            -alias "$CONNECT_RELEASE_KEY_ALIAS" \
+            -storepass:env CONNECT_RELEASE_STORE_PASSWORD \
+            -J-Duser.language=en > "$RUNNER_TEMP/keystore-certificate.txt"
+          python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          t=Path(os.environ['RUNNER_TEMP'],'keystore-certificate.txt').read_text()
+          m=re.search(r'SHA256:\s*([0-9A-Fa-f:]{95})',t)
+          if not m:raise SystemExit('Could not inspect the provided keystore certificate')
+          current=m.group(1).replace(':','').lower()
+          previous=os.environ['PREVIOUS_CERT'].lower()
+          same=current==previous
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+            f.write('- Configured release key SHA-256: `'+current+'`\n')
+            f.write('- Does current release key match the published APK? **'+str(same)+'**\n')
+            f.write('- Result: **'+('Matching release signing certificates; verify installed app certificate before release' if same else 'INCOMPATIBLE — do NOT publish an in-place APK update using this key')+'**\n')
+            f.write('\nDiagnostic success only means the comparison ran; it does not authorize a release or prove the certificate of the APK installed on a phone.\n')
+          print('Configured keystore public certificate SHA-256:',current)
+          print('Matches published APK:',same)
+          if not same:print('::warning::Release key does not match published Connect 3.0.7 APK; publication remains blocked.')
+          PY
