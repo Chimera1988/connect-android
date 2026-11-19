@@ -126,12 +126,24 @@ jobs:
           node scripts/check-parity-source.mjs --tools > verification/parity/android-tools.json
           readarray -t sdk < <(node -e "const v=require('./verification/parity/android-tools.json');console.log(v.sdkPlatform);console.log(v.buildTools);console.log(v.ndk)")
           sdkmanager --channel=3 "${sdk[0]}" "build-tools;${sdk[1]}" "ndk;${sdk[2]}" 'cmake;3.22.1' 'platform-tools'
-      - name: Kotlin, Java, JVM call tests, lint and unsigned release assembly
+      - name: Kotlin, Java, JVM call tests, unsigned APK and Android Lint
         working-directory: native/android
         run: |
           set -euo pipefail
-          ./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease --no-daemon --max-workers=2 2>&1 | tee ../verification/parity/gradle.log
+          # GitHub Actions run #44541390563 exhausted the default JVM metaspace in
+          # Android Lint IconDetector while native/CMake work was running.
+          # Use a bounded, larger Gradle metaspace and isolate Lint in its own
+          # short-lived daemon; do not disable any Lint detectors or tests.
+          gradle_jvm='-Xmx2560m -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8'
+          ./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest :app:assembleRelease \
+            --no-daemon --max-workers=2 "-Dorg.gradle.jvmargs=$gradle_jvm" \
+            2>&1 | tee ../verification/parity/gradle-build.log
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
+          # Fresh single-worker process releases compiler and native-build memory
+          # before scanning icons and other Android resources.
+          ./gradlew :app:lintRelease \
+            --no-daemon --max-workers=1 "-Dorg.gradle.jvmargs=$gradle_jvm" \
+            2>&1 | tee ../verification/parity/gradle-lint.log
       - name: Confirm sources were not rewritten by build
         run: |
           set -euo pipefail
