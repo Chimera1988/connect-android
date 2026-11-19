@@ -95,7 +95,8 @@ jobs:
           base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
           curl --fail --location --retry 2 "$base/$archive" --output "$tools/$archive"
           curl --fail --location --retry 2 "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt" --output "$tools/checksums.txt"
-          (cd "$tools" && rg " $archive\$" checksums.txt | sha256sum --check)
+          # Match the exact archive name without relying on ripgrep being installed.
+          (cd "$tools" && awk -v wanted="$archive" '$2 == wanted || $2 == ("*" wanted) { print; matched=1 } END { if (!matched) exit 1 }' checksums.txt | sha256sum --check)
           tar -xzf "$tools/$archive" -C "$tools" actionlint
           "$tools/actionlint" -color ../.github/workflows/connect-android-parity-release.yml
       - name: TypeScript, unit, integration, call, push and cache regressions
