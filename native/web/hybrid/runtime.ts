@@ -23,7 +23,7 @@ function request(command:string,payload:unknown={}){
     if(!window.ReactNativeWebView||!window.__CONNECT_NONCE__){reject(Error('Нет связи с Android'));return;}
     if(pending.size>=64){reject(Error('Слишком много одновременных действий. Повторите через секунду.'));return;}
     const id=String(++serial);
-    const timer=setTimeout(()=>{pending.delete(id);discardFile(id);if(command.startsWith('record'))emit('file:cancel',{id});if(command.startsWith('calls:'))emit('calls:timeout',{requestId:id,command});const labels:Record<string,string>={'calls:dial':'подготовку исходящего звонка','calls:accept':'принятие звонка','calls:end':'завершение звонка','calls:decline':'отклонение звонка','calls:route':'выбор аудиоустройства'};reject(Error(command.startsWith('calls:')?'Android не подтвердил '+(labels[command]||'управление звонком')+'. Проверьте экран вызова и сохраните диагностику.':'Android не завершил действие «'+command+'». Повторите после возвращения в приложение.'));},['recordVideo:open','recordVoice:start','sounds:pick','files:begin'].includes(command)?600000:60000);
+    const timer=setTimeout(()=>{pending.delete(id);discardFile(id);if(command.startsWith('record'))emit('file:cancel',{id});if(command.startsWith('calls:'))emit('calls:timeout',{requestId:id,command});const labels:Record<string,string>={'calls:dial':'подготовку исходящего звонка','calls:accept':'принятие звонка','calls:end':'завершение звонка','calls:decline':'отклонение звонка','calls:route':'выбор аудиоустройства'};reject(Error(command.startsWith('calls:')?'Android не подтвердил '+(labels[command]||'управление звонком')+'. Проверьте экран вызова и сохраните диагностику.':'Android не завершил действие «'+command+'». Повторите после возвращения в приложение.'));},['recordVideo:open','recordVoice:start','sounds:pick','files:begin'].includes(command)?600000:command==='updates:download'?240000:60000);
     pending.set(id,{resolve,reject,timer});
     try{post(id,command,payload);}catch(error){clearTimeout(timer);pending.delete(id);reject(error);}
   });
@@ -44,6 +44,7 @@ let fullScreenAllowed=true;
 let sounds={message:'Мягкий',call:'По умолчанию',messageCustom:false,callCustom:false,messageSilent:false,callSilent:false};
 window.__connectReceive=(type,data)=>{
   if(type==='ota-progress'){window.dispatchEvent(new CustomEvent('connect:ota-progress',{detail:data}));return;}
+  if(type==='ota-retry'){window.dispatchEvent(new CustomEvent('connect:ota-retry',{detail:data}));return;}
   if(type==='record-level'){window.dispatchEvent(new CustomEvent('connect:record-level',{detail:data}));return;}
   if(type==='response'){
     const r=data as Result,p=pending.get(r.id);if(!p){discardFile(r.id);return;}pending.delete(r.id);clearTimeout(p.timer);

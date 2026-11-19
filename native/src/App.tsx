@@ -7,6 +7,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import {readInstalledAppIdentity} from './installedAppIdentity';
 import * as Updates from 'expo-updates';
+import {downloadOtaWithNetworkRetry,isTransientOtaFailure} from './ConnectOtaNetwork';
 import {checkConnectApkRelease,type ConnectApkCandidate} from './ConnectApkUpdates';
 import {WebView,WebViewMessageEvent} from 'react-native-webview';
 import notifee from '@notifee/react-native';
@@ -47,7 +48,7 @@ function HybridConnect(){
   const send=useCallback((type:string,data:unknown)=>{
     if(!mounted.current)return;
     if(!loaded.current){
-      if(['call','sounds','lifecycle','chat','native-session','ota-progress'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);
+      if(['call','sounds','lifecycle','chat','native-session','ota-progress','ota-retry'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);
       if(queued.current.length>=32)queued.current.shift();
       queued.current.push([type,data]);return;
     }
@@ -210,7 +211,10 @@ function HybridConnect(){
         case 'updates:download':{
           if(!Updates.isEnabled)throw Error('Обновления Expo недоступны');
           if(otaStateRef.current.isUpdatePending||otaDownloaded.current){result={state:'ready'};break;}
-          const fetched=await Updates.fetchUpdateAsync();
+          const fetched=await downloadOtaWithNetworkRetry(
+            ()=>Updates.fetchUpdateAsync(),
+            notice=>send('ota-retry',notice),
+          );
           if(!fetched.isNew&&!fetched.isRollBackToEmbedded){result={state:'current'};break;}
           otaDownloaded.current=true;result={state:'ready'};break;
         }
@@ -348,7 +352,14 @@ function HybridConnect(){
         default:throw Error('Команда пока недоступна');
       }
       traceCall('DONE');respond(true,result);
-    }catch(e){traceCall('ERROR');if(command==='register')send('push-status',{ok:false});respond(false,undefined,e instanceof Error?e.message:'Ошибка Android');}
+    }catch(e){
+      traceCall('ERROR');
+      if(command==='register')send('push-status',{ok:false});
+      const message=command==='updates:download'&&isTransientOtaFailure(e)
+        ?'Не удалось загрузить OTA с сервера Expo. Три попытки не помогли: проверьте доступ к assets.eascdn.net через Wi-Fi, DNS или фильтры сети. Повторите позже.'
+        :e instanceof Error?e.message:'Ошибка Android';
+      respond(false,undefined,message);
+    }
     finally{if(category)busy.current.delete(category);}
   }
   const source=useMemo(()=>initial===undefined?null:{html:pwa.replace('<head>','<head><script>window.__CONNECT_NONCE__='+JSON.stringify(nonce)+';window.__CONNECT_INITIAL_SESSION__='+JSON.stringify(initial)+';</script>'),baseUrl:CONNECT_ORIGIN+'/'},[initial,nonce]);

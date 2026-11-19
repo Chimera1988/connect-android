@@ -22,7 +22,7 @@ test('OTA fraction comes from Expo useUpdates and is bounded to [0,1]',()=>{
 });
 
 test('existing nonce-bound bridge sends native progress events without adding arbitrary commands',()=>{
-  assert.match(native,/\['call','sounds','lifecycle','chat','native-session','ota-progress'\]/);
+  assert.match(native,/\['call','sounds','lifecycle','chat','native-session','ota-progress','ota-retry'\]/);
   assert.match(runtime,/if\(type==='ota-progress'\)/);
   assert.match(runtime,/new CustomEvent\('connect:ota-progress',\{detail:data\}\)/);
   assert.doesNotMatch(ui,/EXPO_TOKEN|SERVICE_ROLE_KEY|fetch\(/);

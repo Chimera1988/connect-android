@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 
 type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean;downloading?:boolean;downloadProgress?:number|null};
 type OtaProgressEvent={downloading:boolean;progress:number|null};
+type OtaRetryEvent={attempt:number;maxAttempts:number;waitMs:number};
 function validFraction(value:unknown):number|null{
   return typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(1,value)):null;
 }
@@ -15,6 +16,7 @@ export default function ConnectOtaSettings(){
   const [state,setState]=useState<OtaState>('loading');
   const [error,setError]=useState('');
   const [downloadFraction,setDownloadFraction]=useState<number|null>(null);
+  const [retryAttempt,setRetryAttempt]=useState<number|null>(null);
   const [apkInfo,setApkInfo]=useState<ApkInfo|null>(null);
   const [apkState,setApkState]=useState<ApkState>('checking');
   const [apkError,setApkError]=useState('');
@@ -26,8 +28,19 @@ export default function ConnectOtaSettings(){
       const fraction=validFraction(data.progress);
       if(fraction!==null)setDownloadFraction(old=>Math.max(old??0,fraction));
     };
+    const handleRetry=(event:Event)=>{
+      const data=(event as CustomEvent<OtaRetryEvent>).detail;
+      if(!data||!Number.isInteger(data.attempt)||data.attempt<2||data.attempt>3)return;
+      setDownloadFraction(null);
+      setRetryAttempt(data.attempt);
+      setState('downloading');
+    };
     window.addEventListener('connect:ota-progress',handle);
-    return()=>window.removeEventListener('connect:ota-progress',handle);
+    window.addEventListener('connect:ota-retry',handleRetry);
+    return()=>{
+      window.removeEventListener('connect:ota-progress',handle);
+      window.removeEventListener('connect:ota-retry',handleRetry);
+    };
   },[]);
   useEffect(()=>{
     let alive=true;
@@ -57,6 +70,7 @@ export default function ConnectOtaSettings(){
     const bridge=window.ConnectNative;
     if(!bridge)return;
     setError('');
+    setRetryAttempt(null);
     if(command!=='updates:apply')setDownloadFraction(null);
     setState(command==='updates:check'?'checking':command==='updates:download'?'downloading':'restarting');
     try{
@@ -104,7 +118,7 @@ export default function ConnectOtaSettings(){
   const showProgress=progress||state==='ready';
   const progressPercent=state==='ready'?100:state==='downloading'&&downloadFraction!==null?Math.round(downloadFraction*100):null;
   const status=state==='loading'?'Получаем сведения о версии…':
-    state==='checking'?'Проверяем обновления…':state==='downloading'?'Скачиваем проверенное обновление…':
+    state==='checking'?'Проверяем обновления…':state==='downloading'?(retryAttempt?`Повторяем загрузку OTA — попытка ${retryAttempt} из 3…`:'Скачиваем проверенное обновление…'):
     state==='restarting'?'Перезапускаем Connect…':state==='available'?'Доступно совместимое обновление интерфейса.':
     state==='ready'?'Обновление загружено и готово к применению.':
     state==='current'?'Обновлений интерфейса пока нет.':
