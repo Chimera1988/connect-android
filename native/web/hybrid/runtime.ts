@@ -43,6 +43,7 @@ function rejectTransfer(id:string,message:string){
 let fullScreenAllowed=true;
 let sounds={message:'Мягкий',call:'По умолчанию',messageCustom:false,callCustom:false,messageSilent:false,callSilent:false};
 window.__connectReceive=(type,data)=>{
+  if(type==='ota-progress'){window.dispatchEvent(new CustomEvent('connect:ota-progress',{detail:data}));return;}
   if(type==='record-level'){window.dispatchEvent(new CustomEvent('connect:record-level',{detail:data}));return;}
   if(type==='response'){
     const r=data as Result,p=pending.get(r.id);if(!p){discardFile(r.id);return;}pending.delete(r.id);clearTimeout(p.timer);

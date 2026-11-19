@@ -119,7 +119,7 @@
     "scripts/verify-call-resources.py": "cfe785d9a7692eb39abe251fc10b02301f1a345c5695dfb5ffbe8af652628980",
     "shared/call-missed-fixtures.tsv": "0709375ba37a6302c2ce6b3dbf8abc9d82ec1be20ea9b806c076a1ecf8fb6a00",
     "shared/call-missed-policy.json": "5289083182fbbb93de4cbd9d9987dac0ecfb21b86339468f09d25a2dd41122a8",
-    "src/App.tsx": "7247ba39d2c2fe76e689a3ea55ec2514d285fccd9986c47bf4e11c275b97ade6",
+    "src/App.tsx": "f3941526a98bb64f259413f7f0cd0996b0199929cd17ee81c7e2b6d7f9631d0c",
     "src/ConnectHybridFiles.ts": "d18520aeba19011df591489da0fd9aff068d8d1f0eb9161671ccdf13a40237bc",
     "src/ConnectHybridRecorder.tsx": "277c5bf7bc244ae46d210609d3c450cefc991a3f7c2d6500b7facd41c8445c74",
     "src/ConnectNativeAlbum.tsx": "64f6603bfd13b0993f19085c101d09be8cc4b013f9669430402466eebd21b9b7",
@@ -226,10 +226,10 @@
     "web/components/InvitationCodes.tsx": "7232a34ec2ffe5d787309f6471a765f689b0b04c2f07a6cbd7132ce99d458e0d",
     "web/components/InviteShareButton.tsx": "220bbcf84dd70f8b76388339e3e3a89304def7b94e4ff83ea301e48bf92ff804",
     "web/hybrid/NativeCallSurface.tsx": "66b3f69490db9d17e7bfde73d8a9bceb71aaeeb8b87a4263660249c5fc45fdda",
-    "web/hybrid/android.css": "44472ba9339fca8785306901c2c3a6bcd61905be925875d71021c955fe282d5c",
+    "web/hybrid/android.css": "e7274226c8c9b15df65e5637a49bfc10d04569c2e45f5f83e0e2baaac9f1f99f",
     "web/hybrid/bridge-types.d.ts": "c72df93a0930448af7f42768e78924731360cc943eb2c2e1d0e0bae5c7634d40",
     "web/hybrid/main.tsx": "281588c80fe7f011f0e3a18fe8f1dc396bf93ad1bdcd53e4a1c4f57407f7c274",
-    "web/hybrid/runtime.ts": "b3e9ce924df2d53a03455e8f0afe31735fe3ac447f49619f4ffdaf7dd1aa806a",
+    "web/hybrid/runtime.ts": "72a54279c633b7327e9ada22529c11d91a09784ad57f3a7ec991a1303b3e9d5a",
     "web/hybrid/styles.d.ts": "35d26ea66c86da9701e4f4b467913481ffeae910761cea34c775c5dacb7f8eaa",
     "web/index.html": "444ae64cc7441459747a46f32855c3821b244fef5a16764c49e1632ed1d46eb8",
     "web/lib/android-sound-policy.ts": "eaa40aa4e619f60df61ebb116bf79293558661178ba8be9e2b24d78f22e1703d",
@@ -381,7 +381,7 @@
     "web/lib/avatar-directory-cache.ts": "4216e0f6ea2e30470509f9c0d5050f80eb6595b59eb3a512f51d50cb193fdd4b",
     "tests/android-media-egress.test.cjs": "fc4aa5cf7fb3409d58c99f9681fa01e813687699870cbc15fab209dd04d179fe",
     "tests/android-incoming-waveform.test.cjs": "89e46bd39844e870787560bb5c634641a6d2248a15c90d1528385c11c323a604",
-    "web/components/ConnectOtaSettings.tsx": "42e305e1328ebcd8a887de220a2e5131f52916bbd0dc1f1f5bee452d968dcf30",
+    "web/components/ConnectOtaSettings.tsx": "81d8b1159fae54bf8d70e2ed2d06eebe4fe560fc50c1e8a84362e2b22713f7d4",
     "tests/connect-ota-about-20261117.test.cjs": "d09292ab8044fc4f515d6478129aaa00daffa7fc0c8db67f68e5274e108bde7f",
     "src/ConnectApkUpdates.ts": "4be722db05c1ddf843eb80bee0696518a194bc991d196ceee2b78b89fc9fdda3",
     "tests/connect-apk-update-20261117.test.cjs": "cc2a117f92ce71b741579c49187afb6b534012b74b18a00668afa72f54f5d40d",
@@ -413,6 +413,7 @@
     "web/lib/session-network-fence.ts": "385ab20683c6768fbc7cf43b2902cc99889c869e75731eb59abb048177e064cd",
     "tests/parity-release.test.cjs": "976cdbeccdc8591d59c40f4df09c2d03cd6756facb8621a3b56ec78a4e221c05",
     "tests/web-logout-fence.test.cjs": "9389946cb61ea8753e3976819acf616bff1f8b72c752e25d5e5f4c08bf032bf0",
-    "tests/logout-notifications.test.cjs": "ad7e24b7527fc9434d8f10865aad4702bbcfaf65b4139f3823ff574f7e04d0f3"
+    "tests/logout-notifications.test.cjs": "ad7e24b7527fc9434d8f10865aad4702bbcfaf65b4139f3823ff574f7e04d0f3",
+    "tests/connect-ota-progress-20261119.test.cjs": "4bb6621066668cd3328fdb64cb72751451c3b9a9b727010cbabbeaf6517245f7"
   }
 }

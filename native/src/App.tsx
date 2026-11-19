@@ -47,13 +47,20 @@ function HybridConnect(){
   const send=useCallback((type:string,data:unknown)=>{
     if(!mounted.current)return;
     if(!loaded.current){
-      if(['call','sounds','lifecycle','chat','native-session'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);
+      if(['call','sounds','lifecycle','chat','native-session','ota-progress'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);
       if(queued.current.length>=32)queued.current.shift();
       queued.current.push([type,data]);return;
     }
     const js=`window.__connectReceive&&window.__connectReceive(${JSON.stringify(type)},${JSON.stringify(data)});true;`;
     web.current?.injectJavaScript(js);
   },[]);
+  // Report real Expo asset-download progress; never synthesize a percentage from elapsed time.
+  useEffect(()=>{
+    const raw=otaState.downloadProgress;
+    const fraction=otaState.isDownloading&&typeof raw==='number'&&Number.isFinite(raw)
+      ?Math.min(1,Math.max(0,raw)):null;
+    send('ota-progress',{downloading:otaState.isDownloading,progress:fraction});
+  },[send,otaState.isDownloading,otaState.downloadProgress]);
   const abortTransfers=useCallback(()=>{
     for(const id of saves.current.keys())void cancelSave(id).catch(()=>{});saves.current.clear();
     for(const transfer of fileTransfers.current.values()){
@@ -189,6 +196,9 @@ function HybridConnect(){
           const installed=await readInstalledAppIdentity(NativeModules.ConnectIncomingCallModule);
           result={version:installed.version,build:installed.build,
             enabled:Updates.isEnabled,pending:otaStateRef.current.isUpdatePending||otaDownloaded.current,
+            downloading:otaStateRef.current.isDownloading,
+            downloadProgress:otaStateRef.current.isDownloading&&typeof otaStateRef.current.downloadProgress==='number'&&Number.isFinite(otaStateRef.current.downloadProgress)
+              ?Math.min(1,Math.max(0,otaStateRef.current.downloadProgress)):null,
             channel:Updates.channel||null,runtime:Updates.runtimeVersion||null,embedded:Updates.isEmbeddedLaunch};break;
         }
         case 'updates:check':{

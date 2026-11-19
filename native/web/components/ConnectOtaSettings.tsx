@@ -1,6 +1,10 @@
 import {useEffect,useState} from 'react';
 
-type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean};
+type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean;downloading?:boolean;downloadProgress?:number|null};
+type OtaProgressEvent={downloading:boolean;progress:number|null};
+function validFraction(value:unknown):number|null{
+  return typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(1,value)):null;
+}
 type OtaState='loading'|'idle'|'checking'|'current'|'available'|'downloading'|'ready'|'restarting'|'disabled'|'error';
 type ApkInfo={state:'unpublished'|'current'|'available';version?:string;build?:number;size?:number};
 type ApkState='checking'|'unpublished'|'current'|'available'|'opening'|'opened'|'error';
@@ -10,9 +14,21 @@ export default function ConnectOtaSettings(){
   const [info,setInfo]=useState<OtaInfo|null>(null);
   const [state,setState]=useState<OtaState>('loading');
   const [error,setError]=useState('');
+  const [downloadFraction,setDownloadFraction]=useState<number|null>(null);
   const [apkInfo,setApkInfo]=useState<ApkInfo|null>(null);
   const [apkState,setApkState]=useState<ApkState>('checking');
   const [apkError,setApkError]=useState('');
+  useEffect(()=>{
+    const handle=(event:Event)=>{
+      const data=(event as CustomEvent<OtaProgressEvent>).detail;
+      if(!data||data.downloading!==true)return;
+      setState(old=>old==='ready'||old==='restarting'||old==='disabled'?old:'downloading');
+      const fraction=validFraction(data.progress);
+      if(fraction!==null)setDownloadFraction(old=>Math.max(old??0,fraction));
+    };
+    window.addEventListener('connect:ota-progress',handle);
+    return()=>window.removeEventListener('connect:ota-progress',handle);
+  },[]);
   useEffect(()=>{
     let alive=true;
     const bridge=window.ConnectNative;
@@ -20,7 +36,8 @@ export default function ConnectOtaSettings(){
     void bridge.request('updates:info',{}).then((value:OtaInfo)=>{
       if(!alive)return;
       setInfo(value);
-      setState(!value.enabled?'disabled':value.pending?'ready':'idle');
+      setDownloadFraction(value.pending?1:validFraction(value.downloadProgress));
+      setState(!value.enabled?'disabled':value.pending?'ready':value.downloading?'downloading':'idle');
     }).catch((reason:unknown)=>{
       if(!alive)return;
       setError(reason instanceof Error?reason.message:'Не удалось проверить состояние обновлений.');
@@ -40,12 +57,17 @@ export default function ConnectOtaSettings(){
     const bridge=window.ConnectNative;
     if(!bridge)return;
     setError('');
+    if(command!=='updates:apply')setDownloadFraction(null);
     setState(command==='updates:check'?'checking':command==='updates:download'?'downloading':'restarting');
     try{
       const response=await bridge.request(command,{});
       if(command==='updates:apply')return;
       const next=response?.state;
-      if(next==='available'||next==='ready'||next==='current')setState(next);
+      if(next==='available'||next==='ready'||next==='current'){
+        if(next==='ready')setDownloadFraction(1);
+        else if(next==='current')setDownloadFraction(null);
+        setState(next);
+      }
       else throw Error('Android вернул неизвестное состояние обновления.');
     }catch(reason){
       setError(reason instanceof Error?reason.message:'Не удалось выполнить обновление.');
@@ -79,6 +101,8 @@ export default function ConnectOtaSettings(){
     }
   }
   const progress=state==='checking'||state==='downloading'||state==='restarting';
+  const showProgress=progress||state==='ready';
+  const progressPercent=state==='ready'?100:state==='downloading'&&downloadFraction!==null?Math.round(downloadFraction*100):null;
   const status=state==='loading'?'Получаем сведения о версии…':
     state==='checking'?'Проверяем обновления…':state==='downloading'?'Скачиваем проверенное обновление…':
     state==='restarting'?'Перезапускаем Connect…':state==='available'?'Доступно совместимое обновление интерфейса.':
@@ -103,6 +127,19 @@ export default function ConnectOtaSettings(){
     <p className="settings-hint"><strong>Обновления интерфейса</strong></p>
     <p className="settings-hint">Совместимые изменения интерфейса загружаются по воздуху через Expo, без установки APK.</p>
     <p className="connect-ota-status" role="status" aria-live="polite">{status}</p>
+    {showProgress&&<div className="connect-ota-progress-area">
+      <div className={'connect-ota-progress-track'+(progressPercent===null?' is-indeterminate':'')}
+        role="progressbar" aria-label="Загрузка обновления интерфейса"
+        aria-valuemin={0} aria-valuemax={100}
+        aria-valuenow={progressPercent===null?undefined:progressPercent}
+        aria-valuetext={progressPercent===null?status:`${progressPercent}%`}>
+        <span className="connect-ota-progress-fill" style={progressPercent===null?undefined:{width:`${progressPercent}%`}}/>
+      </div>
+      <p className="settings-hint connect-ota-progress-caption">
+        {state==='ready'?'Загружено 100% — можно применить обновление.':
+          state==='downloading'?(progressPercent===null?'Загружаем… процент пока недоступен.':`Загружено ${progressPercent}%`):status}
+      </p>
+    </div>}
     {state==='ready'?<button type="button" className="settings-action" disabled={progress} onClick={()=>void run('updates:apply')}>Применить и перезапустить</button>:
       state==='available'?<button type="button" className="settings-action" disabled={progress} onClick={()=>void run('updates:download')}>Скачать обновление</button>:
       state!=='disabled'&&state!=='loading'&&state!=='restarting'?<button type="button" className="settings-action" disabled={progress} onClick={()=>void run('updates:check')}>Проверить обновления интерфейса</button>:null}
