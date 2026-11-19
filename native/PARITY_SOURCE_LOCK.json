@@ -409,7 +409,7 @@
     "scripts/release/check-production-env.mjs": "71764855b0eca5e6655a673688828c3917816cf3dfca1970c67b302b8d452ceb",
     "scripts/release/summary.mjs": "badf091d3d44618f636719b8e439d53961fad4151745986ad99d8f24477942a9",
     "scripts/release/finalize-apk.mjs": "b3e8db6d6fc47dd632e24c2fe8c1514426274483d8042f39f355d4c07b5f564a",
-    "../.github/workflows/connect-android-parity-release.yml": "47f35cb837b423927d227282013669a1c11344e69843f19a5792d275cbf47d6c",
+    "../.github/workflows/connect-android-parity-release.yml": "212337dc89484e2366a4016cd8592bae73829c713b7227db4a4feaa3e5783605",
     "web/lib/session-network-fence.ts": "385ab20683c6768fbc7cf43b2902cc99889c869e75731eb59abb048177e064cd",
     "tests/parity-release.test.cjs": "976cdbeccdc8591d59c40f4df09c2d03cd6756facb8621a3b56ec78a4e221c05",
     "tests/web-logout-fence.test.cjs": "9389946cb61ea8753e3976819acf616bff1f8b72c752e25d5e5f4c08bf032bf0",
