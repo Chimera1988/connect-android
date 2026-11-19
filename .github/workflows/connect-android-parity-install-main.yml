@@ -1237,10 +1237,12 @@ jobs:
           set -euo pipefail
           npm ci --no-audit --no-fund
           node scripts/check-parity-source.mjs
+          # App.tsx imports src/generated/pwa.ts, created by build:web.
+          # Build first: this generated file is intentionally git-ignored.
+          npm run build:web
           npm run typecheck:web
           npm run typecheck
           npm test
-          npm run build:web
           node scripts/check-parity-source.mjs
           git diff --check
       - name: Commit tested sources directly to main (no pull request)
