@@ -1,0 +1,140 @@
+name: Connect Android | Fix Chromium browser cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-browser-cleanup-fix
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Fix, test and commit browser cleanup to main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Check repository and reviewed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test -s native/scripts/test-cache-browser.mjs
+          test -s native/PARITY_SOURCE_LOCK.json
+          test -s .github/workflows/connect-android-parity-release.yml
+          git diff --check
+      - name: Fix Chromium shutdown and update only its SHA-256 lock entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_FIX'
+          import hashlib, json
+          from pathlib import Path
+
+          script=Path('native/scripts/test-cache-browser.mjs')
+          lock_path=Path('native/PARITY_SOURCE_LOCK.json')
+          old_sha='8195eb25193bed96017da4aa3925f3a427d77d7876c5cb3ec3b9451ffb3b207f'
+          new_sha='6c15be70064b3c6ea9c466ffcf42a30789547dd2b8eafbbea0f581ad0350771e'
+          sha=lambda data:hashlib.sha256(data).hexdigest()
+          source=script.read_text(encoding='utf-8')
+          actual=sha(source.encode('utf-8'))
+          if actual==old_sha:
+              old='let socket,serial=0,errors=[];const waiting=new Map();'
+              new='''// Wait for the entire Chromium process to close before deleting its user-data directory.
+          // A fixed delay is not sufficient: its subprocesses can still write into Default/.
+          const chromeClosed=new Promise(done=>{chrome.once('close',done);chrome.once('error',done);});
+          let socket,serial=0,errors=[];const waiting=new Map();'''
+              old_final="}finally{clearTimeout(deadline);socket?.close();chrome.kill('SIGTERM');server.close();await new Promise(done=>setTimeout(done,100));await rm(folder,{recursive:true,force:true});}"
+              new_final='''}finally{
+           clearTimeout(deadline);
+           try{socket?.close();}catch{/* Chromium might have closed the CDP socket already. */}
+           chrome.kill('SIGTERM');
+           const forceKill=setTimeout(()=>chrome.kill('SIGKILL'),5000);
+           try{await chromeClosed;}finally{clearTimeout(forceKill);}
+           await new Promise((done,reject)=>server.close(error=>error?reject(error):done()));
+           await rm(folder,{recursive:true,force:true,maxRetries:10,retryDelay:150});
+          }'''
+              if source.count(old)!=1 or source.count(old_final)!=1:
+                  raise SystemExit('SOURCE_DRIFT: Chromium cleanup anchors changed; refusing edits')
+              source=source.replace(old,new,1).replace(old_final,new_final,1)
+              if sha(source.encode('utf-8'))!=new_sha:
+                  raise SystemExit('Patch SHA mismatch; refusing edits')
+              script.write_text(source,encoding='utf-8')
+          elif actual!=new_sha:
+              raise SystemExit('SOURCE_DRIFT: unexpected browser test version '+actual)
+
+          lock=json.loads(lock_path.read_text(encoding='utf-8'))
+          entry='scripts/test-cache-browser.mjs'
+          if lock['files'].get(entry) not in (old_sha,new_sha):
+              raise SystemExit('SOURCE_DRIFT: browser test checksum in source lock')
+          release=Path('.github/workflows/connect-android-parity-release.yml')
+          expected=lock['files'].get('../.github/workflows/connect-android-parity-release.yml')
+          if not expected or sha(release.read_bytes())!=expected:
+              raise SystemExit('SOURCE_DRIFT: release workflow checksum differs; fix separately')
+          if lock['files'][entry]!=new_sha:
+              lock['files'][entry]=new_sha
+              lock_path.write_text(json.dumps(lock,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          assert sha(script.read_bytes())==new_sha
+          print('Browser teardown SHA-256 verified:',new_sha)
+          print('Release workflow unchanged; lock entries:',len(lock['files']))
+          PY_FIX
+          node --check native/scripts/test-cache-browser.mjs
+          git diff --check
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Test repaired Chromium lifecycle and source integrity
+        shell: bash
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/check-parity-source.mjs
+          npm run build:web
+          npm run typecheck:web
+          npm run typecheck
+          npx --no-install playwright-core install --with-deps chromium
+          CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          export CHROMIUM_PATH
+          test -x "$CHROMIUM_PATH"
+          npm run test:browser
+          npm run test:browser
+          npm test
+          node scripts/check-parity-source.mjs
+      - name: Commit only tested browser teardown and SHA lock to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" || {
+            echo '::error::main changed during verification; no push'; exit 1;
+          }
+          git add -- native/scripts/test-cache-browser.mjs native/PARITY_SOURCE_LOCK.json
+          git diff --cached --check
+          python3 - <<'PY_FILES'
+          import subprocess
+          changed=set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())
+          allowed={'native/scripts/test-cache-browser.mjs','native/PARITY_SOURCE_LOCK.json'}
+          if changed and changed!=allowed:
+              raise SystemExit(f'Unexpected staged paths: {sorted(changed)}')
+          print('Only approved files staged:',sorted(changed))
+          PY_FILES
+          if git diff --cached --quiet; then
+            echo 'Already repaired; nothing to commit.'
+            exit 0
+          fi
+          git -c user.name='Connect CI' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Android: await Chromium exit before removing browser test profile'
+          git push origin HEAD:refs/heads/main
+          echo 'Browser cleanup repaired and committed to main. No APK or OTA was published.' >> "$GITHUB_STEP_SUMMARY"
