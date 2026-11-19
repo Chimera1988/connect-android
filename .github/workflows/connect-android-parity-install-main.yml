@@ -1236,6 +1236,10 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          # Chromium headless shell must match the locally locked playwright-core version.
+          # The media optimizer regression launches a real browser during npm test.
+          npx --no-install playwright-core install --with-deps chromium
+          node -e "const fs=require('node:fs');const p=require('playwright-core').chromium.executablePath();if(!fs.existsSync(p)){throw new Error('PLAYWRIGHT_CHROMIUM_MISSING '+p)}"
           node scripts/check-parity-source.mjs
           # App.tsx imports src/generated/pwa.ts, created by build:web.
           # Build first: this generated file is intentionally git-ignored.
