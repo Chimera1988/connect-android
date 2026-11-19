@@ -112,7 +112,7 @@
     "scripts/check_release_signing.py": "66b587fae54de6118069382c9a48744c97ff0ce3fdadf5e1fb821adf7ce40f79",
     "scripts/embed-web.mjs": "948f184c341821bf5e3667b819abb25829d8060ec7cea034fa7af3af9699a92c",
     "scripts/generate-call-policy.cjs": "f445667273a33e9481decade64a922e303552e84434591c55ea7bb4673faec5b",
-    "scripts/test-cache-browser.mjs": "8195eb25193bed96017da4aa3925f3a427d77d7876c5cb3ec3b9451ffb3b207f",
+    "scripts/test-cache-browser.mjs": "6c15be70064b3c6ea9c466ffcf42a30789547dd2b8eafbbea0f581ad0350771e",
     "scripts/test_release_signing.py": "bf1df7e5c133ffa989ff226e3199e479f7fe03366b29c97c85a40d9ac09cd928",
     "scripts/verify-apk.py": "00b5986de244d7a01f35cfc5b22e19e563bf6fe93c9dced05cf1847fd92c468b",
     "scripts/verify-builtin-sounds.cjs": "65c13bbb426757fb08947d0420bb7be284939a052b825544f0a599068e381696",
