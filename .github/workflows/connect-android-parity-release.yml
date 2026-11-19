@@ -105,7 +105,8 @@ jobs:
           npm run typecheck:web 2>&1 | tee verification/parity/typecheck-web.log
           npm run typecheck 2>&1 | tee verification/parity/typecheck-native.log
           npx --no-install playwright-core install --with-deps chromium
-          export CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          export CHROMIUM_PATH
           test -x "$CHROMIUM_PATH"
           python3 -m unittest discover -s scripts -p 'test_release_signing.py'
           node scripts/verify-builtin-sounds.cjs
