@@ -5,12 +5,12 @@ import {StatusBar} from 'expo-status-bar';
 import * as Crypto from 'expo-crypto';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
+import {readInstalledAppIdentity} from './installedAppIdentity';
 import * as Updates from 'expo-updates';
 import {checkConnectApkRelease,type ConnectApkCandidate} from './ConnectApkUpdates';
 import {WebView,WebViewMessageEvent} from 'react-native-webview';
 import notifee from '@notifee/react-native';
-import {db,mediaUrl,type Profile} from './backend';
+import {db,mediaUrl,lockNativeSession,unlockNativeSession,type Profile} from './backend';
 import {parseHybridMessage,CONNECT_ORIGIN} from './hybridProtocol';
 import {useConnectNativeVoice} from './ConnectNativeVoice';
 import {subscribeNativePush,registerNativePushNow,getNativePushSubscriptionStatus,testNativeMessagePush,getNativePushDiagnostics,disableNativePush,setVisibleConversation,rememberReadAt,dismissChatPush} from './ConnectNativePush';
@@ -186,7 +186,8 @@ function HybridConnect(){
       if(command.startsWith('calls:')&&command!=='calls:accept'&&p.callId&&p.callId!==v.shown?.id)throw Error('Этот звонок уже завершён');
       switch(command){
         case 'updates:info':{
-          result={version:Constants.expoConfig?.version||'неизвестна',build:Constants.platform?.android?.versionCode??Constants.expoConfig?.android?.versionCode??null,
+          const installed=await readInstalledAppIdentity(NativeModules.ConnectIncomingCallModule);
+          result={version:installed.version,build:installed.build,
             enabled:Updates.isEnabled,pending:otaStateRef.current.isUpdatePending||otaDownloaded.current,
             channel:Updates.channel||null,runtime:Updates.runtimeVersion||null,embedded:Updates.isEmbeddedLaunch};break;
         }
@@ -212,7 +213,7 @@ function HybridConnect(){
           return;
         }
         case 'updates:apk-check':{
-          const installedBuild=Number(Constants.platform?.android?.versionCode??Constants.expoConfig?.android?.versionCode??0);
+          const {build:installedBuild}=await readInstalledAppIdentity(NativeModules.ConnectIncomingCallModule);
           const checked=await checkConnectApkRelease(installedBuild);
           apkCandidate.current=checked.candidate??null;
           result={state:checked.state,version:checked.version??null,build:checked.build??null,size:checked.size??null};
@@ -259,9 +260,17 @@ function HybridConnect(){
         case 'session': {
           const session=message.payload as {access_token:string;refresh_token:string}|null;
           authQueue.current=authQueue.current.catch(()=>{}).then(async()=>{
-            if(!session){await disableNativePush();await db.auth.signOut({scope:'local'});currentToken.current='';return;}
+            if(!session){
+              const previous={userId:currentToken.current?ownerId:'',accessToken:currentToken.current};
+              currentToken.current='';setOwnerId('');active.current='';setVisibleConversation(null);abortTransfers();
+              await lockNativeSession(previous.userId?()=>NativeModules.ConnectHistory.execute(previous.userId,'wipe','{}'):undefined);
+              // Session is already unusable even if remote deregistration fails.
+              await db.auth.signOut({scope:'local'});
+              await disableNativePush(previous);return;
+            }
             if(currentToken.current===session.access_token)return;
-            const {error}=await db.auth.setSession(session);if(error)throw error;currentToken.current=session.access_token;
+            await unlockNativeSession();
+            const {error}=await db.auth.setSession(session);if(error){await lockNativeSession();throw error;}currentToken.current=session.access_token;
           });await authQueue.current;break;
         }
         case 'register': {await authQueue.current;const {data:{session}}=await db.auth.getSession();if(!session||session.access_token!==p.token)throw Error('Сессия не подтверждена');await registerNativePushNow(session.user.id);send('push-status',{ok:true});break;}

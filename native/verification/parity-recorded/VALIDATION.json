@@ -1,0 +1,33 @@
+{
+  "checkedAt": "2026-11-19T11:21:19.492146+00:00",
+  "pwaSha": "9b4062cfd96faed8931cc2432ee9326b4c883ac2",
+  "androidBaseSha": "169681ee308b01799f2cf9df15a99e76f9dad56a",
+  "node": "24.22.1",
+  "java": "21.0.13",
+  "webTypecheck": "pass",
+  "nativeTypecheck": "pass",
+  "webBuildBytes": 1078088,
+  "nodeTests": {
+    "passed": 249,
+    "failed": 0,
+    "skipped": 0
+  },
+  "browserTests": {
+    "passed": 15,
+    "failed": 0
+  },
+  "pythonSigningTests": 4,
+  "expoExport": "Hermes HBC validated",
+  "prebuild": "pass without clean",
+  "workflowBytes": 15248,
+  "yamlParser": "PyYAML 6.0.3",
+  "actionlint": "1.7.12 pass",
+  "nativeCompile": "BLOCKED: Gradle wrapper download Connection refused; Android SDK/NDK absent",
+  "newApk": "NOT BUILT",
+  "productionOta": "NOT PUBLISHED",
+  "hardware": "НЕ ПРОВЕРЕНО",
+  "backendSchemaChanges": false,
+  "pwaChanges": false,
+  "sourceLockFiles": 406,
+  "workflowSha256": "62168bd32a785bfc9f5e69cab48d074c82203e5dddb290b6a827e5b96e74d75f"
+}

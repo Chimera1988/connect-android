@@ -7,7 +7,13 @@ function configureRelease(contents) {
   // Runtime release binaries do not require Play Console native debug archives.
   if (!contents.includes('// Connect omit packaged debug symbols') && /release\s*\{/.test(contents))
     contents = contents.replace(/release\s*\{/, "release {\n            // Connect omit packaged debug symbols\n            ndk { debugSymbolLevel 'none' }");
-  if (contents.includes('// Connect release signing')) return contents;
+  if (contents.includes('// Connect release signing')) {
+    const old = 'signingConfig connectKeystore ? signingConfigs.connectRelease : signingConfigs.debug';
+    const safe = 'signingConfig connectKeystore ? signingConfigs.connectRelease : null';
+    if (contents.includes(old)) return contents.replace(old, safe);
+    if (!contents.includes(safe)) throw new Error('SOURCE_DRIFT: unknown Connect release signing configuration');
+    return contents;
+  }
   const anchor = '    buildTypes {';
   if (!contents.includes(anchor)) throw new Error('Cannot locate Android buildTypes');
   const signing = `    // Shipping binaries do not need intermediate native debug information.
@@ -38,7 +44,7 @@ function configureRelease(contents) {
   contents = contents.replace(anchor, signing + '\n' + anchor);
   const release = /(release\s*\{[\s\S]*?)signingConfig signingConfigs\.debug/;
   if (!release.test(contents)) throw new Error('Cannot locate Expo release signing configuration');
-  return contents.replace(release, '$1signingConfig connectKeystore ? signingConfigs.connectRelease : signingConfigs.debug');
+  return contents.replace(release, '$1signingConfig connectKeystore ? signingConfigs.connectRelease : null');
 }
 
 module.exports = function withConnectRelease(config) {

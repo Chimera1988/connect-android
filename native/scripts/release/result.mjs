@@ -1,0 +1,13 @@
+import {readFileSync,appendFileSync} from 'node:fs';
+import {app,writeReport} from './config.mjs';
+const parsed=JSON.parse(readFileSync(process.argv[2],'utf8'));
+const entries=Array.isArray(parsed)?parsed:parsed.updates;
+if(!Array.isArray(entries)||!entries.length)throw Error('EAS returned no published updates');
+const android=entries.find(e=>e.platform==='android');
+if(!android||android.runtimeVersion!==app.runtimeVersion||!android.group||!android.id)throw Error('Unexpected published runtime/platform/group');
+const {fullName}=JSON.parse(readFileSync('verification/parity/eas-project.json','utf8'));
+const [owner,slug]=fullName.replace(/^@/,'').split('/');
+const link=`https://expo.dev/accounts/${owner}/projects/${slug}/updates/${android.group}`;
+writeReport('ota-publication.json',{id:android.id,group:android.group,runtime:android.runtimeVersion,url:link});
+if(process.env.GITHUB_STEP_SUMMARY)appendFileSync(process.env.GITHUB_STEP_SUMMARY,`\nPublished Android OTA: [${android.group}](${link}), runtime ${android.runtimeVersion}.\n`);
+console.log('Published group '+android.group+' '+link);

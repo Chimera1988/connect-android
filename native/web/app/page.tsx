@@ -12,6 +12,8 @@ import {readNativeCatalog,writeNativeCatalog} from '../lib/native-catalog';
 import {seedInboxHistory,releaseHistoryMemory,chatNetworkDue,chatNetworkVerified} from '../lib/chat-history-cache';
 import {resolveCachedStorageFile} from '../lib/media-cache';
 import {createAvatarDirectoryCache} from '../lib/avatar-directory-cache'; // CONNECT_ANDROID_AVATAR_EGRESS_GUARD_V1
+import { settingsMenuSegmentClasses } from '../lib/settings-menu-groups';
+import ConnectAdminUsage from '../components/ConnectAdminUsage';
 import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
 import {readChatWave, prewarmChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
 import { prefetchCachedMedia, prefetchChatAudio, prefetchStickerWebp } from '../lib/media-cache'; // CONNECT_PWA_CHAT_SPEED_STICKER_VOICE_V1_20261115
@@ -70,6 +72,19 @@ function mediaUrl(url: string): string {
   return url;
 }
 
+const CONNECT_LOCAL_LOGOUT_FLAG='connect-local-logout-v1';
+function locallyLoggedOut():boolean {try{return localStorage.getItem(CONNECT_LOCAL_LOGOUT_FLAG)==='1';}catch{return false;}}
+function clearStoredConnectAuth():void {
+  try {
+    if(!supabaseUrl)return;
+    const host=new URL(supabaseUrl).hostname;
+    if(!host.endsWith('.supabase.co'))return;
+    const ref=host.slice(0,-'.supabase.co'.length);
+    if(!/^[a-z0-9-]{4,64}$/.test(ref))return;
+    localStorage.removeItem(`sb-${ref}-auth-token`);
+  }catch{/* Storage restrictions must never prevent the screen from locking. */}
+}
+
 const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
       auth: { detectSessionInUrl: true, persistSession: true, autoRefreshToken: true },
@@ -101,7 +116,7 @@ const MESSAGE_COLUMNS = 'id,conversation_id,sender_id,body,created_at,edited_at,
 // CONNECT_PWA_WEBP_HISTORY_THUMBS_AUDIO_HOLD_V1
 
 type Tab = 'chats' | 'contacts' | 'settings';
-type SettingsPage = 'home' | 'appearance' | 'notifications' | 'stickers' | 'members' | 'data' | 'privacy' | 'about';
+type SettingsPage = 'home' | 'appearance' | 'notifications' | 'stickers' | 'members' | 'usage' | 'data' | 'privacy' | 'about';
 type VisualScene = 'waves' | 'aurora' | 'moon' | 'sunset' | 'lagoon' | 'nebula' | 'minimal';
 const VISUAL_SCENES: ReadonlyArray<{ id: VisualScene; title: string; description: string }> = [
   { id: 'waves', title: 'Волны', description: 'Текущая тема' },
@@ -1072,6 +1087,14 @@ export default function Home() {
   // Sticker input lives inside each pack's label; native iOS picker retains the tap gesture.
 
   const [user, setUser] = useState<User | null>(null);
+  // CONNECT_PWA_AUTH_FAIL_CLOSED_20261117: stored session alone is never authorization.
+  const [authGate, setAuthGate] = useState<'checking'|'verified'|'denied'|'offline'>('checking');
+  // CONNECT_PWA_SEAMLESS_SESSION_20261118: only a server-verified in-memory session can remain visible.
+  const verifiedSessionRef = useRef(false);
+  const [connectionStatus,setConnectionStatus] = useState<'online'|'offline'|'reconnecting'>('online');
+  const authSequence = useRef(0);
+  const passwordRecoveryPending = useRef(false);
+  const loginInProgress = useRef(false);
   const [loading, setLoading] = useState(true);
   const [splashVisible, setSplashVisible] = useState(()=>typeof window==='undefined'||!window.__connectNativeCall||window.__connectNativeCall.phase==='idle');
   const [directoryReady, setDirectoryReady] = useState(false);
@@ -1429,22 +1452,147 @@ export default function Home() {
 
   useEffect(() => { setDirectoryReady(false); }, [user?.id]);
 
+  const denyPrivateAccess = useCallback(() => {
+    verifiedSessionRef.current = false;
+    setConnectionStatus('online');
+    setUser(null);setSetup(false);setAuthGate('denied');setLoading(false);
+    setActiveChat(null);setProfileView(null);setMessages([]);
+    setConversations([]);setProfiles([]);setAvatarUrls({});
+    setLatest({});setUnread({});setAdmin(false);setSettingsPage('home');
+    setMediaViewer(null);setMenuMessage(null);setForwardIds([]);
+    setVideoNoteOpen(false);setCrop(null);setProfileMediaOpen(null);
+  },[]);
+
+  // The only path to the authenticated UI is a live, server-verified Supabase session.
+  const verifyAuth = useCallback(async () => {
+    if (!supabase) { setUser(null); setAuthGate('denied'); setLoading(false); return; }
+    const sequence = ++authSequence.current;
+    if(locallyLoggedOut()){
+      if(loginInProgress.current)return;
+      clearStoredConnectAuth();
+      denyPrivateAccess();
+      return;
+    }
+    // Recheck a running chat silently; never use startup loading for periodic auth.
+    if (!verifiedSessionRef.current) { setAuthGate('checking'); setLoading(true); }
+    // The network state is only a hint; a fresh boot still requires server verification.
+    if (navigator.onLine === false) {
+      if (verifiedSessionRef.current) setConnectionStatus('offline');
+      else { setUser(null); setAuthGate('offline'); setLoading(false); }
+      return;
+    }
+    let timer:ReturnType<typeof setTimeout> | undefined;
+    let serverUnavailable = false;
+    let controller:AbortController | undefined;
+    try {
+      const {data,error} = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise<never>((_,reject) => { timer=setTimeout(()=>reject(new Error('SESSION_CHECK_TIMEOUT')),12000); }),
+      ]);
+      if (sequence !== authSequence.current) return;
+      if (error && !data.session) {
+        const code = error.name || '';
+        if (code !== 'AuthSessionMissingError' && code !== 'AuthApiError') throw error;
+      }
+      const session = data.session;
+      if (!session?.access_token) {
+        clearStoredConnectAuth();
+        denyPrivateAccess();
+        void Promise.resolve().then(()=>window.__connectPrepareSession?.(null)).catch(()=>{});
+        return;
+      }
+      controller = new AbortController();
+      if(timer)clearTimeout(timer);
+      timer=setTimeout(()=>controller?.abort(),12000);
+      const response = await fetch('/api/auth/verify', {
+        method:'GET',credentials:'same-origin',cache:'no-store',
+        headers:{Authorization:`Bearer ${session.access_token}`},signal:controller.signal,
+      }).catch((error:unknown)=>{serverUnavailable=true;throw error;});
+      if (sequence !== authSequence.current) return;
+      if (response.status === 401 || response.status === 403) {
+        clearStoredConnectAuth();
+        denyPrivateAccess();
+        void Promise.resolve().then(()=>window.__connectPrepareSession?.(null)).catch(()=>{});
+        return;
+      }
+      if (!response.ok) {
+        serverUnavailable = response.status===429 || response.status>=500;
+        throw new Error('SESSION_SERVER_UNAVAILABLE');
+      }
+      const result = await response.json();
+      if (!result?.ok || result.userId !== session.user.id) {
+        clearStoredConnectAuth(); denyPrivateAccess();
+        void Promise.resolve().then(()=>window.__connectPrepareSession?.(null)).catch(()=>{});
+        return;
+      }
+      if (sequence !== authSequence.current) return;
+      await window.__connectPrepareSession?.(session);
+      if (sequence !== authSequence.current) return;
+      verifiedSessionRef.current = true;
+      setConnectionStatus('online');
+      setUser(session.user); setAuthGate('verified'); setLoading(false);
+      if (invited || passwordRecoveryPending.current) setSetup(true);
+      passwordRecoveryPending.current=false;
+    } catch (error) {
+      if (sequence === authSequence.current) {
+        // Only genuine transport/timeout failures may keep a previously verified UI mounted.
+        const transient = serverUnavailable || (error instanceof Error && (
+          error.message==='SESSION_CHECK_TIMEOUT' || error.name==='AbortError' ||
+          error.name==='AuthRetryableFetchError'
+        ));
+        if (verifiedSessionRef.current && transient) {
+          setConnectionStatus('reconnecting');
+        } else {
+          verifiedSessionRef.current = false;
+          setUser(null); setAuthGate('offline'); setLoading(false);
+        }
+      }
+    } finally {if(timer)clearTimeout(timer);controller?.abort();}
+  },[invited,denyPrivateAccess]);
+
   useEffect(() => {
-    if (!supabase) { setLoading(false); return; }
-    let alive = true;
-    void supabase.auth.getSession().then(async ({ data, error }) => {
-      await window.__connectPrepareSession?.(data.session);
-      if (!alive) return;
-      setUser(data.session?.user || null); setLoading(false);
-      if (error) setNotice(error.message);
-      if (invited && data.session) setSetup(true);
-    }).catch(error=>{if(alive){setLoading(false);setNotice(error instanceof Error?error.message:'Не удалось восстановить настройки');}});
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!alive) return;
-      void Promise.resolve().then(async()=>{await window.__connectPrepareSession?.(session);if(!alive)return;setUser(session?.user || null);setLoading(false);if(event==='PASSWORD_RECOVERY'||(invited&&session))setSetup(true);}).catch(error=>{if(alive){setLoading(false);setNotice(error instanceof Error?error.message:'Не удалось восстановить настройки');}});
+    if(!supabase){setAuthGate('denied');setLoading(false);return;}
+    let active=true;
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+      if(!active)return;
+      if(event==='SIGNED_OUT'||!session){
+        // CONNECT_PWA_LOGOUT_SESSION_RECOVERY_20261117
+        ++authSequence.current;
+        denyPrivateAccess();
+        void Promise.resolve().then(()=>window.__connectPrepareSession?.(null)).catch(()=>{});
+      } else if(event==='INITIAL_SESSION'||event==='SIGNED_IN'||event==='TOKEN_REFRESHED'||event==='USER_UPDATED'||event==='PASSWORD_RECOVERY'){
+        if(event==='PASSWORD_RECOVERY')passwordRecoveryPending.current=true;
+        // Supabase auth callbacks must not await other auth methods synchronously.
+        queueMicrotask(()=>{if(active)void verifyAuth();});
+      }
     });
-    return () => { alive = false; subscription.unsubscribe(); };
-  }, [invited]);
+    void verifyAuth();
+    const onOffline=()=>{
+      ++authSequence.current;
+      if(verifiedSessionRef.current) { setConnectionStatus('offline'); return; }
+      setUser(null);setAuthGate('offline');setLoading(false);
+    };
+    const onReturn=()=>{
+      if(document.visibilityState!=='visible')return;
+      if(navigator.onLine!==false) setConnectionStatus(s=>s==='offline'?'reconnecting':s);
+      void verifyAuth();
+    };
+    window.addEventListener('offline',onOffline);
+    window.addEventListener('online',onReturn);
+    window.addEventListener('focus',onReturn);
+    window.addEventListener('pageshow',onReturn);
+    document.addEventListener('visibilitychange',onReturn);
+    const timer=window.setInterval(onReturn,60000);
+    return ()=>{
+      active=false;++authSequence.current;subscription.unsubscribe();
+      window.removeEventListener('offline',onOffline);
+      window.removeEventListener('online',onReturn);
+      window.removeEventListener('focus',onReturn);
+      window.removeEventListener('pageshow',onReturn);
+      document.removeEventListener('visibilitychange',onReturn);
+      window.clearInterval(timer);
+    };
+  },[verifyAuth,denyPrivateAccess]);
 
   // Re-register the current FCM token after login or token rotation, not only
   // when the user manually opens the notification settings screen.
@@ -3016,6 +3164,12 @@ export default function Home() {
       // It retains the original file when iOS cannot safely encode the audio/video.
       const prepared=await connectOptimizeMedia(file,{native:isNativeMediaRuntime(),onProgress:f=>setUploadProgress(Math.round(f*35))});
       file=prepared.file;
+      // Locally recorded PWA audio already exists in memory: build its wave
+      // without downloading the uploaded object again.
+      if(kind==='audio'&&!isNativeMediaRuntime()&&file.size>0&&file.size<=2*1024*1024){
+        const localVoiceUrl=URL.createObjectURL(file);
+        void prewarmChatWave(user.id,path,localVoiceUrl,file.size).finally(()=>URL.revokeObjectURL(localVoiceUrl));
+      }
       // The dimensions travel with the storage path, so the recipient can reserve
       // an accurate layout before downloading a newly sent photo.
       if (kind === 'image' && !/^sticker-\d+\.(?:png|webp|gif|jpe?g)$/i.test(file.name)) {
@@ -3298,6 +3452,7 @@ export default function Home() {
 
   async function login(e: FormEvent) {
     e.preventDefault(); if (!supabase) return;
+    loginInProgress.current=true;
     setBusy(true); setNotice('');
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -3308,10 +3463,15 @@ export default function Home() {
         }),
       ]);
       if (result.error) setNotice('Не удалось войти: ' + result.error.message);
+      else {
+        try{localStorage.removeItem(CONNECT_LOCAL_LOGOUT_FLAG);}catch{}
+        void verifyAuth();
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Ошибка соединения с сервером');
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
+      loginInProgress.current=false;
       setBusy(false);
     }
   }
@@ -3324,18 +3484,60 @@ export default function Home() {
     window.history.replaceState({}, '', window.location.pathname);
   }
   async function logout() {
-    if(user?.id)await wipeUserHistory(user.id).catch(()=>{}); setAvatarUrls({});if(user?.id)forgetUserChatPresentation(user.id); warmedChatWindows.current.clear();signedMediaLifetimes.current.clear(); await supabase?.auth.signOut(); exitChat(); setProfiles([]); setConversations([]); setMessages([]);
-    setLatest({}); setUnread({}); readCache.current = {}; setPassword(''); setNotice('');
+    if (!supabase) return;
+    // A missing remote session is NOT a reason to leave the private UI unlocked.
+    ++authSequence.current;
+    verifiedSessionRef.current = false;
+    setConnectionStatus('online');
+    const accountId=user?.id;
+    try{localStorage.setItem(CONNECT_LOCAL_LOGOUT_FLAG,'1');}catch{}
+    setAuthGate('denied');setUser(null); setLoading(false); setSetup(false);
+    void window.__connectPrepareSession?.(null).catch(()=>{});
+    setBusy(true);setNotice('');
+    exitChat();setProfiles([]);setConversations([]);setMessages([]);
+    setLatest({});setUnread({});readCache.current={};setPassword('');
+    setAvatarUrls({});
+    if(accountId)forgetUserChatPresentation(accountId);
+    warmedChatWindows.current.clear();signedMediaLifetimes.current.clear();
+    let signoutTimeout:ReturnType<typeof setTimeout>|undefined;
+    try {
+      const {error}=await Promise.race([
+        supabase.auth.signOut({ scope: 'local' }),
+        new Promise<{error:Error}>((resolve)=>{signoutTimeout=setTimeout(()=>resolve({error:new Error('signout_timeout')}),4500);}),
+      ]);
+      if(error && error.name!=='AuthSessionMissingError'){
+        setNotice('Локальный выход выполнен. Серверный выход не подтверждён.');
+      }
+    }catch{
+      setNotice('Локальный выход выполнен. Серверный выход не подтверждён.');
+    }finally{
+      if(signoutTimeout)clearTimeout(signoutTimeout);
+      // Even if Supabase returns Auth session missing or the network fails,
+      // ensure a cold PWA restart cannot reopen from stale local credentials.
+      clearStoredConnectAuth();
+      // Android clears SQLite before removing its authenticated owner lease.
+      if(accountId&&!window.ConnectNative)void wipeUserHistory(accountId).catch(()=>{});
+      setBusy(false);
+    }
   }
 
   const keyboardOpen = frame ? window.innerHeight - frame.height - frame.top > 130 : false;
   const screenStyle: CSSProperties | undefined = frame ? { height: `${frame.height}px`, top: `${frame.top}px`, paddingBottom: keyboardOpen ? '0px' : undefined } : undefined;
   return <div className={'connect-app ' + theme + (keyboardOpen ? ' keyboard-open' : '')} data-visual-scene={visualScene} ref={shellRef} style={{...screenStyle, '--accent':accent,'--accent2':accent} as CSSProperties}>
     {splashVisible && <ConnectSplashScreen ready={!loading && (!user || directoryReady)} onComplete={finishSplash}/>}
-    {supabase && user && !setup && <ConnectPushGuardian supabase={supabase} userId={user.id}/>}
+    {user && authGate==='verified' && connectionStatus!=='online' && <div role="status" aria-live="polite"
+      style={{position:'fixed',zIndex:1500,top:'calc(env(safe-area-inset-top, 0px) + 10px)',left:'50%',transform:'translateX(-50%)',
+        background:'rgba(22,27,34,.9)',color:'#fff',border:'1px solid rgba(255,255,255,.16)',borderRadius:20,
+        padding:'5px 12px',fontSize:12,lineHeight:1.4,whiteSpace:'nowrap',pointerEvents:'none',boxShadow:'0 3px 14px rgba(0,0,0,.17)'}}>
+      {connectionStatus==='offline'?'Нет соединения':'Восстанавливаем соединение…'}</div>}
+    {supabase && user && authGate==='verified' && !setup && <ConnectPushGuardian supabase={supabase} userId={user.id}/>}
     {!supabase ? <div className="connection-error"><Icon name="info" size={32}/><h2>Подключение не настроено</h2><p>Проверьте NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY в Vercel.</p></div>
-      : loading || user&&hydratedOwner!==user.id ? <div className="loading-screen"><img src="/icon-192.png" alt=""/><p>Подключаем Connect…</p></div>
-        : !user || setup ? <div className="login-screen">
+      : loading || authGate==='checking' || user&&hydratedOwner!==user.id ? <div className="loading-screen"><img src="/icon-192.png" alt=""/><p>Подключаем Connect…</p></div>
+        : authGate==='offline' ? <div className="login-screen" role="status">
+            <div className="login-brand"><img src="/icon-192.png" alt=""/><h1>Connect</h1></div>
+            <div className="login-form"><h2>Проверка входа</h2><p className="login-hint">Сервер авторизации недоступен. Переписки и настройки закрыты до подтверждения сессии.</p><button className="primary-action" type="button" onClick={()=>void verifyAuth()}>Повторить проверку</button><button className="settings-action secondary" type="button" onClick={()=>void logout()}>Выйти и войти заново</button></div>
+          </div>
+        : !user || authGate!=='verified' || setup ? <div className="login-screen">
           <div className="login-brand"><img src="/icon-192.png" alt=""/><h1>Connect</h1><p>Личные разговоры. Только свои.</p></div>
           <form className="login-form" onSubmit={setup ? savePassword : login}>
             <h2>{setup ? 'Создать пароль' : 'Вход в Connect'}</h2>
@@ -3495,12 +3697,12 @@ export default function Home() {
                 </div>
               </>}
               {tab === 'settings' && <>
-                <header className="simple-header">{settingsPage!=='home' && <button type="button" className="icon-btn" onClick={()=>setSettingsPage('home')} aria-label="Назад"><Icon name="back" size={24}/></button>}<h1>{({home:'Настройки',appearance:'Оформление',notifications:'Уведомления',stickers:'Стикеры',members:'Участники',data:'Данные',privacy:'Приватность',about:'О приложении'} as Record<SettingsPage,string>)[settingsPage]}</h1></header>
+                <header className="simple-header">{settingsPage!=='home' && <button type="button" className="icon-btn" onClick={()=>setSettingsPage('home')} aria-label="Назад"><Icon name="back" size={24}/></button>}<h1>{({home:'Настройки',appearance:'Оформление',notifications:'Уведомления',stickers:'Стикеры',members:'Участники',usage:'Хранилище и трафик',data:'Данные',privacy:'Приватность',about:'О приложении'} as Record<SettingsPage,string>)[settingsPage]}</h1></header>
                 <div className="scroll-content settings-content">
                   {settingsPage==='home' && <>
                     <button type="button" className="settings-profile" onClick={()=>showProfile(user.id)}><Avatar size="lg" name={ownProfile?.display_name||'Мой профиль'} id={user.id} url={avatarUrls[user.id]}/><div><strong>{ownProfile?.display_name||'Мой профиль'}</strong><span>{ownProfile?.bio||user.email}</span></div><Icon name="chevron" size={19}/></button>
                     <div className="settings-group settings-menu">
-                      {([{id:'appearance',icon:'sun',title:'Оформление',subtitle:'Тема, цвет и фон чатов'},{id:'stickers',icon:'message',title:'Стикеры',subtitle:'Наборы и избранное'},...(admin?[{id:'members' as SettingsPage,icon:'contacts' as IconName,title:'Управление участниками',subtitle:'Приглашения в Connect'}]:[]),{id:'notifications',icon:'info',title:'Уведомления',subtitle:'Звуки и push-уведомления'},{id:'data',icon:'file',title:'Данные и хранилище',subtitle:'Экспорт и очистка'},{id:'privacy',icon:'shield',title:'Приватность',subtitle:'Безопасность переписок'},{id:'about',icon:'info',title:'О приложении',subtitle:'Версия и разработчики'}] as {id:SettingsPage;icon:IconName;title:string;subtitle:string}[]).map((item,i)=><div key={item.id}>{i>0&&<div className="setting-divider"/>}<button type="button" className="settings-menu-row" onClick={()=>setSettingsPage(item.id)}><span className="setting-icon"><Icon name={item.icon} size={19}/></span><span><strong>{item.title}</strong><small>{item.subtitle}</small></span><Icon name="chevron" size={19}/></button></div>)}
+                      {([{id:'appearance',icon:'sun',title:'Оформление',subtitle:'Тема, цвет и фон чатов'},{id:'stickers',icon:'message',title:'Стикеры',subtitle:'Наборы и избранное'},...(admin?[{id:'members' as SettingsPage,icon:'contacts' as IconName,title:'Управление участниками',subtitle:'Приглашения в Connect'},{id:'usage' as SettingsPage,icon:'file' as IconName,title:'Хранилище и трафик',subtitle:'Статистика Supabase'}]:[]),{id:'notifications',icon:'info',title:'Уведомления',subtitle:'Звуки и push-уведомления'},{id:'data',icon:'file',title:'Данные и хранилище',subtitle:'Экспорт и очистка'},{id:'privacy',icon:'shield',title:'Приватность',subtitle:'Безопасность переписок'},{id:'about',icon:'info',title:'О приложении',subtitle:'Версия и разработчики'}] as {id:SettingsPage;icon:IconName;title:string;subtitle:string}[]).map((item,i,items)=><div key={item.id} className={settingsMenuSegmentClasses(items,i)}>{i>0&&<div className="setting-divider"/>}<button type="button" className="settings-menu-row" onClick={()=>setSettingsPage(item.id)}><span className="setting-icon"><Icon name={item.icon} size={19}/></span><span><strong>{item.title}</strong><small>{item.subtitle}</small></span><Icon name="chevron" size={19}/></button></div>)}
                     </div><button type="button" className="logout-button" onClick={()=>void logout()}><Icon name="logout" size={20}/> Выйти из аккаунта</button>
                   </>}
                   {settingsPage==='appearance' && <>
@@ -3570,6 +3772,7 @@ export default function Home() {
 
                     </div>)}
                     <p className="settings-hint">В чате нажмите ☺ рядом с полем сообщения. Есть избранное и недавно отправленные.</p></>}
+                  {settingsPage==='usage' && admin && <ConnectAdminUsage supabase={supabase!} userId={user.id}/>}
                   {settingsPage==='members' && admin && <div className="settings-group data-settings"><strong>Приглашения</strong><p className="settings-hint">Создавайте одноразовые коды для новых участников. Код действует 24 часа.</p><button type="button" className="settings-action" onClick={()=>window.dispatchEvent(new Event('connect:open-invitations'))}>Коды приглашений</button><button type="button" className="settings-action" onClick={()=>window.dispatchEvent(new Event('connect:open-hidden-invitations'))}>Коды для скрытых</button><div style={{marginTop:20}}><ConnectHiddenMembers request={authenticatedRequest} onChanged={()=>void loadDirectory()}/></div></div>}
                   {settingsPage==='data' && <><CacheSettings userId={user.id}/><div className="settings-group data-settings"><strong>Локальные данные</strong><p className="settings-hint">Сбросит тему, цвет, фон и настройки стикеров на этом устройстве. Переписки, файлы и голосовые на сервере останутся.</p><button type="button" className="settings-action secondary" onClick={clearLocalPreferences}>Очистить локальные настройки</button></div><div className="settings-group data-settings"><strong>Экспорт переписки</strong><p className="settings-hint">Экспорт всех доступных переписок в JSON (до 50 000 сообщений). Файлы вложений в архив не входят.</p><button type="button" className="settings-action" disabled={busy||conversations.length===0} onClick={()=>void exportChats()}>Экспортировать переписки</button></div></>}
                   {settingsPage==='privacy' && <><div className="settings-group data-settings"><strong>Личные переписки</strong><p className="settings-hint">Сообщения доступны участникам диалога в рамках настроенных правил доступа. Это не означает сквозное шифрование.</p></div><div className="settings-group data-settings"><strong>Удаление аккаунта</strong><p className="settings-hint">Учётная запись и личные данные будут удалены. Отправленные сообщения останутся у собеседников от имени «Удалённый пользователь».</p><button type="button" className="settings-action secondary" disabled={busy} onClick={()=>void deleteMyAccount()}>Удалить аккаунт навсегда</button></div></>}
@@ -3579,11 +3782,11 @@ export default function Home() {
             </div><nav className="bottom-nav" aria-label="Основная навигация">
               {([{ id: 'chats' as const, label: 'Чаты', icon: 'chats' as const }, { id: 'contacts' as const, label: 'Контакты', icon: 'contacts' as const }, { id: 'settings' as const, label: 'Настройки', icon: 'settings' as const }]).map(item => <button type="button" key={item.id} className={'nav-tab' + (tab === item.id ? ' selected' : '')} onClick={() => switchTab(item.id)}><span className="nav-symbol"><Icon name={item.icon} size={24}/>{item.id === 'chats' && unreadTotal > 0 && <em className="connect-nav-count" aria-hidden="true">{unreadTotal > 99 ? '99+' : unreadTotal}</em>}</span><small>{item.label}</small></button>)}
             </nav></>}
-    {crop && <AvatarCropper url={crop.url} saving={busy} onCancel={closeCrop} onSave={blob=>void uploadAvatar(new File([blob],'avatar.jpg',{type:'image/jpeg'}))}/>}
+    {authGate==='verified' && user && crop && <AvatarCropper url={crop.url} saving={busy} onCancel={closeCrop} onSave={blob=>void uploadAvatar(new File([blob],'avatar.jpg',{type:'image/jpeg'}))}/>}
     {notice && <button type="button" className="notice-toast"  role="status" onClick={() => setNotice('')}>{notice} <Icon name="close" size={16}/></button>}
-    {forwardIds.length>0&&<div className="forward-overlay"><div className="forward-dialog"><header><strong>Переслать сообщения</strong><button type="button" onClick={()=>setForwardIds([])}><Icon name="close" size={21}/></button></header><p>Выберите получателя · {forwardIds.length} сообщ.</p><div className="forward-contacts">{contacts.map(p=><button type="button" key={p.id} disabled={busy} onClick={()=>void forwardTo(p)}><Avatar name={p.display_name} id={p.id} url={avatarUrls[p.id]}/><span>{p.display_name}</span><Icon name="chevron" size={18}/></button>)}</div></div></div>}
-    {videoNoteOpen && <VideoNoteRecorder onClose={()=>{setVideoNoteRecording(false);setVideoNoteOpen(false)}} onRecordingChange={setVideoNoteRecording} onSend={file=>{setVideoNoteRecording(false);setVideoNoteOpen(false);void sendAttachment(file)}}/>}
-    {mediaViewer && <ConnectGalleryViewer
+    {authGate==='verified' && user && forwardIds.length>0&&<div className="forward-overlay"><div className="forward-dialog"><header><strong>Переслать сообщения</strong><button type="button" onClick={()=>setForwardIds([])}><Icon name="close" size={21}/></button></header><p>Выберите получателя · {forwardIds.length} сообщ.</p><div className="forward-contacts">{contacts.map(p=><button type="button" key={p.id} disabled={busy} onClick={()=>void forwardTo(p)}><Avatar name={p.display_name} id={p.id} url={avatarUrls[p.id]}/><span>{p.display_name}</span><Icon name="chevron" size={18}/></button>)}</div></div></div>}
+    {authGate==='verified' && user && videoNoteOpen && <VideoNoteRecorder onClose={()=>{setVideoNoteRecording(false);setVideoNoteOpen(false)}} onRecordingChange={setVideoNoteRecording} onSend={file=>{setVideoNoteRecording(false);setVideoNoteOpen(false);void sendAttachment(file)}}/>}
+    {authGate==='verified' && user && mediaViewer && <ConnectGalleryViewer
       items={galleryIndex>=0?gallery:[...gallery,mediaViewer]}
       currentPath={mediaViewer.path}
       onClose={()=>setMediaViewer(null)}
@@ -3607,7 +3810,7 @@ export default function Home() {
         });
       }}
     />}
-    {menuMessage && <div className="context-overlay" role="presentation" onClickCapture={e=>{if(Date.now()<suppressMessageClick.current){e.preventDefault();e.stopPropagation();}}} onPointerDownCapture={()=>{suppressMessageClick.current=0;clearGestureTimer();gesture.current=null;}} onKeyDownCapture={()=>{suppressMessageClick.current=0;}}><button className="context-backdrop" aria-label="Закрыть меню" type="button" onClick={() => setMenuMessage(null)}/><div className={"floating-menu menu-"+menuSide} role="dialog" aria-modal="true" aria-label="Действия с сообщением" style={{ top: `${menuTop}px` }}>
+    {authGate==='verified' && user && menuMessage && <div className="context-overlay" role="presentation" onClickCapture={e=>{if(Date.now()<suppressMessageClick.current){e.preventDefault();e.stopPropagation();}}} onPointerDownCapture={()=>{suppressMessageClick.current=0;clearGestureTimer();gesture.current=null;}} onKeyDownCapture={()=>{suppressMessageClick.current=0;}}><button className="context-backdrop" aria-label="Закрыть меню" type="button" onClick={() => setMenuMessage(null)}/><div className={"floating-menu menu-"+menuSide} role="dialog" aria-modal="true" aria-label="Действия с сообщением" style={{ top: `${menuTop}px` }}>
       {isKeyboardSticker(menuMessage) && <button type="button" onClick={() => void saveKeyboardStickerFavorite(menuMessage)} disabled={busy}><Icon name="plus" size={22}/>Добавить в избранное</button>}
       <button type="button" onClick={() => beginForward([menuMessage.id])}><Icon name="forward" size={22}/>Переслать</button>
       <button type="button" onClick={() => startSelection([menuMessage.id])}><Icon name="check" size={22}/>Выбрать</button>

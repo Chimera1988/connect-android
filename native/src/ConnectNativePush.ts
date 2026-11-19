@@ -3,7 +3,7 @@ import {getMessaging,getToken,onMessage,onTokenRefresh,setBackgroundMessageHandl
 import notifee, {AndroidCategory, AndroidImportance, AndroidVisibility, EventType} from '@notifee/react-native';
 import {AppState,NativeModules,DeviceEventEmitter} from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import {db} from './backend';
+import {db,isNativeSessionLocked} from './backend';
 import {chatTimeKey} from '../web/lib/chat-order';
 import {showIncomingSystemCall,endSystemCall,handleCallNotificationAction} from './ConnectNativeTelecom';
 import {getConnectSoundChannel} from './ConnectNativeSoundSettings';
@@ -170,6 +170,7 @@ async function sendRegistration(endpoint:string, method:'POST'|'DELETE',expected
     if(method==='POST')throw Error('Аккаунт изменился. Подключите уведомления повторно.');
     return;
   }
+  if(isNativeSessionLocked?.())throw Error('SESSION_LOCKED');
   const res=await fetch(API+'/api/push/register',{
     method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
     body:JSON.stringify(method==='POST'?{platform:'android',endpoint}:{endpoint}),
@@ -341,14 +342,26 @@ export async function testNativeMessagePush(ownerId:string):Promise<string>{
 }
 
 /** Do not keep showing personal notifications after account sign-out. */
-export async function disableNativePush(){
+export async function disableNativePush(previous?:{userId:string;accessToken:string}){
   await SecureStore.setItemAsync(DEVICE_ACTIVE_KEY,'no');
-  try{
-    const {data:{session}}=await db.auth.getSession();
-    const token=await getToken(getMessaging());
-    if(session&&token)await sendRegistration(token,'DELETE',session.user.id);
-  }catch(e){console.warn('Connect: FCM token deregistration deferred',e);}
   await notifee.cancelAllNotifications();
+  try{
+    const session=previous?null:(await db.auth.getSession()).data.session;
+    const credentials=previous||(session?{userId:session.user.id,accessToken:session.access_token}:null);
+    // An already logged-out cold boot needs neither Firebase nor a network round trip.
+    if(!credentials?.userId||!credentials.accessToken)return;
+    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
+    try{
+      const token=await Promise.race([getToken(getMessaging()),new Promise<never>((_,reject)=>{
+        timer=setTimeout(()=>{controller.abort();reject(Error('Push deregistration timeout'));},12000);
+      })]);
+      if(token){
+        const response=await fetch(API+'/api/push/register',{method:'DELETE',signal:controller.signal,
+          headers:{'Content-Type':'application/json',Authorization:'Bearer '+credentials.accessToken},body:JSON.stringify({endpoint:token})});
+        if(!response.ok)throw Error('Push deregistration HTTP '+response.status);
+      }
+    }finally{if(timer)clearTimeout(timer);}
+  }catch(e){console.warn('Connect: FCM token deregistration deferred',e);}
 }
 
 

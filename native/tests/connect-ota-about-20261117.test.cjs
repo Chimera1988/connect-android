@@ -5,8 +5,8 @@ const cfg=JSON.parse(read('app.json')).expo,lock=JSON.parse(read('PARITY_SOURCE_
 test('Connect Android About never uses a stale literal version',()=>{
   assert.doesNotMatch(web,/Версия 3\.0\.6 \(24\)/);
   assert.match(web,/<ConnectOtaSettings\/>/);
-  assert.match(app,/Constants\.expoConfig\?\.version/);
-  assert.match(app,/Constants\.platform\?\.android\?\.versionCode/);
+  assert.match(app,/readInstalledAppIdentity\(NativeModules.ConnectIncomingCallModule\)/);
+  assert.doesNotMatch(app,/Constants\.expoConfig/);
   assert.match(ui,/Версия \{info\?\.version/);
 });
 test('strict nonce-bound bridge validates all four OTA commands with no arbitrary payload',()=>{
@@ -19,8 +19,8 @@ test('strict nonce-bound bridge validates all four OTA commands with no arbitrar
 });
 test('Expo OTA uses the installed production channel and unchanged 3.0.7 runtime',()=>{
   assert.equal(cfg.android.package,'com.connect.messenger');
-  assert.equal(cfg.version,'3.0.7');assert.equal(cfg.android.versionCode,25);
-  assert.equal(cfg.runtimeVersion,'connect-android-ota-v1-sdk58');
+  assert.equal(cfg.version,'3.0.8');assert.equal(cfg.android.versionCode,26);
+  assert.equal(cfg.runtimeVersion,'connect-android-ota-v2-sdk58');
   assert.equal(cfg.updates.requestHeaders['expo-channel-name'],'production');
   assert.equal(cfg.extra.eas.projectId,'430c7f08-3921-48d5-96d1-f7c3d686d3bf');
   assert.match(app,/Updates\.checkForUpdateAsync\(\)/);

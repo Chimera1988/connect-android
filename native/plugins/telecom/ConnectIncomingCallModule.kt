@@ -23,6 +23,18 @@ internal object ConnectCallMicrophone {
 class ConnectIncomingCallModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   override fun getName() = "ConnectIncomingCallModule"
 
+  /** Installed binary identity cannot be overridden by an Expo OTA manifest. */
+  @ReactMethod fun getAppIdentity(promise:Promise){
+    try{
+      val info=context.packageManager.getPackageInfo(context.packageName,0)
+      val result=com.facebook.react.bridge.Arguments.createMap()
+      result.putString("packageName",context.packageName)
+      result.putString("version",info.versionName?:"")
+      result.putDouble("build",info.longVersionCode.toDouble())
+      promise.resolve(result)
+    }catch(error:Exception){promise.reject("APP_IDENTITY","Не удалось прочитать версию APK",error)}
+  }
+
   @ReactMethod
   fun requestMicrophone(promise:Promise){
     context.runOnUiQueueThread{

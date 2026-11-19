@@ -11,3 +11,5 @@ src/generated/
 verification/browser/*.html
 __pycache__/
 *.pyc
+# Local release output is volatile; curated evidence is in parity-recorded/.
+verification/parity/

@@ -1,7 +1,7 @@
 // CONNECT_PWA_UNIFIED_MEDIA_QUALITY_20261115
 /** CONNECT_PWA_SAFE_MEDIA_OPTIMIZATION_V1_20261115
  * Best-effort, local and bounded. The original File is never mutated.
- * No encoding occurs in the native Android wrapper.
+ * Android uses the same bounded still-image path. Audio/video recordings stay native.
  */
 export type ConnectMediaDecision = 'optimized' | 'unchanged' | 'unsupported' | 'failed';
 export type ConnectMediaResult = { file: File; decision: ConnectMediaDecision };
@@ -16,7 +16,7 @@ const WAV_MAX = 24 * MB;
 const VIDEO_MAX_SECONDS = 150;
 
 export function connectCanOptimizeMedia(file: File, native = false): 'image' | 'wav' | 'video' | null {
-  if (native || !file.size || file.size > MAX_UPLOAD) return null;
+  if (!file.size || file.size > MAX_UPLOAD) return null;
   const type = file.type.toLowerCase();
   const name = file.name.toLowerCase();
   // Animated GIFs, icons, stickers, videos recorded by Connect and compressed audio
@@ -24,6 +24,8 @@ export function connectCanOptimizeMedia(file: File, native = false): 'image' | '
   if (/^sticker-\d+\./.test(name) || /^connect-video-note-\d+\./.test(name)) return null;
   if (type === 'image/jpeg' || type === 'image/png' || type === 'image/webp')
     return file.size >= IMAGE_MIN ? 'image' : null;
+  // WebView recording/transcoding cannot guarantee AAC/H.264 across Android 10 vendors.
+  if (native) return null;
   if ((type === 'audio/wav' || type === 'audio/wave' || type === 'audio/x-wav' || /\.wav$/.test(name)) && file.size >= WAV_MIN && file.size <= WAV_MAX)
     return 'wav';
   if (type.startsWith('video/') && file.size >= VIDEO_MIN) return 'video';

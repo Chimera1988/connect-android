@@ -3,12 +3,12 @@
     "name": "Connect",
     "slug": "connect-native-v2",
     "scheme": "connect",
-    "version": "3.0.7",
+    "version": "3.0.8",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.connect.messenger",
-      "versionCode": 25,
+      "versionCode": 26,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -96,7 +96,7 @@
       "backgroundColor": "#090e14",
       "barStyle": "light-content"
     },
-    "runtimeVersion": "connect-android-ota-v1-sdk58",
+    "runtimeVersion": "connect-android-ota-v2-sdk58",
     "updates": {
       "enabled": true,
       "url": "https://u.expo.dev/430c7f08-3921-48d5-96d1-f7c3d686d3bf",

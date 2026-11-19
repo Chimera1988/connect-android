@@ -1,0 +1,70 @@
+
+> connect-native-v2@3.0.8 test:browser
+> node scripts/test-cache-browser.mjs
+
+{
+  "results": [
+    {
+      "name": "real IndexedDB reuses bytes across expiring signed URLs and honors versions",
+      "pass": true
+    },
+    {
+      "name": "streaming cap cancels oversized data even without content length",
+      "pass": true
+    },
+    {
+      "name": "retired profile path cannot be restored by an in-flight download",
+      "pass": true
+    },
+    {
+      "name": "account change cancels pending cache writes and isolates downloaded media",
+      "pass": true
+    },
+    {
+      "name": "SQLite catalog bridge stores stable paths only and isolates viewer and media owner",
+      "pass": true
+    },
+    {
+      "name": "peer warmup limits three photos, one video and one track and skips oversized files",
+      "pass": true
+    },
+    {
+      "name": "hot history opens offline, deduplicates native reads and honors deletion",
+      "pass": true
+    },
+    {
+      "name": "inbox write during chunk hydration retries without losing cached history",
+      "pass": true
+    },
+    {
+      "name": "profile UI displays cached catalog while server list is unavailable",
+      "pass": true
+    },
+    {
+      "name": "ordinary media clear preserves system avatars and drops temporary bytes",
+      "pass": true
+    },
+    {
+      "name": "music selection obtains a network URL after its cached blob was cleared",
+      "pass": true
+    },
+    {
+      "name": "Android compact Connect sounds migrate legacy choice and use native actions",
+      "pass": true
+    },
+    {
+      "name": "personal sticker bytes survive new signatures and are isolated to the owner",
+      "pass": true
+    },
+    {
+      "name": "streaming play does not issue an extra original fetch; small explicit audio warmup is deduplicated",
+      "pass": true
+    },
+    {
+      "name": "native waveform presentation survives remount without crossing account boundaries",
+      "pass": true
+    }
+  ],
+  "passed": 15,
+  "failed": 0
+}

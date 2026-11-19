@@ -49,7 +49,7 @@ tools = sdk / 'build-tools' / '37.0.0'
 badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
 assert "package: name='com.connect.messenger'" in badging, 'Wrong application ID'
 assert "application-label:'Connect'" in badging, 'Wrong visible name'
-assert "versionCode='25'" in badging and "versionName='3.0.7'" in badging, 'Wrong release version'
+assert "versionCode='26'" in badging and "versionName='3.0.8'" in badging, 'Wrong release version'
 assert "sdkVersion:'29'" in badging, 'Android 10 minimum not enforced'
 assert 'application-debuggable' not in badging, 'Release must not be debuggable'
 with zipfile.ZipFile(apk) as z:
@@ -70,7 +70,12 @@ with zipfile.ZipFile(apk) as z:
     dex=b''.join(z.read(n) for n in z.namelist() if re.fullmatch(r'classes\d*\.dex',n))
     for name in ['ConnectCallService','ConnectCallConnectionService','ConnectIncomingCallActivity','ConnectCallSetupActivity','ConnectCallIngress','ConnectCallTiming','ConnectCallScreen','ConnectCallAudioGate','ConnectIncomingAlerts','ConnectIncomingGate','ConnectPushTokenService','ConnectCallHintJob','ConnectHistoryModule','HistoryStore','ConnectSoundModule','ConnectFilesModule','ConnectMissedCalls','ConnectMissedCallJob','ConnectMissedPolicy','ConnectProximityOwner','HistoryCatalogPolicy']:
         assert ('Lcom/connect/messenger/'+name+';').encode() in dex, 'Native implementation missing: '+name
+    assert b'getAppIdentity' in dex, 'Installed APK identity API missing'
     resource_table = subprocess.check_output([str(tools/'aapt2'), 'dump', 'resources', str(apk)],text=True)
+    app_config = json.loads((Path(__file__).resolve().parents[1]/'app.json').read_text())['expo']
+    assert app_config['runtimeVersion'] in resource_table, 'Packaged Expo runtime mismatch'
+    manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'],text=True)
+    assert app_config['updates']['url'] in manifest and 'production' in manifest, 'Wrong packaged OTA project/channel'
     for index, name in enumerate(['bright','call','gentle','soft','firebase_common_keep','keep','node_modules_expo_vectoricons_build_vendor_reactnativevectoricons_fonts_ionicons','notification','ringtone']):
         resource_name=name if index in (4,5,6) else 'connect_'+name
         assert f'resource {0x7f110000+index:#010x} raw/{resource_name}' in resource_table, 'Numeric channel URI compatibility lost: '+name
@@ -99,18 +104,20 @@ assert re.fullmatch(r'[0-9a-f]{64}', expected), 'Expected installed certificate 
 owner = re.search(r'certificate DN: (.*)', signature)
 validate_certificate(fingerprint[1], expected, owner[1] if owner else '')
 compatible = None if not expected else expected == fingerprint[1].lower()
-previous_artifact_certificate = 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c'
+previous_path = Path(__file__).resolve().parents[1]/'verification/parity/previous-apk.json'
+previous = json.loads(previous_path.read_text()) if previous_path.is_file() else {}
+previous_artifact_certificate = previous.get('certificateSha256', expected)
 if compatible is False:
     raise SystemExit('Certificate differs from configured previous release; refusing incompatible update artifact')
 report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
-    'version': '3.0.7', 'versionCode': 25, 'minSdk': 29,
+    'version': '3.0.8', 'versionCode': 26, 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
     'signerSha256': fingerprint[1],
-    'signing': 'supplied-release-key' if os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE') else 'Android debug key (fallback)',
+    'signing': 'verified-production-key',
     'compatibleWithPreviousCertificate': compatible,
-    'previousArtifactVersion': '3.0.4 (22)',
-    'previousArtifactApkSha256': '835f076c896d48205b286beed5d9c77b164d18a0bab9fa0f1cae9bb00a7843f4',
+    'previousArtifactVersion': previous.get('version'),
+    'previousArtifactApkSha256': previous.get('apkSha256'),
     'matchesPreviousArtifactCertificate': fingerprint[1].lower() == previous_artifact_certificate,
     'embeddedJavaScript': True,
     'deviceAcceptance': 'Not established by APK verification. See PARITY_NOTIFICATIONS_REPORT.md.',

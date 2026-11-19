@@ -153,8 +153,9 @@
 .connect-app .settings-group:not(.settings-menu) { border-radius: 23px; }
 .connect-app .home-brand img { border-radius: 12px; box-shadow: 0 2px 13px rgba(26, 107, 218, .15); }
 
-/* Give settings a three-card visual hierarchy (3 / 3 / 1).
-   The source menu actions and order are completely unchanged. */
+/* CONNECT_PWA_SETTINGS_SEMANTIC_GROUPS_20261117
+   Keep rounded Liquid Glass cards stable for both administrator and member menus.
+   Group boundaries are supplied by lib/settings-menu-groups.ts, not nth-child. */
 .connect-app .settings-group.settings-menu {
   background: transparent;
   border: 0;
@@ -170,20 +171,17 @@
   border-bottom-color: rgba(255,255,255,.04);
 }
 .connect-app .settings-menu > div .setting-divider { display: none; }
-.connect-app .settings-menu > div:nth-child(1),
-.connect-app .settings-menu > div:nth-child(4),
-.connect-app .settings-menu > div:nth-child(7) {
+.connect-app .settings-menu > div.settings-segment-start {
   border-top-left-radius: 22px;
   border-top-right-radius: 22px;
 }
-.connect-app .settings-menu > div:nth-child(3),
-.connect-app .settings-menu > div:nth-child(6),
-.connect-app .settings-menu > div:nth-child(7) {
+.connect-app .settings-menu > div.settings-segment-end {
   border-bottom-left-radius: 22px;
   border-bottom-right-radius: 22px;
 }
-.connect-app .settings-menu > div:nth-child(4),
-.connect-app .settings-menu > div:nth-child(7) { margin-top: 14px; }
+.connect-app .settings-menu > div.settings-segment-start:not(:first-child) {
+  margin-top: 14px;
+}
 .connect-app .settings-menu-row { min-height: 65px; }
 .connect-app .setting-icon {
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 28%, rgba(255,255,255,.04)), color-mix(in srgb, var(--wave-primary) 8%, rgba(23, 60, 78, .30)));

@@ -58,6 +58,6 @@ test('source integrity covers every modified and new file',()=>{
    'web/components/ConnectOtaSettings.tsx','tests/connect-apk-update-20261117.test.cjs']){
   assert.equal(lock.files[name],crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex'),name);
  }
- assert.equal(JSON.parse(read('app.json')).expo.android.versionCode,25);
+ assert.equal(JSON.parse(read('app.json')).expo.android.versionCode,26);
  assert.ok(Object.keys(lock.files).length>=377);
 });

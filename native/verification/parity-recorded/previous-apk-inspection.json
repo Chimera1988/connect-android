@@ -1,0 +1,9 @@
+{
+  "tag": "connect-android-v3.0.7-b25",
+  "bytes": 110786661,
+  "sha256": "5d50755822cb2fd4c9fe781cd140b9dc164cf747cab9fce5ceec5caa37e3a5a8",
+  "certificateSha256": "a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130",
+  "owner": "CN=Connect Release, OU=Android, O=Connect",
+  "method": "Extracted X.509 certificate from APK v2 signing block; keytool read certificate",
+  "fullApksignerVerification": false
+}

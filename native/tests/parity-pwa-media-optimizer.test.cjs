@@ -21,7 +21,8 @@ test('media decisions preserve compressed originals, stickers, notes, native and
   assert.equal(policy(fake('clip.mp4','video/mp4',14e6),false),'video');
   assert.equal(policy(fake('connect-video-note-123.mp4','video/mp4',14e6),false),null);
   assert.equal(policy(fake('big.mp4','video/mp4',101*1024*1024),false),null);
-  assert.equal(policy(fake('pic.jpg','image/jpeg',2e6),true),null);
+  assert.equal(policy(fake('pic.jpg','image/jpeg',2e6),true),'image');
+  assert.equal(policy(fake('clip.mp4','video/mp4',14e6),true),null);
 });
 
 test('single uploads and albums both prepare before thumbnail, upload and metadata; PWA recordings bounded',()=>{
@@ -61,7 +62,7 @@ test('real Chromium: full photo compression, alpha preservation, originals and c
       const noGif=await window.runOptimize(gif);
       const raw=new File([new Uint8Array(16e6)],'video.mp4',{type:'video/mp4'});
       const originalIsReturned=(await window.runOptimize(raw)).file===raw;
-      const native=(await window.runOptimize(input,{native:true})).file===input;
+      const native=(await window.runOptimize(input,{native:true})).decision==='optimized';
       return {input:input.size,output:out.size,mime:out.type,optimized:out!==input,alpha,noGif:noGif.file===gif,originalIsReturned,native};
     });
     assert.ok(result.optimized,'PNG must be optimized in Chromium');

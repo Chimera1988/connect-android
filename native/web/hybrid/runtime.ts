@@ -1,3 +1,4 @@
+import {fencedSessionFetch} from '../lib/session-network-fence';
 import {setMissedActiveCall} from '../lib/call-missed';
 import type {} from './bridge-types';
 import {createClient} from '@supabase/supabase-js';
@@ -14,6 +15,7 @@ declare global {interface Window {
   __connectNativeCall?:any;
   __connectPrepareSession?:(session:Session|null)=>Promise<void>;
 }}
+window.fetch=fencedSessionFetch(window.fetch.bind(window),()=>localStorage.getItem('connect-local-logout-v1')==='1',location.origin,process.env.NEXT_PUBLIC_SUPABASE_URL!);
 let serial=0;
 const pending=new Map<string,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 function request(command:string,payload:unknown={}){
@@ -114,10 +116,12 @@ let deferredNativeSession:NativeSession|undefined;
 let nativeSessionQueue=Promise.resolve();
 function publishSession(session:Session|null){
   const token=session?.access_token||null;
+  if(session&&localStorage.getItem('connect-local-logout-v1')==='1')return;
   if(applyingNative||token===lastPublishedToken)return;
   lastPublishedToken=token;action('session',session?{access_token:session.access_token,refresh_token:session.refresh_token}:null);
 }
 function receiveNativeSession(session:NativeSession){
+  if(session&&localStorage.getItem('connect-local-logout-v1')==='1')return;
   deferredNativeSession=session;
   if(!authBootstrapped)return;
   const change=deferredNativeSession;deferredNativeSession=undefined;
@@ -133,7 +137,7 @@ function receiveNativeSession(session:NativeSession){
 }
 const migrations=new Map<string,Promise<void>>();
 async function prepareSession(session:Session|null){
-  if(!session){publishSession(null);return;}
+  if(!session){lastPublishedToken=null;await request('session',null);return;}
   await request('session',{access_token:session.access_token,refresh_token:session.refresh_token});
   lastPublishedToken=session.access_token;
   const key='connect-android-hybrid-migration-v1.'+session.user.id;
@@ -156,8 +160,8 @@ export const ready=(async()=>{
   // A verified request proves the receiver exists before native events flush.
   await request('bridge:ready');
   const {data}=await client.auth.getSession();
-  if(!data.session&&window.__CONNECT_INITIAL_SESSION__)await client.auth.setSession(window.__CONNECT_INITIAL_SESSION__);
-  const current=await client.auth.getSession();await prepareSession(current.data.session);
+  if(!data.session&&localStorage.getItem('connect-local-logout-v1')!=='1'&&window.__CONNECT_INITIAL_SESSION__)await client.auth.setSession(window.__CONNECT_INITIAL_SESSION__);
+  const current=await client.auth.getSession();await prepareSession(localStorage.getItem('connect-local-logout-v1')==='1'?null:current.data.session);
   client.auth.onAuthStateChange((_event,session)=>{publishSession(session);});
   authBootstrapped=true;if(deferredNativeSession!==undefined)receiveNativeSession(deferredNativeSession);
   action('sounds:get');

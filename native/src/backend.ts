@@ -9,14 +9,29 @@ const CONNECT_URL = (process.env.EXPO_PUBLIC_CONNECT_URL || 'https://connect-cha
 
 /** All browser session data stays on the device, inside Android encrypted storage. */
 const nativeAuth=NativeModules.ConnectCallCoordinator;
+const SESSION_LOCK='connect-native-session-locked-v1';
+const AUTH_KEY='sb-'+new URL(SUPABASE_URL).hostname.split('.')[0]+'-auth-token';
+let sessionBlocked=false;
+export function isNativeSessionLocked(){return sessionBlocked;}
+/** Fence native requests immediately, before any asynchronous FCM/network cleanup. */
+export async function lockNativeSession(cleanup?:()=>Promise<unknown>){
+  sessionBlocked=true;
+  await SecureStore.setItemAsync(SESSION_LOCK,'1');
+  try{await cleanup?.();}finally{await sessionStore.removeItem(AUTH_KEY);}
+}
+export async function unlockNativeSession(){
+  await SecureStore.deleteItemAsync(SESSION_LOCK);
+  sessionBlocked=false;
+}
 const sessionStore = {
   async getItem(key:string){
+    if(await SecureStore.getItemAsync(SESSION_LOCK)==='1'){sessionBlocked=true;return null;}
     if(nativeAuth){try{const value=await nativeAuth.getAuth(key);if(value!==null)return value;}catch{/* Migrate the existing encrypted Expo session if necessary. */}}
     const old=await SecureStore.getItemAsync(key);
     if(old!==null&&nativeAuth)await nativeAuth.setAuth(key,old);
     return old;
   },
-  async setItem(key:string,value:string){if(nativeAuth)await nativeAuth.setAuth(key,value);else await SecureStore.setItemAsync(key,value);},
+  async setItem(key:string,value:string){if(sessionBlocked)throw Error('SESSION_LOCKED');if(nativeAuth)await nativeAuth.setAuth(key,value);else await SecureStore.setItemAsync(key,value);},
   async removeItem(key:string){if(nativeAuth)await nativeAuth.removeAuth(key);await SecureStore.deleteItemAsync(key);},
 };
 
@@ -24,6 +39,7 @@ const sessionStore = {
  * Realtime still requires native WebSocket routing; a polling fallback is used for now.
  */
 function connectFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if(sessionBlocked)return Promise.reject(Error('SESSION_LOCKED'));
   const requested = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
   const rewritten = SUPABASE_URL && requested.startsWith(SUPABASE_URL + '/')
     ? CONNECT_URL + '/supabase/' + requested.slice(SUPABASE_URL.length + 1) : requested;

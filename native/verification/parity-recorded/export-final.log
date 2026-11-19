@@ -1,0 +1,14 @@
+Starting Metro Bundler
+
+Android Bundled 12527ms index.js (994 modules)
+
+› Assets (1):
+node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf (390KB)
+
+› android bundles (1):
+_expo/static/js/android/index-bd09b7183652fe75c6087bfa760f9d05.hbc (5.1MB)
+
+› Files (1):
+metadata.json (212B)
+
+Exported: verification/parity/export-final
