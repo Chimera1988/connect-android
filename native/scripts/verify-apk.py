@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 import zipfile
-from check_release_signing import validate_certificate
+from check_release_signing import validate_certificate, read_apksigner_fingerprint
 
 def audit_packaged_signing_material(archive):
     """Reject any private credentials; permit only parseable public X.509/PEM keys."""
@@ -96,14 +96,14 @@ with zipfile.ZipFile(apk) as z:
     audit_packaged_signing_material(z)
     assert sorted({n.split('/')[1] for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')})==['arm64-v8a','armeabi-v7a']
 signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
-fingerprint = re.search(r'(?:Signer #1|V2 Signer|V3 Signer):? certificate SHA-256 digest: ([0-9a-fA-F]+)', signature)
+fingerprint = read_apksigner_fingerprint(signature)
 assert fingerprint, 'Missing signing certificate'
 assert os.environ.get('CONNECT_RELEASE_KEYSTORE_FILE'), 'Final candidate requires the existing release key; debug fallback is forbidden'
 expected = os.environ.get('CONNECT_PREVIOUS_CERT_SHA256', '').replace(':', '').lower()
 assert re.fullmatch(r'[0-9a-f]{64}', expected), 'Expected installed certificate is required'
 owner = re.search(r'certificate DN: (.*)', signature)
-validate_certificate(fingerprint[1], expected, owner[1] if owner else '')
-compatible = None if not expected else expected == fingerprint[1].lower()
+validate_certificate(fingerprint, expected, owner[1] if owner else '')
+compatible = None if not expected else expected == fingerprint.lower()
 previous_path = Path(__file__).resolve().parents[1]/'verification/parity/previous-apk.json'
 previous = json.loads(previous_path.read_text()) if previous_path.is_file() else {}
 previous_artifact_certificate = previous.get('certificateSha256', expected)
@@ -113,12 +113,12 @@ report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
     'version': '3.0.8', 'versionCode': 26, 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
-    'signerSha256': fingerprint[1],
+    'signerSha256': fingerprint,
     'signing': 'verified-production-key',
     'compatibleWithPreviousCertificate': compatible,
     'previousArtifactVersion': previous.get('version'),
     'previousArtifactApkSha256': previous.get('apkSha256'),
-    'matchesPreviousArtifactCertificate': fingerprint[1].lower() == previous_artifact_certificate,
+    'matchesPreviousArtifactCertificate': fingerprint.lower() == previous_artifact_certificate,
     'embeddedJavaScript': True,
     'deviceAcceptance': 'Not established by APK verification. See PARITY_NOTIFICATIONS_REPORT.md.',
 }

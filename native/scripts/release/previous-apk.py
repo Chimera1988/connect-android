@@ -7,9 +7,16 @@ text=subprocess.check_output([str(sdk/'aapt'),'dump','badging',str(apk)],text=Tr
 match=re.search(r"package: name='com.connect.messenger' versionCode='(\d+)' versionName='([^']+)'",text)
 if not match:raise SystemExit('Previous APK identity invalid')
 cert=subprocess.check_output([str(sdk/'apksigner'),'verify','--verbose','--print-certs',str(apk)],text=True)
-digest=re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)',cert)
+# This script is executed as scripts/release/previous-apk.py from native/.
+# Its import path otherwise excludes the parent scripts directory.
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from check_release_signing import read_apksigner_fingerprint
 expected='a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130'
-if not digest or digest[1].lower()!=expected:raise SystemExit('Previous APK production certificate mismatch; release stopped')
+try:
+ actual=read_apksigner_fingerprint(cert)
+except ValueError as error:
+ raise SystemExit('Cannot verify previous APK signer: '+str(error)) from error
+if actual!=expected:raise SystemExit('Previous APK production certificate mismatch; release stopped')
 app=json.loads(Path('app.json').read_text())['expo']
 resources=subprocess.check_output([str(sdk/'aapt2'),'dump','resources',str(apk)],text=True)
 runtimes=set(re.findall(r'connect-android-ota-v[0-9]+-sdk58',resources))

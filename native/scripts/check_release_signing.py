@@ -2,6 +2,18 @@
 import os
 import re
 import subprocess
+def read_apksigner_fingerprint(output):
+    """Read a verified APK's public signing certificate in old/new apksigner formats."""
+    count = re.search(r'^Number of signers:\s*(\d+)\s*$', output, re.M)
+    if count and int(count.group(1)) != 1:
+        raise ValueError('Expected exactly one APK signer')
+    digests = set(value.lower() for value in re.findall(
+        r'^\s*(?:(?:V[0-9](?:\.[0-9])?\s+)?Signer(?:\s+#\d+)?):?\s+certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$',
+        output, re.M))
+    if len(digests) != 1:
+        raise ValueError('Cannot establish one unambiguous previous APK certificate')
+    return next(iter(digests))
+
 DEBUG_CERT = 'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c'
 def validate_certificate(actual, expected, owner):
     actual = actual.replace(':', '').lower()
