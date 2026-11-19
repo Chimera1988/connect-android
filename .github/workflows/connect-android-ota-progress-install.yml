@@ -1,0 +1,258 @@
+name: Connect Android | Install real OTA download progress
+run-name: Connect Android 3.0.8 — add OTA download progress to main
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-ota-progress-install
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Require unchanged Connect 3.0.8 production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain)"
+          test -s native/PARITY_SOURCE_LOCK.json
+          node -e "const e=require('./native/app.json').expo;if(e.version!=='3.0.8'||e.android.versionCode!==26||e.runtimeVersion!=='connect-android-ota-v2-sdk58')process.exit(1)"
+      - name: Patch real Expo progress (source-locked, JS only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYOTA'
+          #!/usr/bin/env python3
+          """Apply Connect 3.0.8 OTA progress UI changes to verified source tree."""
+          from pathlib import Path
+          import hashlib, json, sys
+          
+          root = Path(sys.argv[1] if len(sys.argv) > 1 else 'native').resolve()
+          lock_path=root/'PARITY_SOURCE_LOCK.json'
+          lock=json.loads(lock_path.read_text())
+          
+          before_hashes={
+              'src/App.tsx': '7247ba39d2c2fe76e689a3ea55ec2514d285fccd9986c47bf4e11c275b97ade6',
+              'web/hybrid/runtime.ts':'b3e9ce924df2d53a03455e8f0afe31735fe3ac447f49619f4ffdaf7dd1aa806a',
+              'web/components/ConnectOtaSettings.tsx':'42e305e1328ebcd8a887de220a2e5131f52916bbd0dc1f1f5bee452d968dcf30',
+              'web/hybrid/android.css':'44472ba9339fca8785306901c2c3a6bcd61905be925875d71021c955fe282d5c',
+          }
+          
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          
+          def verify_base():
+              for name,expected in before_hashes.items():
+                  path=root/name
+                  content=path.read_bytes()
+                  if sha(content)!=expected or lock['files'].get(name)!=expected:
+                      raise SystemExit('STOP: reviewed baseline changed for '+name+' (no sources changed)')
+          verify_base()
+          
+          new_files={}
+          def replace(name,old,new):
+              content=new_files.get(name, (root/name).read_text())
+              if content.count(old)!=1:raise SystemExit('STOP: patch anchor missing/non-unique: '+name+' '+repr(old[:65]))
+              new_files[name]=content.replace(old,new,1)
+          
+          replace('src/App.tsx',
+          "      if(['call','sounds','lifecycle','chat','native-session'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);",
+          "      if(['call','sounds','lifecycle','chat','native-session','ota-progress'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);")
+          
+          replace('src/App.tsx',
+          "  const abortTransfers=useCallback(()=>{",
+          """  // Report real Expo asset-download progress; never synthesize a percentage from elapsed time.
+            useEffect(()=>{
+              const raw=otaState.downloadProgress;
+              const fraction=otaState.isDownloading&&typeof raw==='number'&&Number.isFinite(raw)
+                ?Math.min(1,Math.max(0,raw)):null;
+              send('ota-progress',{downloading:otaState.isDownloading,progress:fraction});
+            },[send,otaState.isDownloading,otaState.downloadProgress]);
+            const abortTransfers=useCallback(()=>{""")
+          
+          replace('src/App.tsx',
+          "            enabled:Updates.isEnabled,pending:otaStateRef.current.isUpdatePending||otaDownloaded.current,",
+          """            enabled:Updates.isEnabled,pending:otaStateRef.current.isUpdatePending||otaDownloaded.current,
+                      downloading:otaStateRef.current.isDownloading,
+                      downloadProgress:otaStateRef.current.isDownloading&&typeof otaStateRef.current.downloadProgress==='number'&&Number.isFinite(otaStateRef.current.downloadProgress)
+                        ?Math.min(1,Math.max(0,otaStateRef.current.downloadProgress)):null,""")
+          
+          replace('web/hybrid/runtime.ts',
+          "window.__connectReceive=(type,data)=>{\n  if(type==='record-level')",
+          """window.__connectReceive=(type,data)=>{
+            if(type==='ota-progress'){window.dispatchEvent(new CustomEvent('connect:ota-progress',{detail:data}));return;}
+            if(type==='record-level')""")
+          
+          replace('web/components/ConnectOtaSettings.tsx',
+          "type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean};",
+          """type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean;downloading?:boolean;downloadProgress?:number|null};
+          type OtaProgressEvent={downloading:boolean;progress:number|null};
+          function validFraction(value:unknown):number|null{
+            return typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(1,value)):null;
+          }""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          "  const [error,setError]=useState('');",
+          """  const [error,setError]=useState('');
+            const [downloadFraction,setDownloadFraction]=useState<number|null>(null);""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          """  useEffect(()=>{
+              let alive=true;
+              const bridge=window.ConnectNative;""",
+          """  useEffect(()=>{
+              const handle=(event:Event)=>{
+                const data=(event as CustomEvent<OtaProgressEvent>).detail;
+                if(!data||data.downloading!==true)return;
+                setState(old=>old==='ready'||old==='restarting'||old==='disabled'?old:'downloading');
+                const fraction=validFraction(data.progress);
+                if(fraction!==null)setDownloadFraction(old=>Math.max(old??0,fraction));
+              };
+              window.addEventListener('connect:ota-progress',handle);
+              return()=>window.removeEventListener('connect:ota-progress',handle);
+            },[]);
+            useEffect(()=>{
+              let alive=true;
+              const bridge=window.ConnectNative;""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          """      setInfo(value);
+                setState(!value.enabled?'disabled':value.pending?'ready':'idle');""",
+          """      setInfo(value);
+                setDownloadFraction(value.pending?1:validFraction(value.downloadProgress));
+                setState(!value.enabled?'disabled':value.pending?'ready':value.downloading?'downloading':'idle');""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          """    setError('');
+              setState(command==='updates:check'?'checking':command==='updates:download'?'downloading':'restarting');""",
+          """    setError('');
+              if(command!=='updates:apply')setDownloadFraction(null);
+              setState(command==='updates:check'?'checking':command==='updates:download'?'downloading':'restarting');""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          """      if(next==='available'||next==='ready'||next==='current')setState(next);""",
+          """      if(next==='available'||next==='ready'||next==='current'){
+                  if(next==='ready')setDownloadFraction(1);
+                  else if(next==='current')setDownloadFraction(null);
+                  setState(next);
+                }""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          """  const progress=state==='checking'||state==='downloading'||state==='restarting';""",
+          """  const progress=state==='checking'||state==='downloading'||state==='restarting';
+            const showProgress=progress||state==='ready';
+            const progressPercent=state==='ready'?100:state==='downloading'&&downloadFraction!==null?Math.round(downloadFraction*100):null;""")
+          replace('web/components/ConnectOtaSettings.tsx',
+          """    <p className="connect-ota-status" role="status" aria-live="polite">{status}</p>
+              {state==='ready'?""",
+          """    <p className="connect-ota-status" role="status" aria-live="polite">{status}</p>
+              {showProgress&&<div className="connect-ota-progress-area">
+                <div className={'connect-ota-progress-track'+(progressPercent===null?' is-indeterminate':'')}
+                  role="progressbar" aria-label="Загрузка обновления интерфейса"
+                  aria-valuemin={0} aria-valuemax={100}
+                  aria-valuenow={progressPercent===null?undefined:progressPercent}
+                  aria-valuetext={progressPercent===null?status:`${progressPercent}%`}>
+                  <span className="connect-ota-progress-fill" style={progressPercent===null?undefined:{width:`${progressPercent}%`}}/>
+                </div>
+                <p className="settings-hint connect-ota-progress-caption">
+                  {state==='ready'?'Загружено 100% — можно применить обновление.':
+                    state==='downloading'?(progressPercent===null?'Загружаем… процент пока недоступен.':`Загружено ${progressPercent}%`):status}
+                </p>
+              </div>}
+              {state==='ready'?""")
+          
+          css='web/hybrid/android.css'
+          new_files[css]=(root/css).read_text()+"""
+          /* OTA: determinate bar only for Expo-reported download fractions. */
+          .connect-ota-about .connect-ota-progress-area{margin:9px 0 13px;}
+          .connect-ota-about .connect-ota-progress-track{width:100%;height:8px;overflow:hidden;border-radius:999px;background:rgba(126,164,215,.19);box-shadow:inset 0 0 0 1px rgba(170,208,255,.12);}
+          .connect-ota-about .connect-ota-progress-fill{display:block;height:100%;width:0;background:linear-gradient(90deg,#2786e8,#66bfff);border-radius:inherit;transition:width .18s ease-out;}
+          .connect-ota-about .connect-ota-progress-track.is-indeterminate .connect-ota-progress-fill{width:28%;animation:connect-ota-sweep 1.35s ease-in-out infinite;}
+          .connect-ota-about .connect-ota-progress-caption{font-size:12px;margin-top:7px;}
+          @keyframes connect-ota-sweep{from{transform:translateX(-100%)}to{transform:translateX(360%)}}
+          @media (prefers-reduced-motion:reduce){.connect-ota-about .connect-ota-progress-track.is-indeterminate .connect-ota-progress-fill{animation:none;width:100%;opacity:.5}}
+          """
+          
+          # Commit only after every replacement and source-lock entry can be validated.
+          for name,value in new_files.items():
+              path=root/name
+              path.write_text(value)
+              lock['files'][name]=sha(path.read_bytes())
+          lock_path.write_text(json.dumps(lock,indent=2,ensure_ascii=False)+'\n')
+          # Assert matching file hashes and that nativeBaseline inputs remain unchanged.
+          for name,value in new_files.items():
+              if lock['files'][name]!=sha((root/name).read_bytes()):raise SystemExit('Lock mismatch '+name)
+          print('OTA progress patch prepared for '+', '.join(sorted(new_files))+'; source lock updated')
+          
+          # A focused regression guard accompanies the feature and is also hash-locked.
+          test_name='tests/connect-ota-progress-20261119.test.cjs'
+          test=b'const {test}=require(\'node:test\');\nconst assert=require(\'node:assert/strict\');\nconst fs=require(\'node:fs\');\nconst path=require(\'node:path\');\nconst crypto=require(\'node:crypto\');\nconst root=path.resolve(__dirname,\'..\');\nconst read=name=>fs.readFileSync(path.join(root,name),\'utf8\');\nconst native=read(\'src/App.tsx\');\nconst runtime=read(\'web/hybrid/runtime.ts\');\nconst ui=read(\'web/components/ConnectOtaSettings.tsx\');\nconst css=read(\'web/hybrid/android.css\');\n\ntest(\'OTA fraction comes from Expo useUpdates and is bounded to [0,1]\',()=>{\n  assert.match(native,/const otaState=Updates\\.useUpdates\\(\\)/);\n  assert.match(native,/otaState\\.downloadProgress/);\n  assert.match(native,/otaState\\.isDownloading/);\n  assert.match(native,/Number\\.isFinite\\(raw\\)/);\n  assert.match(native,/Math\\.min\\(1,Math\\.max\\(0,raw\\)\\)/);\n  assert.match(native,/send\\(\'ota-progress\',\\{downloading:otaState\\.isDownloading,progress:fraction\\}\\)/);\n  assert.match(native,/downloadProgress:otaStateRef\\.current\\.isDownloading/);\n  assert.doesNotMatch(native,/setInterval\\([^\\n]*ota-progress/);\n});\n\ntest(\'existing nonce-bound bridge sends native progress events without adding arbitrary commands\',()=>{\n  assert.match(native,/\\[\'call\',\'sounds\',\'lifecycle\',\'chat\',\'native-session\',\'ota-progress\'\\]/);\n  assert.match(runtime,/if\\(type===\'ota-progress\'\\)/);\n  assert.match(runtime,/new CustomEvent\\(\'connect:ota-progress\',\\{detail:data\\}\\)/);\n  assert.doesNotMatch(ui,/EXPO_TOKEN|SERVICE_ROLE_KEY|fetch\\(/);\n});\n\ntest(\'OTA UI displays real percentages, accessible progress, and unknown progress without fake data\',()=>{\n  assert.match(ui,/function validFraction\\(value:unknown\\):number\\|null/);\n  assert.match(ui,/Number\\.isFinite\\(value\\)/);\n  assert.match(ui,/setDownloadFraction\\(old=>Math\\.max\\(old\\?\\?0,fraction\\)\\)/);\n  assert.match(ui,/progressPercent=state===\'ready\'\\?100:state===\'downloading\'/);\n  assert.match(ui,/role="progressbar"/);\n  assert.match(ui,/aria-valuenow=\\{progressPercent===null\\?undefined:progressPercent\\}/);\n  assert.match(ui,/\xd0\x97\xd0\xb0\xd0\xb3\xd1\x80\xd1\x83\xd0\xb6\xd0\xb5\xd0\xbd\xd0\xbe \\$\\{progressPercent\\}%/);\n  assert.match(ui,/\xd0\xbf\xd1\x80\xd0\xbe\xd1\x86\xd0\xb5\xd0\xbd\xd1\x82 \xd0\xbf\xd0\xbe\xd0\xba\xd0\xb0 \xd0\xbd\xd0\xb5\xd0\xb4\xd0\xbe\xd1\x81\xd1\x82\xd1\x83\xd0\xbf\xd0\xb5\xd0\xbd/);\n  assert.match(ui,/state===\'ready\'\\?\'\xd0\x97\xd0\xb0\xd0\xb3\xd1\x80\xd1\x83\xd0\xb6\xd0\xb5\xd0\xbd\xd0\xbe 100%/);\n  assert.match(ui,/case \'updates:download\'|updates:download/);\n  assert.doesNotMatch(ui,/setInterval|setTimeout|Math\\.random/);\n});\n\ntest(\'progress indicator is accessible, dark-theme compatible and reduced-motion aware\',()=>{\n  assert.match(css,/connect-ota-progress-track/);\n  assert.match(css,/connect-ota-progress-fill/);\n  assert.match(css,/connect-ota-sweep/);\n  assert.match(css,/prefers-reduced-motion:reduce/);\n});\n\ntest(\'all changed sources and this test are hash-locked\',()=>{\n  const lock=JSON.parse(read(\'PARITY_SOURCE_LOCK.json\'));\n  for(const name of [\'src/App.tsx\',\'web/hybrid/runtime.ts\',\'web/components/ConnectOtaSettings.tsx\',\'web/hybrid/android.css\',\'tests/connect-ota-progress-20261119.test.cjs\']){\n    const digest=crypto.createHash(\'sha256\').update(fs.readFileSync(path.join(root,name))).digest(\'hex\');\n    assert.equal(lock.files[name],digest,name);\n  }\n});\n'
+          test_path=root/test_name
+          test_path.write_bytes(test)
+          lock['files'][test_name]=sha(test)
+          lock_path.write_text(json.dumps(lock,indent=2,ensure_ascii=False)+'\n')
+          print('Added '+test_name+' to reviewed source lock')
+          PYOTA
+          (cd native && node scripts/check-parity-source.mjs && node --test tests/connect-ota-progress-20261119.test.cjs)
+      - name: Typecheck, unit and integration tests, real Chromium regression
+        shell: bash
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build:web
+          npm run typecheck:web
+          npm run typecheck
+          npx --no-install playwright-core install --with-deps chromium
+          CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          export CHROMIUM_PATH
+          test -x "$CHROMIUM_PATH"
+          npm test
+          npm run test:browser
+          node scripts/check-parity-source.mjs
+          git diff --check
+      - name: Confirm exactly the intended files and push to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- \
+            native/src/App.tsx \
+            native/web/hybrid/runtime.ts \
+            native/web/hybrid/android.css \
+            native/web/components/ConnectOtaSettings.tsx \
+            native/tests/connect-ota-progress-20261119.test.cjs \
+            native/PARITY_SOURCE_LOCK.json
+          expected=$(printf '%s\n' \
+            native/PARITY_SOURCE_LOCK.json \
+            native/src/App.tsx \
+            native/tests/connect-ota-progress-20261119.test.cjs \
+            native/web/components/ConnectOtaSettings.tsx \
+            native/web/hybrid/android.css \
+            native/web/hybrid/runtime.ts)
+          actual="$(git diff --cached --name-only)"
+          if [ "$actual" != "$expected" ]; then
+            echo '::error::Unexpected staged file list. Refusing to push.' >&2
+            git diff --cached --name-only >&2
+            exit 1
+          fi
+          test -z "$(git diff --name-only)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Connect Android: show real Expo OTA download progress'
+          git push origin HEAD:refs/heads/main
+          echo '### Connect OTA progress' >> "$GITHUB_STEP_SUMMARY"
+          echo 'JavaScript progress and UI installed in main; compatible with APK 3.0.8 / OTA runtime v2.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Next: run Connect Android | PWA parity release with mode=ota, previous_release=connect-android-v3.0.8-b26.' >> "$GITHUB_STEP_SUMMARY"
