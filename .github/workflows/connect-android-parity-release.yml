@@ -1,0 +1,324 @@
+name: Connect Android | PWA parity release
+run-name: Connect Android parity — ${{ inputs.mode }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: check validates only; apk builds the new native base; ota requires its published baseline
+        required: true
+        type: choice
+        default: check
+        options: [check, ota, apk]
+      previous_release:
+        description: Published signed APK to compare (OTA requires CONNECT-NATIVE-BASELINE.json in this release)
+        required: true
+        type: string
+        default: connect-android-v3.0.7-b25
+      message:
+        description: Expo update release note
+        required: true
+        type: string
+        default: Connect Android PWA parity
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-android-production-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+    working-directory: native
+
+env:
+  CI: '1'
+  EXPO_NO_TELEMETRY: '1'
+  CONNECT_PREVIOUS_CERT_SHA256: a6507c8b798b77774144502fb1d9a6d09c53da98946b174c692175a96c230130
+
+jobs:
+  verify:
+    name: Sources, regressions, Hermes and native build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard repository, branch and committed inputs
+        env:
+          SELECTED_MODE: ${{ inputs.mode }}
+          PREVIOUS_RELEASE: ${{ inputs.previous_release }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          [[ "$SELECTED_MODE" =~ ^(check|ota|apk)$ ]]
+          [[ "$PREVIOUS_RELEASE" =~ ^connect-android-v[0-9]+\.[0-9]+\.[0-9]+-b[1-9][0-9]*$ ]]
+          for path in package-lock.json app.json google-services.json PWA_ANDROID_FINAL_PARITY_REPORT.md scripts/release/validate.mjs; do
+            test -s "$path"
+          done
+          git diff --check
+          mkdir -p verification/parity
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - name: Install locked dependencies and compile embedded UI
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/check-parity-source.mjs
+          npm run build:web
+          node scripts/release/validate.mjs source
+          node scripts/release/config.mjs
+      - name: Validate YAML syntax, size and GitHub expressions
+        env:
+          ACTIONLINT_VERSION: '1.7.12'
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python3 scripts/release/check-workflow.py
+          tools="$RUNNER_TEMP/actionlint"
+          mkdir -p "$tools"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl --fail --location --retry 2 "$base/$archive" --output "$tools/$archive"
+          curl --fail --location --retry 2 "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt" --output "$tools/checksums.txt"
+          (cd "$tools" && rg " $archive\$" checksums.txt | sha256sum --check)
+          tar -xzf "$tools/$archive" -C "$tools" actionlint
+          "$tools/actionlint" -color ../.github/workflows/connect-android-parity-release.yml
+      - name: TypeScript, unit, integration, call, push and cache regressions
+        run: |
+          set -euo pipefail
+          npm run typecheck:web 2>&1 | tee verification/parity/typecheck-web.log
+          npm run typecheck 2>&1 | tee verification/parity/typecheck-native.log
+          npx --no-install playwright-core install --with-deps chromium
+          export CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          test -x "$CHROMIUM_PATH"
+          python3 -m unittest discover -s scripts -p 'test_release_signing.py'
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm test 2>&1 | tee verification/parity/node-tests.log
+          npm run test:browser 2>&1 | tee verification/parity/browser-tests.log
+      - name: Export Android Hermes bundle
+        run: |
+          set -euo pipefail
+          npx --no-install expo export --platform android --output-dir verification/parity/export 2>&1 | tee verification/parity/export.log
+          node scripts/release/validate.mjs export
+      - name: Generate native project and install exact SDK tools
+        run: |
+          set -euo pipefail
+          npx --no-install expo prebuild --platform android --no-install 2>&1 | tee verification/parity/prebuild.log
+          node scripts/release/validate.mjs prebuild
+          node scripts/check-parity-source.mjs --tools > verification/parity/android-tools.json
+          readarray -t sdk < <(node -e "const v=require('./verification/parity/android-tools.json');console.log(v.sdkPlatform);console.log(v.buildTools);console.log(v.ndk)")
+          sdkmanager --channel=3 "${sdk[0]}" "build-tools;${sdk[1]}" "ndk;${sdk[2]}" 'cmake;3.22.1' 'platform-tools'
+      - name: Kotlin, Java, JVM call tests, lint and unsigned release assembly
+        working-directory: native/android
+        run: |
+          set -euo pipefail
+          ./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease --no-daemon --max-workers=2 2>&1 | tee ../verification/parity/gradle.log
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Confirm sources were not rewritten by build
+        run: |
+          set -euo pipefail
+          node scripts/check-parity-source.mjs
+          git diff --check
+          git diff --exit-code
+          git rev-parse HEAD > verification/parity/BUILD-SOURCE-SHA.txt
+      - name: Save internal unsigned APK for signing job (not an installable release)
+        if: inputs.mode == 'apk'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: connect-internal-unsigned-${{ github.run_id }}
+          path: native/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 1
+      - name: Write verification summary
+        if: always()
+        run: node scripts/release/summary.mjs
+      - name: Preserve checks, including failures
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: connect-parity-checks-${{ github.run_id }}
+          path: |
+            native/verification/parity/*.json
+            native/verification/parity/*.txt
+            native/verification/parity/*.log
+            native/android/app/build/reports/
+            native/android/app/build/test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  ota:
+    name: Publish compatible production Expo OTA
+    needs: verify
+    if: inputs.mode == 'ota'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Install identical sources and EAS CLI
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build:web
+          node scripts/check-parity-source.mjs
+          npm install --global eas-cli@27.10.0 --no-audit --no-fund
+          mkdir -p verification/parity
+      - name: Require an actually released matching native base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_RELEASE: ${{ inputs.previous_release }}
+        run: |
+          set -euo pipefail
+          gh release download "$PREVIOUS_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern CONNECT-NATIVE-BASELINE.json --dir "$RUNNER_TEMP/native-base"
+          node scripts/release/validate.mjs ota "$RUNNER_TEMP/native-base/CONNECT-NATIVE-BASELINE.json"
+      - name: Verify authenticated EAS project, production channel and environment
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPO_TOKEN" || { echo '::error::Missing EXPO_TOKEN'; exit 1; }
+          eas whoami
+          eas project:info > verification/parity/eas-project.txt
+          node scripts/release/check-eas-project.mjs
+          eas channel:view production --json > verification/parity/eas-channel.json
+          node scripts/release/check-eas-channel.mjs
+          eas env:exec production 'node scripts/release/check-production-env.mjs' --non-interactive
+      - name: Publish Android only after all checks
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RELEASE_MESSAGE: ${{ inputs.message }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote https://github.com/Chimera1988/connect-android.git refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          node scripts/check-parity-source.mjs
+          git diff --exit-code
+          eas update --channel production --platform android --environment production --message "$RELEASE_MESSAGE" --non-interactive --json > verification/parity/eas-update.json
+          node scripts/release/result.mjs verification/parity/eas-update.json
+      - name: Write OTA summary
+        if: always()
+        run: node scripts/release/summary.mjs
+      - name: Preserve publication identifiers and compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: connect-ota-result-${{ github.run_id }}
+          path: native/verification/parity/*.json
+          if-no-files-found: error
+          retention-days: 90
+
+  apk:
+    name: Verify production key, sign and publish APK
+    needs: verify
+    if: inputs.mode == 'apk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: connect-internal-unsigned-${{ github.run_id }}
+          path: native/verification/parity/unsigned
+      - name: Install signing tools and confirm previous APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_RELEASE: ${{ inputs.previous_release }}
+        run: |
+          set -euo pipefail
+          sdkmanager 'build-tools;37.0.0'
+          gh release download "$PREVIOUS_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern Connect.apk --dir "$RUNNER_TEMP/previous"
+          node scripts/release/config.mjs
+          gh release view "$PREVIOUS_RELEASE" --repo "$GITHUB_REPOSITORY" --json assets > verification/parity/previous-assets.json
+          has_baseline="$(node -p "require('./verification/parity/previous-assets.json').assets.some(a=>a.name==='CONNECT-NATIVE-BASELINE.json')")"
+          if [ "$has_baseline" = 'true' ]; then
+            gh release download "$PREVIOUS_RELEASE" --repo "$GITHUB_REPOSITORY" --pattern CONNECT-NATIVE-BASELINE.json --dir "$RUNNER_TEMP/previous"
+          fi
+          python3 scripts/release/previous-apk.py "$RUNNER_TEMP/previous/Connect.apk" verification/parity
+      - name: Require the existing production signing key (no debug fallback)
+        env:
+          CONNECT_RELEASE_KEYSTORE_BASE64: ${{ secrets.CONNECT_RELEASE_KEYSTORE_BASE64 }}
+          CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.CONNECT_RELEASE_STORE_PASSWORD }}
+          CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.CONNECT_RELEASE_KEY_ALIAS }}
+          CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.CONNECT_RELEASE_KEY_PASSWORD }}
+          CONNECT_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/connect-release.jks
+        run: |
+          set -euo pipefail
+          for key in CONNECT_RELEASE_KEYSTORE_BASE64 CONNECT_RELEASE_STORE_PASSWORD CONNECT_RELEASE_KEY_ALIAS CONNECT_RELEASE_KEY_PASSWORD; do
+            test -n "${!key}" || { echo "::error::Missing production secret $key"; exit 1; }
+          done
+          umask 077
+          printf '%s' "$CONNECT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$CONNECT_RELEASE_KEYSTORE_FILE"
+          python3 scripts/check_release_signing.py
+          mkdir -p verification/parity/apk
+          tools="$ANDROID_HOME/build-tools/37.0.0"
+          "$tools/zipalign" -P 16 -f -v 4 verification/parity/unsigned/app-release-unsigned.apk verification/parity/aligned.apk
+          "$tools/apksigner" sign --ks "$CONNECT_RELEASE_KEYSTORE_FILE" --ks-key-alias "$CONNECT_RELEASE_KEY_ALIAS" --ks-pass env:CONNECT_RELEASE_STORE_PASSWORD --key-pass env:CONNECT_RELEASE_KEY_PASSWORD --out verification/parity/apk/Connect.apk verification/parity/aligned.apk
+          "$tools/zipalign" -c -P 16 -v 4 verification/parity/apk/Connect.apk
+          python3 scripts/verify-apk.py verification/parity/apk/Connect.apk verification/parity/apk
+      - name: Prepare verified release and future OTA baseline
+        run: |
+          set -euo pipefail
+          node scripts/release/finalize-apk.mjs
+          git rev-parse HEAD > verification/parity/apk/BUILD-SOURCE-SHA.txt
+          git diff --check
+          git diff --exit-code
+      - name: Publish the verified APK for existing in-app updater
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote https://github.com/Chimera1988/connect-android.git refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          tag="$(node -p "const a=require('./app.json').expo;'connect-android-v'+a.version+'-b'+a.android.versionCode")"
+          gh release create "$tag" verification/parity/apk/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Connect Android $tag" --notes-file scripts/release/APK_RELEASE_NOTES.md --latest
+          echo "Published signed APK: https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+      - name: Write APK summary
+        if: always()
+        run: node scripts/release/summary.mjs
+      - name: Preserve signed APK, SHA-256, baseline and report
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: connect-apk-result-${{ github.run_id }}
+          path: |
+            native/verification/parity/apk/
+            native/verification/parity/previous-apk.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Delete temporary production keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/connect-release.jks"
