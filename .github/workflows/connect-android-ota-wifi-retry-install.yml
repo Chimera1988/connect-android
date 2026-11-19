@@ -1,0 +1,358 @@
+name: Connect Android | Repair Expo OTA Wi-Fi timeouts
+run-name: Connect 3.0.8 — safe OTA network retries
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-ota-wifi-repair
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Guard current Connect 3.0.8 sources and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain)"
+          node -e "const a=require('./native/app.json').expo;if(a.version!=='3.0.8'||a.android.versionCode!==26||a.runtimeVersion!=='connect-android-ota-v2-sdk58')process.exit(1)"
+          python3 - <<'PYHASH'
+          import pathlib,hashlib,sys
+          expected={
+            'native/src/App.tsx': 'f3941526a98bb64f259413f7f0cd0996b0199929cd17ee81c7e2b6d7f9631d0c',
+            'native/web/hybrid/runtime.ts': '72a54279c633b7327e9ada22529c11d91a09784ad57f3a7ec991a1303b3e9d5a',
+            'native/web/components/ConnectOtaSettings.tsx': '81d8b1159fae54bf8d70e2ed2d06eebe4fe560fc50c1e8a84362e2b22713f7d4',
+            'native/tests/connect-ota-progress-20261119.test.cjs': '4bb6621066668cd3328fdb64cb72751451c3b9a9b727010cbabbeaf6517245f7',
+          }
+          for name,expected_sha in expected.items():
+              file=pathlib.Path(name)
+              if not file.is_file() or hashlib.sha256(file.read_bytes()).hexdigest()!=expected_sha:
+                  sys.exit('STOP: production source changed for '+name)
+          for name in ['native/src/ConnectOtaNetwork.ts','native/tests/connect-ota-network-retry-20261119.test.cjs']:
+              if pathlib.Path(name).exists():sys.exit('STOP: patch already present: '+name)
+          PYHASH
+          (cd native && node scripts/check-parity-source.mjs)
+      - name: Apply audited retry patch (no native module changes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/connect-ota-wifi.patch" <<'PATCH'
+          --- a/native/src/App.tsx
+          +++ b/native/src/App.tsx
+          @@ -7,6 +7,7 @@
+           import * as SecureStore from 'expo-secure-store';
+           import {readInstalledAppIdentity} from './installedAppIdentity';
+           import * as Updates from 'expo-updates';
+          +import {downloadOtaWithNetworkRetry,isTransientOtaFailure} from './ConnectOtaNetwork';
+           import {checkConnectApkRelease,type ConnectApkCandidate} from './ConnectApkUpdates';
+           import {WebView,WebViewMessageEvent} from 'react-native-webview';
+           import notifee from '@notifee/react-native';
+          @@ -47,7 +48,7 @@
+             const send=useCallback((type:string,data:unknown)=>{
+               if(!mounted.current)return;
+               if(!loaded.current){
+          -      if(['call','sounds','lifecycle','chat','native-session','ota-progress'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);
+          +      if(['call','sounds','lifecycle','chat','native-session','ota-progress','ota-retry'].includes(type))queued.current=queued.current.filter(([t])=>t!==type);
+                 if(queued.current.length>=32)queued.current.shift();
+                 queued.current.push([type,data]);return;
+               }
+          @@ -210,7 +211,10 @@
+                   case 'updates:download':{
+                     if(!Updates.isEnabled)throw Error('Обновления Expo недоступны');
+                     if(otaStateRef.current.isUpdatePending||otaDownloaded.current){result={state:'ready'};break;}
+          -          const fetched=await Updates.fetchUpdateAsync();
+          +          const fetched=await downloadOtaWithNetworkRetry(
+          +            ()=>Updates.fetchUpdateAsync(),
+          +            notice=>send('ota-retry',notice),
+          +          );
+                     if(!fetched.isNew&&!fetched.isRollBackToEmbedded){result={state:'current'};break;}
+                     otaDownloaded.current=true;result={state:'ready'};break;
+                   }
+          @@ -348,7 +352,14 @@
+                   default:throw Error('Команда пока недоступна');
+                 }
+                 traceCall('DONE');respond(true,result);
+          -    }catch(e){traceCall('ERROR');if(command==='register')send('push-status',{ok:false});respond(false,undefined,e instanceof Error?e.message:'Ошибка Android');}
+          +    }catch(e){
+          +      traceCall('ERROR');
+          +      if(command==='register')send('push-status',{ok:false});
+          +      const message=command==='updates:download'&&isTransientOtaFailure(e)
+          +        ?'Не удалось загрузить OTA с сервера Expo. Три попытки не помогли: проверьте доступ к assets.eascdn.net через Wi-Fi, DNS или фильтры сети. Повторите позже.'
+          +        :e instanceof Error?e.message:'Ошибка Android';
+          +      respond(false,undefined,message);
+          +    }
+               finally{if(category)busy.current.delete(category);}
+             }
+             const source=useMemo(()=>initial===undefined?null:{html:pwa.replace('<head>','<head><script>window.__CONNECT_NONCE__='+JSON.stringify(nonce)+';window.__CONNECT_INITIAL_SESSION__='+JSON.stringify(initial)+';</script>'),baseUrl:CONNECT_ORIGIN+'/'},[initial,nonce]);
+          --- /dev/null
+          +++ b/native/src/ConnectOtaNetwork.ts
+          @@ -0,0 +1,29 @@
+          +/** Retry only transient network failures of Expo asset downloads. */
+          +const MAX_ATTEMPTS = 3;
+          +const RETRY_DELAYS_MS = [2500, 6500] as const;
+          +
+          +export function isTransientOtaFailure(error: unknown): boolean {
+          +  const message = error instanceof Error ? error.message : String(error ?? '');
+          +  // Never retry integrity, signing, permission, or version-compatibility failures.
+          +  if (/signature|certificate|integrity|checksum|hash mismatch|incompatible|invalid manifest|unauthorized|forbidden|\b40[0134]\b/i.test(message)) return false;
+          +  return /timeout|timed out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ENOTFOUND|network is unreachable|connection (?:reset|refused|lost|timed out)|unable to resolve host|temporary failure in name resolution|\b(?:502|503|504)\b/i.test(message);
+          +}
+          +
+          +export type OtaRetryNotice = {attempt: number; maxAttempts: number; waitMs: number};
+          +
+          +export async function downloadOtaWithNetworkRetry<T>(
+          +  download: () => Promise<T>,
+          +  onRetry: (notice: OtaRetryNotice) => void,
+          +  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+          +): Promise<T> {
+          +  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          +    try { return await download(); }
+          +    catch (error) {
+          +      if (attempt === MAX_ATTEMPTS || !isTransientOtaFailure(error)) throw error;
+          +      const waitMs = RETRY_DELAYS_MS[attempt - 1];
+          +      onRetry({attempt: attempt + 1, maxAttempts: MAX_ATTEMPTS, waitMs});
+          +      await sleep(waitMs);
+          +    }
+          +  }
+          +  throw new Error('All OTA download attempts exhausted');
+          +}
+          --- a/native/web/hybrid/runtime.ts
+          +++ b/native/web/hybrid/runtime.ts
+          @@ -23,7 +23,7 @@
+               if(!window.ReactNativeWebView||!window.__CONNECT_NONCE__){reject(Error('Нет связи с Android'));return;}
+               if(pending.size>=64){reject(Error('Слишком много одновременных действий. Повторите через секунду.'));return;}
+               const id=String(++serial);
+          -    const timer=setTimeout(()=>{pending.delete(id);discardFile(id);if(command.startsWith('record'))emit('file:cancel',{id});if(command.startsWith('calls:'))emit('calls:timeout',{requestId:id,command});const labels:Record<string,string>={'calls:dial':'подготовку исходящего звонка','calls:accept':'принятие звонка','calls:end':'завершение звонка','calls:decline':'отклонение звонка','calls:route':'выбор аудиоустройства'};reject(Error(command.startsWith('calls:')?'Android не подтвердил '+(labels[command]||'управление звонком')+'. Проверьте экран вызова и сохраните диагностику.':'Android не завершил действие «'+command+'». Повторите после возвращения в приложение.'));},['recordVideo:open','recordVoice:start','sounds:pick','files:begin'].includes(command)?600000:60000);
+          +    const timer=setTimeout(()=>{pending.delete(id);discardFile(id);if(command.startsWith('record'))emit('file:cancel',{id});if(command.startsWith('calls:'))emit('calls:timeout',{requestId:id,command});const labels:Record<string,string>={'calls:dial':'подготовку исходящего звонка','calls:accept':'принятие звонка','calls:end':'завершение звонка','calls:decline':'отклонение звонка','calls:route':'выбор аудиоустройства'};reject(Error(command.startsWith('calls:')?'Android не подтвердил '+(labels[command]||'управление звонком')+'. Проверьте экран вызова и сохраните диагностику.':'Android не завершил действие «'+command+'». Повторите после возвращения в приложение.'));},['recordVideo:open','recordVoice:start','sounds:pick','files:begin'].includes(command)?600000:command==='updates:download'?240000:60000);
+               pending.set(id,{resolve,reject,timer});
+               try{post(id,command,payload);}catch(error){clearTimeout(timer);pending.delete(id);reject(error);}
+             });
+          @@ -44,6 +44,7 @@
+           let sounds={message:'Мягкий',call:'По умолчанию',messageCustom:false,callCustom:false,messageSilent:false,callSilent:false};
+           window.__connectReceive=(type,data)=>{
+             if(type==='ota-progress'){window.dispatchEvent(new CustomEvent('connect:ota-progress',{detail:data}));return;}
+          +  if(type==='ota-retry'){window.dispatchEvent(new CustomEvent('connect:ota-retry',{detail:data}));return;}
+             if(type==='record-level'){window.dispatchEvent(new CustomEvent('connect:record-level',{detail:data}));return;}
+             if(type==='response'){
+               const r=data as Result,p=pending.get(r.id);if(!p){discardFile(r.id);return;}pending.delete(r.id);clearTimeout(p.timer);
+          --- a/native/web/components/ConnectOtaSettings.tsx
+          +++ b/native/web/components/ConnectOtaSettings.tsx
+          @@ -2,6 +2,7 @@
+           
+           type OtaInfo={version:string;build:number|null;enabled:boolean;pending:boolean;channel:string|null;runtime:string|null;embedded:boolean;downloading?:boolean;downloadProgress?:number|null};
+           type OtaProgressEvent={downloading:boolean;progress:number|null};
+          +type OtaRetryEvent={attempt:number;maxAttempts:number;waitMs:number};
+           function validFraction(value:unknown):number|null{
+             return typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(1,value)):null;
+           }
+          @@ -15,6 +16,7 @@
+             const [state,setState]=useState<OtaState>('loading');
+             const [error,setError]=useState('');
+             const [downloadFraction,setDownloadFraction]=useState<number|null>(null);
+          +  const [retryAttempt,setRetryAttempt]=useState<number|null>(null);
+             const [apkInfo,setApkInfo]=useState<ApkInfo|null>(null);
+             const [apkState,setApkState]=useState<ApkState>('checking');
+             const [apkError,setApkError]=useState('');
+          @@ -26,8 +28,19 @@
+                 const fraction=validFraction(data.progress);
+                 if(fraction!==null)setDownloadFraction(old=>Math.max(old??0,fraction));
+               };
+          +    const handleRetry=(event:Event)=>{
+          +      const data=(event as CustomEvent<OtaRetryEvent>).detail;
+          +      if(!data||!Number.isInteger(data.attempt)||data.attempt<2||data.attempt>3)return;
+          +      setDownloadFraction(null);
+          +      setRetryAttempt(data.attempt);
+          +      setState('downloading');
+          +    };
+               window.addEventListener('connect:ota-progress',handle);
+          -    return()=>window.removeEventListener('connect:ota-progress',handle);
+          +    window.addEventListener('connect:ota-retry',handleRetry);
+          +    return()=>{
+          +      window.removeEventListener('connect:ota-progress',handle);
+          +      window.removeEventListener('connect:ota-retry',handleRetry);
+          +    };
+             },[]);
+             useEffect(()=>{
+               let alive=true;
+          @@ -57,6 +70,7 @@
+               const bridge=window.ConnectNative;
+               if(!bridge)return;
+               setError('');
+          +    setRetryAttempt(null);
+               if(command!=='updates:apply')setDownloadFraction(null);
+               setState(command==='updates:check'?'checking':command==='updates:download'?'downloading':'restarting');
+               try{
+          @@ -104,7 +118,7 @@
+             const showProgress=progress||state==='ready';
+             const progressPercent=state==='ready'?100:state==='downloading'&&downloadFraction!==null?Math.round(downloadFraction*100):null;
+             const status=state==='loading'?'Получаем сведения о версии…':
+          -    state==='checking'?'Проверяем обновления…':state==='downloading'?'Скачиваем проверенное обновление…':
+          +    state==='checking'?'Проверяем обновления…':state==='downloading'?(retryAttempt?`Повторяем загрузку OTA — попытка ${retryAttempt} из 3…`:'Скачиваем проверенное обновление…'):
+               state==='restarting'?'Перезапускаем Connect…':state==='available'?'Доступно совместимое обновление интерфейса.':
+               state==='ready'?'Обновление загружено и готово к применению.':
+               state==='current'?'Обновлений интерфейса пока нет.':
+          --- a/native/tests/connect-ota-progress-20261119.test.cjs
+          +++ b/native/tests/connect-ota-progress-20261119.test.cjs
+          @@ -22,7 +22,7 @@
+           });
+           
+           test('existing nonce-bound bridge sends native progress events without adding arbitrary commands',()=>{
+          -  assert.match(native,/\['call','sounds','lifecycle','chat','native-session','ota-progress'\]/);
+          +  assert.match(native,/\['call','sounds','lifecycle','chat','native-session','ota-progress','ota-retry'\]/);
+             assert.match(runtime,/if\(type==='ota-progress'\)/);
+             assert.match(runtime,/new CustomEvent\('connect:ota-progress',\{detail:data\}\)/);
+             assert.doesNotMatch(ui,/EXPO_TOKEN|SERVICE_ROLE_KEY|fetch\(/);
+          --- /dev/null
+          +++ b/native/tests/connect-ota-network-retry-20261119.test.cjs
+          @@ -0,0 +1,62 @@
+          +const {test}=require('node:test');
+          +const assert=require('node:assert/strict');
+          +const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+          +const root=path.resolve(__dirname,'..');
+          +const {isTransientOtaFailure,downloadOtaWithNetworkRetry}=require('../src/ConnectOtaNetwork.ts');
+          +const read=p=>fs.readFileSync(path.join(root,p),'utf8');
+          +
+          +test('Wi-Fi Expo CDN timeout is retryable, but signature or compatibility errors are not',()=>{
+          +  assert.equal(isTransientOtaFailure(Error("Failed to download asset from URL https://assets.eascdn.net/foo: timeout")),true);
+          +  assert.equal(isTransientOtaFailure(Error('Unable to resolve host assets.eascdn.net')),true);
+          +  assert.equal(isTransientOtaFailure(Error('HTTP 503')),true);
+          +  for(const msg of ['certificate mismatch','signature failed','asset hash mismatch','Unauthorized HTTP 401','incompatible runtime'])
+          +    assert.equal(isTransientOtaFailure(Error(msg)),false,msg);
+          +});
+          +
+          +test('transient Expo failures retry at most twice, then succeed without fake progress',async()=>{
+          +  const calls=[], notices=[], waits=[];
+          +  const result=await downloadOtaWithNetworkRetry(async()=>{
+          +    calls.push(1);
+          +    if(calls.length<3)throw Error('Failed to download asset: timeout');
+          +    return {isNew:true};
+          +  },n=>notices.push(n),async n=>{waits.push(n);});
+          +  assert.equal(result.isNew,true);assert.equal(calls.length,3);
+          +  assert.deepEqual(waits,[2500,6500]);
+          +  assert.deepEqual(notices.map(x=>x.attempt),[2,3]);
+          +  assert.ok(notices.every(x=>x.maxAttempts===3));
+          +});
+          +
+          +test('persistent Wi-Fi timeout fails cleanly after three attempts, not forever',async()=>{
+          +  let attempts=0;
+          +  await assert.rejects(()=>downloadOtaWithNetworkRetry(async()=>{
+          +    attempts++;throw Error('timeout');
+          +  },()=>{},async()=>{}),/timeout/);
+          +  assert.equal(attempts,3);
+          +});
+          +
+          +test('an integrity error is never retried',async()=>{
+          +  let attempts=0;
+          +  await assert.rejects(()=>downloadOtaWithNetworkRetry(async()=>{
+          +    attempts++;throw Error('signature mismatch');
+          +  },()=>{throw Error('should never retry');},async()=>{}),/signature/);
+          +  assert.equal(attempts,1);
+          +});
+          +
+          +test('OTA bridge allows sufficient timeout for retry, user sees attempts and safe fallback',()=>{
+          +  assert.match(read('web/hybrid/runtime.ts'),/command==='updates:download'\?240000/);
+          +  assert.match(read('web/hybrid/runtime.ts'),/if\(type==='ota-retry'\)/);
+          +  assert.match(read('src/App.tsx'),/downloadOtaWithNetworkRetry/);
+          +  assert.match(read('src/App.tsx'),/send\('ota-retry',notice\)/);
+          +  assert.match(read('web/components/ConnectOtaSettings.tsx'),/Повторяем загрузку OTA — попытка/);
+          +  assert.match(read('src/App.tsx'),/Три попытки не помогли/);
+          +  assert.doesNotMatch(read('web/components/ConnectOtaSettings.tsx'),/EXPO_TOKEN|SERVICE_ROLE_KEY/);
+          +});
+          +
+          +test('new and modified files are included in PARITY_SOURCE_LOCK',()=>{
+          +  const lock=JSON.parse(read('PARITY_SOURCE_LOCK.json'));
+          +  for(const p of ['src/ConnectOtaNetwork.ts','src/App.tsx','web/hybrid/runtime.ts',
+          +                   'web/components/ConnectOtaSettings.tsx','tests/connect-ota-network-retry-20261119.test.cjs']){
+          +    const actual=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p))).digest('hex');
+          +    assert.equal(lock.files[p],actual,p);
+          +  }
+          +});
+          PATCH
+          printf '%s  %s\n' '2b2811e1773dc0ea8519fd1cc356fb5ad1a1b52e379a944bf3b26f389691b39f' "$RUNNER_TEMP/connect-ota-wifi.patch" | sha256sum --check
+          git apply --check "$RUNNER_TEMP/connect-ota-wifi.patch"
+          git apply "$RUNNER_TEMP/connect-ota-wifi.patch"
+          python3 - <<'PYVERIFY'
+          import pathlib,hashlib,sys
+          expected={
+            'native/src/App.tsx': 'a6db2eb098d90b7279c0d73dc296f972c08d26593822794323018c36b29a2fbe',
+            'native/src/ConnectOtaNetwork.ts': '6b68e76f5c551d1e7bc520b09b3c87a3ad3c272b04e3ea70c52a0780ebde6646',
+            'native/web/hybrid/runtime.ts': '0c9916cb3734e01d8e11e7a6db316e4d1a89f6e813a6b758f596f232d2c956bc',
+            'native/web/components/ConnectOtaSettings.tsx': '89d3c2220e2f8dee9afc81726d5da2fa256521c7d53f8ee363de9aa74ce013ef',
+            'native/tests/connect-ota-progress-20261119.test.cjs': 'b636b6c583f6409e0ab1b68c4ba9eb47a9937ac20413f8d77b95214521668131',
+            'native/tests/connect-ota-network-retry-20261119.test.cjs': '45f21b74cdf49ea96e88d9560e9df4e779377e51e9c0fd7116cbbf1684377ff3',
+          }
+          for name,expected_sha in expected.items():
+              if hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()!=expected_sha:
+                  sys.exit('STOP: unexpected patch output '+name)
+          import json
+          lockpath=pathlib.Path('native/PARITY_SOURCE_LOCK.json')
+          lock=json.loads(lockpath.read_text())
+          for name,expected_sha in expected.items():
+              lock['files'][name.removeprefix('native/')]=expected_sha
+          lockpath.write_text(json.dumps(lock,indent=2,ensure_ascii=False)+'\n')
+          PYVERIFY
+          (cd native && node scripts/check-parity-source.mjs)
+      - name: Full web/native checks and Chromium regressions
+        shell: bash
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build:web
+          npm run typecheck:web
+          npm run typecheck
+          npx --no-install playwright-core install --with-deps chromium
+          CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          export CHROMIUM_PATH
+          test -x "$CHROMIUM_PATH"
+          npm test
+          npm run test:browser
+          node scripts/check-parity-source.mjs
+          git diff --check
+      - name: Commit only reviewed OTA JS change to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- native/PARITY_SOURCE_LOCK.json native/src/App.tsx native/src/ConnectOtaNetwork.ts \
+            native/web/hybrid/runtime.ts native/web/components/ConnectOtaSettings.tsx \
+            native/tests/connect-ota-progress-20261119.test.cjs \
+            native/tests/connect-ota-network-retry-20261119.test.cjs
+          expected="$(printf '%s\n' \
+            native/PARITY_SOURCE_LOCK.json \
+            native/src/App.tsx \
+            native/src/ConnectOtaNetwork.ts \
+            native/tests/connect-ota-network-retry-20261119.test.cjs \
+            native/tests/connect-ota-progress-20261119.test.cjs \
+            native/web/components/ConnectOtaSettings.tsx \
+            native/web/hybrid/runtime.ts)"
+          actual="$(git diff --cached --name-only)"
+          if [ "$actual" != "$expected" ]; then echo "::error::Unexpected changed files"; git diff --cached --name-only; exit 1; fi
+          test -z "$(git diff --name-only)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Connect OTA: retry transient Wi-Fi CDN timeouts without weakening verification'
+          git push origin HEAD:refs/heads/main
+          echo '### OTA network retries installed in main' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Retries network timeouts at most twice; integrity and compatibility checks stay enabled.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Compatible with the released Connect 3.0.8 / OTA runtime v2. No APK update required.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Next: release with mode=ota, previous_release=connect-android-v3.0.8-b26.' >> "$GITHUB_STEP_SUMMARY"
