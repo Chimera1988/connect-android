@@ -1,5 +1,5 @@
 # One-time installer for Connect Android PWA parity source changes.
-# It writes verified source changes directly to main; it DOES NOT publish an APK or Expo OTA.
+# It writes verified Android source changes directly to main; the release workflow YAML is exported as an artifact for manual upload. No APK or Expo OTA is published.
 # Source: connect-android-parity-all.zip; patch SHA256: ab79896d39b5429abbe62e167318192183fd29bd4c40e3d4bea7a378ed53549a
 name: Connect Android | Install Codex parity directly to main
 
@@ -1249,7 +1249,17 @@ jobs:
           npm test
           node scripts/check-parity-source.mjs
           git diff --check
-      - name: Commit tested sources directly to main (no pull request)
+      # The default GitHub Actions token cannot create/edit another workflow file.
+      # Keep the release workflow as a tested standalone artifact for a manual GitHub UI upload.
+      - name: Export verified release workflow for manual upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-android-parity-release-yaml
+          path: .github/workflows/connect-android-parity-release.yml
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Commit tested Android sources directly to main (no pull request)
         shell: bash
         run: |
           set -euo pipefail
@@ -1262,7 +1272,9 @@ jobs:
             echo '::error::Main advanced during tests. No commit will be pushed; re-audit the changes.'
             exit 1
           fi
-          git add -A -- native .github/workflows/connect-android-parity-release.yml
+          # GitHub App token has no permission to create/update .github/workflows/*.
+          # Commit only the 62 reviewed native/ files; distribute the 15 KB release workflow separately.
+          git add -A -- native
           git diff --cached --check
           test -s native/PWA_ANDROID_FINAL_PARITY_REPORT.md
           test -s .github/workflows/connect-android-parity-release.yml
@@ -1275,21 +1287,29 @@ jobs:
           from pathlib import Path
           manifest_path=Path(os.environ['RUNNER_TEMP'])/'connect-parity-manifest.json'
           expected=json.loads(manifest_path.read_text())
+          release_yaml='.github/workflows/connect-android-parity-release.yml'
+          assert release_yaml in expected, 'Missing expected release workflow from audited patch'
           changed=set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())
-          if changed!=set(expected):
-              raise SystemExit(f'UNEXPECTED_STAGED_FILES: missing={sorted(set(expected)-changed)}, extra={sorted(changed-set(expected))}')
+          expected_staged=set(expected)-{release_yaml}
+          if changed!=expected_staged:
+              raise SystemExit(f'UNEXPECTED_STAGED_FILES: missing={sorted(expected_staged-changed)}, extra={sorted(changed-expected_staged)}')
+          if any(name.startswith('.github/workflows/') for name in changed):
+              raise SystemExit('WORKFLOW_PERMISSION_GUARD: refusing to stage GitHub workflow files')
           for name,sha in expected.items():
               p=Path(name)
               actual=hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
               if actual!=sha:
                   raise SystemExit(f'SOURCE_CHANGED_DURING_TESTS: {name}')
-          print('VERIFIED_EXACT_PATCH_FILES:',len(changed))
+          print('VERIFIED_EXACT_PATCH_FILES:',len(expected))
+          print('STAGED_ANDROID_SOURCE_FILES:',len(changed))
+          print('RELEASE_WORKFLOW_EXPORTED_SEPARATELY:',release_yaml)
           PY_STAGED
           git -c user.name='Connect Codex Installer' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit -m 'Android: bring PWA parity changes and guarded release workflow'
+            commit -m 'Android: install verified PWA parity sources (release YAML separate)'
           # Normal non-force push; rejects remote updates and protected-branch restrictions.
           git push origin HEAD:refs/heads/main
           echo '## Connect Android source install' >> "$GITHUB_STEP_SUMMARY"
           echo "Tested source changes committed directly to main: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
           echo 'No APK was built, installed or published, and no Expo OTA was pushed.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Next: run Connect Android parity release in check mode, then apk mode if native changes require a new APK.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NEXT: Download the connect-android-parity-release-yaml artifact from this run. Upload the contained connect-android-parity-release.yml manually to .github/workflows/ on main through the GitHub UI. This separate upload is required because GITHUB_TOKEN cannot create workflow files.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'After that, run Connect Android parity release in check mode, then apk mode for native changes.' >> "$GITHUB_STEP_SUMMARY"
