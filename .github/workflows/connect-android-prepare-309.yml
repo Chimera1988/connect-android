@@ -94,6 +94,20 @@ jobs:
                   'tests/release-config.test.cjs': [
                       ('assert.equal(expo.android.versionCode, 26)', 'assert.equal(expo.android.versionCode, 27)'),
                   ],
+                  # Preserve historical 3.0.8 release fixtures; only update the
+                  # assertion about the actual CURRENT installation's version.
+                  'tests/connect-apk-update-20261117.test.cjs': [
+                      ('assert.equal(JSON.parse(read(\'app.json\')).expo.android.versionCode,26)',
+                       'assert.equal(JSON.parse(read(\'app.json\')).expo.android.versionCode,27)'),
+                  ],
+                  'tests/connect-ota-about-20261117.test.cjs': [
+                      ("test('Expo OTA uses the installed production channel and unchanged 3.0.7 runtime'",
+                       "test('Expo OTA uses the installed production channel and new v3 runtime'"),
+                      ("assert.equal(cfg.version,'3.0.8');assert.equal(cfg.android.versionCode,26)",
+                       "assert.equal(cfg.version,'3.0.9');assert.equal(cfg.android.versionCode,27)"),
+                      ("assert.equal(cfg.runtimeVersion,'connect-android-ota-v2-sdk58')",
+                       "assert.equal(cfg.runtimeVersion,'connect-android-ota-v3-sdk58')"),
+                  ],
               }
               # First validate every replacement against the unchanged working tree.
               for name, pairs in edits.items():
@@ -138,7 +152,14 @@ jobs:
           npm run build:web
           npm run typecheck:web
           npm run typecheck
+          # Both Node integration and browser suites need the actual Chromium binary.
+          # Keep tests enabled; do not skip them or hide test failures.
+          npx --no-install playwright-core install --with-deps chromium
+          CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          test -x "$CHROMIUM_PATH"
+          export CHROMIUM_PATH
           npm test
+          npm run test:browser
           node scripts/release/validate.mjs source
       - name: Confirm only approved files changed, commit to main
         run: |
@@ -154,6 +175,8 @@ jobs:
               'native/tests/source-lock.test.cjs',
               'native/tests/connect-ota-config-20261117.test.cjs',
               'native/tests/release-config.test.cjs',
+              'native/tests/connect-apk-update-20261117.test.cjs',
+              'native/tests/connect-ota-about-20261117.test.cjs',
           }
           changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
           unexpected = changed - allowed
@@ -170,7 +193,7 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- app.json package.json package-lock.json PARITY_SOURCE_LOCK.json scripts/check-parity-source.mjs tests/source-lock.test.cjs tests/connect-ota-config-20261117.test.cjs tests/release-config.test.cjs
+          git add -- app.json package.json package-lock.json PARITY_SOURCE_LOCK.json scripts/check-parity-source.mjs tests/source-lock.test.cjs tests/connect-ota-config-20261117.test.cjs tests/release-config.test.cjs tests/connect-apk-update-20261117.test.cjs tests/connect-ota-about-20261117.test.cjs
           git diff --cached --check
           git commit -m 'chore(android): prepare 3.0.9 native media cache and OTA runtime v3'
           git push origin HEAD:main
