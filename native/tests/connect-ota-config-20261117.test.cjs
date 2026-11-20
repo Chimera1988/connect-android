@@ -8,8 +8,8 @@ const read=(name)=>fs.readFileSync(path.join(root,name));
 const app=JSON.parse(read('app.json')).expo;
 test('existing production Connect Android package and version remain intact',()=>{
   assert.equal(app.android.package,'com.connect.messenger');
-  assert.equal(app.version,'3.0.8');
-  assert.equal(app.android.versionCode,26);
+  assert.equal(app.version,'3.0.9');
+  assert.equal(app.android.versionCode,27);
 });
 test('Expo project ID and matching update endpoint are fixed',()=>{
   assert.equal(app.extra.eas.projectId,'430c7f08-3921-48d5-96d1-f7c3d686d3bf');
@@ -22,7 +22,7 @@ test('GitHub-built production binary sets the channel itself',()=>{
   assert.equal(app.updates.enabled,true);
 });
 test('native runtime is pinned and not derived from mutable JS changes',()=>{
-  assert.equal(app.runtimeVersion,'connect-android-ota-v2-sdk58');
+  assert.equal(app.runtimeVersion,'connect-android-ota-v3-sdk58');
 });
 test('Expo Updates installed using an exact SDK-compatible version',()=>{
   const pkg=JSON.parse(read('package.json'));

@@ -9,7 +9,7 @@ for(const [name,expected] of Object.entries(manifest.files)){
  if(!existsSync(path)||createHash('sha256').update(readFileSync(path)).digest('hex')!==expected)throw Error('SOURCE_DRIFT: '+name);
 }
 const app=JSON.parse(readFileSync(resolve(root,'app.json'),'utf8')).expo;
-if(app.android.package!=='com.connect.messenger'||app.version!=='3.0.8'||app.android.versionCode!==26)throw Error('SOURCE_DRIFT: release identity');
+if(app.android.package!=='com.connect.messenger'||app.version!=='3.0.9'||app.android.versionCode!==27)throw Error('SOURCE_DRIFT: release identity');
 const props=app.plugins.find(p=>Array.isArray(p)&&p[0]==='expo-build-properties')[1].android;
 if(props.minSdkVersion!==29)throw Error('SOURCE_DRIFT: minSdk');
 const pkg=JSON.parse(readFileSync(resolve(root,'package.json'),'utf8'));

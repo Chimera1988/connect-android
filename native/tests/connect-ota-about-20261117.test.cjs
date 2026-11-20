@@ -17,10 +17,10 @@ test('strict nonce-bound bridge validates all four OTA commands with no arbitrar
   assert.match(proto,/case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields\(value,\[\]\)/);
   assert.match(proto,/isTrustedHybridUrl\(sourceUrl\)/);
 });
-test('Expo OTA uses the installed production channel and unchanged 3.0.7 runtime',()=>{
+test('Expo OTA uses the installed production channel and new v3 runtime',()=>{
   assert.equal(cfg.android.package,'com.connect.messenger');
-  assert.equal(cfg.version,'3.0.8');assert.equal(cfg.android.versionCode,26);
-  assert.equal(cfg.runtimeVersion,'connect-android-ota-v2-sdk58');
+  assert.equal(cfg.version,'3.0.9');assert.equal(cfg.android.versionCode,27);
+  assert.equal(cfg.runtimeVersion,'connect-android-ota-v3-sdk58');
   assert.equal(cfg.updates.requestHeaders['expo-channel-name'],'production');
   assert.equal(cfg.extra.eas.projectId,'430c7f08-3921-48d5-96d1-f7c3d686d3bf');
   assert.match(app,/Updates\.checkForUpdateAsync\(\)/);
