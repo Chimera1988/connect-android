@@ -15,7 +15,7 @@ export type HybridCommand =
   | 'updates:info' | 'updates:check' | 'updates:download' | 'updates:apply' | 'updates:apk-check' | 'updates:apk-open'
   | 'notification:status' | 'notification:connect' | 'notification:test'
   | 'notification:diagnostics'
-  | 'media:waveform'
+  | 'media:waveform' | 'media:cache'
   | 'calls:journal'
   | 'history:catalog-retire' | 'history:catalog-read' | 'history:catalog-write' | 'history:catalog-drop'
   | 'history:read' | 'history:page' | 'history:chunk' | 'history:write' | 'history:drop' | 'history:wipe' | 'history:stats' | 'history:limit'
@@ -87,6 +87,19 @@ function payloadValid(command: string, value: unknown): boolean {
     case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields(value,[]);
     case 'notification:status':case 'notification:connect':case 'notification:test':return fields(value,[]);
     case 'notification:diagnostics':return fields(value,[]);
+    case 'media:cache':{
+      if(!fields(value,['action','userId','nonce'],['identity','version','category','retire','limitBytes'])||!uuid(value.userId)||!text(value.nonce,128,32)||!NONCE.test(value.nonce))return false;
+      const common=['action','userId','nonce'];
+      const identity=()=>text(value.identity,4096,3)&&/^(connect-attachments|connect-avatars|connect-stickers|connect-profile-media)\//.test(value.identity)&&!(value.identity as string).split('/').some(x=>!x||x==='.'||x==='..')&&!/[?\\#\u0000-\u0020]/.test(value.identity as string);
+      switch(value.action){
+        case 'bind':return fields(value,[...common,'limitBytes'])&&Number.isSafeInteger(value.limitBytes)&&Number(value.limitBytes)>=0&&Number(value.limitBytes)<=2147483648;
+        case 'lookup':return fields(value,[...common,'identity'],['version'])&&identity()&&(value.version===undefined||text(value.version,512));
+        case 'clear':return fields(value,[...common,'category'],['identity','retire'])&&['temporary','system','photos','videos','audio','other'].includes(value.category as string)&&(value.identity===undefined||identity())&&(value.retire===undefined||typeof value.retire==='boolean');
+        case 'revive':return fields(value,[...common,'identity'])&&identity();
+        case 'stats':case 'unbind':return fields(value,common);
+        default:return false;
+      }
+    }
     case 'media:waveform':return fields(value,['path'])&&text(value.path,1000,1)&&/^[a-fA-F0-9-]{36}\/[a-zA-Z0-9_./-]+$/.test(value.path as string)&&!(value.path as string).includes('..');
     case 'calls:journal':return fields(value,['userId','action'],['rows','at'])&&uuid(value.userId)&&['state','seed','view','close','reconcile'].includes(value.action as string)&&(value.rows===undefined||Array.isArray(value.rows)&&value.rows.length<=200&&value.rows.every(r=>record(r)&&fields(r,['id','conversation_id','caller_id','callee_id','status','created_at','answered_at','ended_at'],['hidden'])&&uuid(r.id)&&uuid(r.callee_id)&&uuid(r.caller_id)&&text(r.created_at,48,20)&&text(r.status,20)&&(r.answered_at===null||text(r.answered_at,48))&&(r.ended_at===null||text(r.ended_at,48))&&(r.hidden===undefined||typeof r.hidden==='boolean')))&&(value.at===undefined||Number.isFinite(value.at));
     case 'history:catalog-retire':return fields(value,['userId','key','path'])&&uuid(value.userId)&&text(value.key,90,1)&&/^profile:[a-fA-F0-9-]{36}:(photos|videos|music)$/.test(value.key as string)&&text(value.path,1000,1)&&!(value.path as string).includes('..')&&!/[?\\]/.test(value.path as string)&&safeCatalog(value.path);

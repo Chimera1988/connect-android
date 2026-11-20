@@ -76,7 +76,20 @@ test('native chat never silently replaces a missing JPEG preview with the full-s
 test('Android keeps voice/video bounded and user-account media-cache identities',()=>{
  assert.match(app,/preload="none"/);
  assert.equal((app.match(/userPaused=useRef\(isNativeMediaRuntime\(\)\)/g)||[]).length,2,'both native inline videos and video notes must wait for an explicit tap');
- assert.match(app,/prefetchChatAudio\(url,viewer,meta\.attachment_size\)/);
+ assert.doesNotMatch(app,/prefetchChatAudio\(url,viewer,meta\.attachment_size\)/,'chat entry must not prefetch voice originals');
  assert.match(media,/cacheLeaseValid\(user,epoch\)/);
- assert.match(media,/id\.startsWith\('connect-avatars\/'\)\?1024\*1024:512\*1024/);
+ assert.match(media,/if\(id\.startsWith\('connect-avatars\/'\)\)return 1024\*1024/);
+ assert.match(media,/thumb\\.webp\|poster\\.jpg/);
+});
+
+test('native chat link expiry replaces once, prefers complete local files, and discards late logout/chat results',async()=>{
+ const code=ts.transpileModule(media,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const out={};new Function('exports','require',code)(out,()=>({}));
+ let now=0,signs=0,local=null,epoch=1,release;
+ const cache=out.createSignedMediaCache({now:()=>now,lease:()=>epoch,cached:async()=>local,sign:async()=>{signs++;return 'signed-'+signs;}});
+ assert.equal(await cache.resolve('alice','connect-attachments','voice'),'signed-1');for(let i=0;i<100;i++)assert.equal(await cache.resolve('alice','connect-attachments','voice'),'signed-1');assert.equal(signs,1);
+ now+=3600001;const renewed=await Promise.all([cache.resolve('alice','connect-attachments','voice'),cache.resolve('alice','connect-attachments','voice')]);assert.deepEqual(renewed,['signed-2','signed-2']);assert.equal(signs,2);
+ local='https://connect-chat.duckdns.org/supabase/storage/v1/object/authenticated/connect-attachments/voice?__cm_local=1&__cm=capability';now+=3600001;assert.equal(await cache.resolve('alice','connect-attachments','voice'),local);assert.equal(signs,2);
+ local=null;const late=out.createSignedMediaCache({lease:()=>epoch,cached:async()=>null,sign:()=>new Promise(r=>release=r)}).resolve('alice','connect-attachments','late');while(!release)await new Promise(r=>setImmediate(r));epoch++;release('stale');assert.equal(await late,undefined);
+ assert.match(app,/if\(!url\|\|!current\(\)\)continue/);assert.doesNotMatch(app,/setAttachmentUrls\(prev=>prev\[path\]\?prev:/);
 });

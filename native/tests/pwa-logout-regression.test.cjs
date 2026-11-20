@@ -23,7 +23,7 @@ function makeLogout(result){
     setLatest:()=>{},setUnread:()=>{},readCache:{current:{}},setPassword:()=>{},
     historyWarmStamps:{current:{}},inboxMediaWarm:{current:{clear(){}}},
     avatarCacheEpoch:{current:0},setAvatarUrls:()=>{},forgetUserChatPresentation:()=>{},
-    warmedChatWindows:{current:{clear(){}}},signedMediaLifetimes:{current:{clear(){}}},
+    warmedChatWindows:{current:{clear(){}}},signedMediaLinks:{clear(){}},
     clearStoredConnectAuth:()=>events.push(['purgeTokens']),
     wipeUserHistory:async()=>events.push(['wipe']),
   };

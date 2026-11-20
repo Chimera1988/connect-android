@@ -19,6 +19,7 @@ const viewer='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',peer='bbbbbbbb-bbbb-4bbb-8bb
 const profileRetired=new Set<string>();
 const catalogs=new Map<string,any>(),history=new Map<string,any[]>(),retired=new Set<string>();let reads=0,downloads=0;let holdRead=false,releaseRead:(()=>void)|undefined;
 (window as any).ConnectNative={request:async(command:string,p:any)=>{
+ if(command==='media:cache')return{supported:false};
  if(p.userId!==activeOwner)throw Error('Account changed');
  const key=p.userId+':'+(p.key||p.conversationId);
  if(command==='history:catalog-read'){const saved=catalogs.get(key);return{value:saved?.items?{items:saved.items.filter((x:any)=>!profileRetired.has(p.userId+':'+x.path))}:saved||null,epoch:1};}
@@ -43,11 +44,11 @@ window.fetch=async(input,init)=>{
 const signed=(path:string,token='one')=>location.origin+'/storage/v1/object/sign/connect-profile-media/'+path+'?token='+token;
 const delay=()=>new Promise(resolve=>setTimeout(resolve,0));
 await test('real IndexedDB reuses bytes across expiring signed URLs and honors versions',async()=>{
- const path=peer+'/photos/a.webp';assert(!await resolveCachedProfileFile(viewer,path,'v1'),'initial miss');
- await prefetchProfileFile(signed(path),viewer,'photos',2048);const count=downloads;
+ const path=peer+'/music/a.mp3';assert(!await resolveCachedProfileFile(viewer,path,'v1'),'initial miss');
+ await prefetchProfileFile(signed(path),viewer,'music',2048);const count=downloads;
  const local=await resolveCachedProfileFile(viewer,path,'v1');assert(local?.startsWith('blob:'),'local object URL');
- await prefetchProfileFile(signed(path,'new-token'),viewer,'photos',2048);assert(downloads===count,'signed URL change downloaded twice');
- assert(!await resolveCachedProfileFile(viewer,path,'v2'),'stale version reused');await prefetchProfileFile(signed(path),viewer,'photos',2048);
+ await prefetchProfileFile(signed(path,'new-token'),viewer,'music',2048);assert(downloads===count,'signed URL change downloaded twice');
+ assert(!await resolveCachedProfileFile(viewer,path,'v2'),'stale version reused');await prefetchProfileFile(signed(path),viewer,'music',2048);
  const fresh=await resolveCachedProfileFile(viewer,path,'v2');assert(fresh&&fresh!==local,'version did not invalidate object URL');
 });
 await test('streaming cap cancels oversized data even without content length',async()=>{
@@ -55,14 +56,14 @@ await test('streaming cap cancels oversized data even without content length',as
  assert(await boundedMediaBody(response,1024)===null&&cancelled,'unbounded download');
 });
 await test('retired profile path cannot be restored by an in-flight download',async()=>{
- const path=peer+'/photos/pending.webp';const task=prefetchProfileFile(signed(path),viewer,'photos',2048);
+ const path=peer+'/music/pending.mp3';const task=prefetchProfileFile(signed(path),viewer,'music',2048);
  while(!pendingRelease)await delay();await retireCachedProfileFile(viewer,path);pendingRelease();pendingRelease=undefined;await task;
  assert(!await resolveCachedProfileFile(viewer,path),'retired bytes resurrected');
 });
 await test('account change cancels pending cache writes and isolates downloaded media',async()=>{
- const path=peer+'/photos/pending-account.webp',task=prefetchProfileFile(signed(path),viewer,'photos',2048);
+ const path=peer+'/music/pending-account.mp3',task=prefetchProfileFile(signed(path),viewer,'music',2048);
  while(!pendingRelease)await delay();stop();activeOwner=other;stop=installMediaCache(other);pendingRelease();pendingRelease=undefined;await task;
- assert(!await resolveCachedProfileFile(other,peer+'/photos/a.webp'),'other account read bytes');
+ assert(!await resolveCachedProfileFile(other,peer+'/music/a.mp3'),'other account read bytes');
  stop();activeOwner=viewer;stop=installMediaCache(viewer);assert(!await resolveCachedProfileFile(viewer,path),'old download survived logout');
 });
 await test('SQLite catalog bridge stores stable paths only and isolates viewer and media owner',async()=>{
@@ -72,12 +73,12 @@ await test('SQLite catalog bridge stores stable paths only and isolates viewer a
  for(const value of [{token:'secret'},{url:signed(row.path)},{credential:'eyJabc.payload.signature'}])assert(!safeCatalog(value),'credentials accepted');
  activeOwner=other;assert(await readProfileLibrary(other,peer,'photos')===null,'wrong viewer catalog');activeOwner=viewer;
 });
-await test('peer warmup limits three photos, one video and one track and skips oversized files',async()=>{
+await test('peer warmup loads metadata without downloading originals',async()=>{
  const rows=(kind:string)=>Array.from({length:8},(_,i)=>({id:String(i),name:'budget-'+i+(kind==='music'?'.mp3':kind==='videos'?'.mp4':'.webp'),created_at:'2026-11-11T00:00:00Z',updated_at:'v1',metadata:{size:i===0?10*1024**2:1000}}));
  let signCount=0;
  const client:any={storage:{from:()=>({list:async(directory:string)=>({data:rows(directory.split('/')[1])}),createSignedUrls:async(paths:string[])=>{signCount+=paths.length;return{data:paths.map(path=>({path,signedUrl:signed(path)}))};}})}};
- await warmPeerProfileLibraries(client,viewer,peer);
- assert(signCount===5,'prefetch selected '+signCount+' files instead of 5');
+ const beforeDownloads=downloads;await warmPeerProfileLibraries(client,viewer,peer);
+ assert(signCount===0,'catalog warmup signed originals without user intent');assert(downloads===beforeDownloads,'photo/video originals downloaded during metadata warmup');
  for(const kind of ['photos','videos','music'] as const){const selection=profilePrefetchSelection(kind,[{path:'huge',createdAt:'',size:100*1024**2}]);assert(selection.items.length===0,'large original selected');}
 });
 await test('hot history opens offline, deduplicates native reads and honors deletion',async()=>{
@@ -96,7 +97,10 @@ await test('inbox write during chunk hydration retries without losing cached his
  assert((await loading)?.messages.length===2,'hydration discarded after concurrent inbox write');
 });
 await test('profile UI displays cached catalog while server list is unavailable',async()=>{
- const row={path:peer+'/photos/offline.webp',createdAt:'2026-11-11T00:00:00Z',size:4};await writeProfileLibrary(viewer,peer,'photos',[row]);await prefetchProfileFile(signed(row.path),viewer,'photos',2048);
+ const row={path:peer+'/photos/offline.webp',createdAt:'2026-11-11T00:00:00Z',size:4};await writeProfileLibrary(viewer,peer,'photos',[row]);
+ // Seed genuine existing photo bytes; background original prefetch is forbidden.
+ const request=indexedDB.open('connect-media-v1',4);const db=await new Promise<IDBDatabase>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+ await new Promise<void>((resolve,reject)=>{const tx=db.transaction('objects','readwrite');tx.objectStore('objects').put({key:viewer+':connect-profile-media/'+row.path,user:viewer,category:'photos',size:imageBytes.length,used:Date.now(),bytes:imageBytes.buffer,type:'image/png'});tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});db.close();
  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
  let gallerySigns=0;const client:any={storage:{from:()=>({list:()=>new Promise(()=>{}),createSignedUrl:async(path:string)=>{gallerySigns++;return{data:{signedUrl:signed(path,'gallery-refreshed')}};}})}};
  root.render(<ConnectProfileMedia client={client} viewerId={viewer} userId={peer} kind="photos" onBack={()=>{}} onAvatar={()=>{}} isOwner={false}/>);
@@ -108,9 +112,19 @@ await test('profile UI displays cached catalog while server list is unavailable'
  (document.querySelector('.connect-full-gallery-icon[aria-label="Закрыть просмотр"]') as HTMLButtonElement).click();await delay();await clearCachedMedia('temporary');
  (container.querySelector('.connect-profile-photo-thumb') as HTMLButtonElement).click();
  for(let i=0;i<25&&!gallerySigns;i++)await delay();
- for(let i=0;i<25&&!document.querySelector('.connect-full-gallery-stage img');i++)await delay();
+ for(let i=0;i<200&&!document.querySelector('.connect-full-gallery-stage img')?.getAttribute('src')?.includes('gallery-refreshed');i++)await new Promise(r=>setTimeout(r,5));
  assert(gallerySigns===1&&document.querySelector('.connect-full-gallery-stage img')?.getAttribute('src')?.includes('gallery-refreshed'),'gallery reused a revoked blob URL after clearing');
  root.unmount();container.remove();
+});
+await test('a delayed image error preserves a decoded local blob and an unrelated pending fill',async()=>{
+ const avatar=location.origin+'/storage/v1/object/sign/connect-avatars/'+viewer+'/delayed.webp';await prefetchCachedMedia(avatar,viewer);
+ const local=await resolveCachedMedia(avatar,viewer);assert(local.startsWith('blob:'),'avatar not cached');
+ const image=new Image();image.src=local;document.body.append(image);await image.decode();await new Promise(r=>setTimeout(r,40));
+ let evictions=0;const changed=()=>evictions++;window.addEventListener('connect:cache-changed',changed);
+ const path=peer+'/music/pending-delayed.mp3',fill=prefetchProfileFile(signed(path),viewer,'music',2048);while(!pendingRelease)await delay();
+ try{image.dispatchEvent(new Event('error'));await new Promise(r=>setTimeout(r,40));pendingRelease();pendingRelease=undefined;await fill;
+ assert(evictions===0,'decoded image evicted on delayed error');assert((await resolveCachedMedia(avatar,viewer)).startsWith('blob:'),'valid cached bytes removed');assert(await resolveCachedProfileFile(viewer,path),'unrelated pending fill canceled');
+ }finally{window.removeEventListener('connect:cache-changed',changed);image.remove();pendingRelease?.();pendingRelease=undefined;}
 });
 await test('ordinary media clear preserves system avatars and drops temporary bytes',async()=>{
  const avatar=location.origin+'/storage/v1/object/sign/connect-avatars/'+viewer+'/avatar.webp?token=one';
@@ -132,6 +146,7 @@ await test('music selection obtains a network URL after its cached blob was clea
   await clearCachedMedia('temporary');(container.querySelector('.connect-minimal-track-main') as HTMLButtonElement).click();
   for(let i=0;i<25&&!signCount;i++)await delay();
   assert(signCount===1,'cleared blob was reused instead of signing a network URL');
+  for(let i=0;i<200&&!container.querySelector('audio')?.getAttribute('src')?.includes('token=refreshed');i++)await new Promise(r=>setTimeout(r,5));
   assert(container.querySelector('audio')?.getAttribute('src')?.includes('token=refreshed'),'player source not refreshed');
  }finally{root.unmount();container.remove();HTMLMediaElement.prototype.play=play;}
 });

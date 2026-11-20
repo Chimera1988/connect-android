@@ -1,4 +1,5 @@
 'use client';
+import {isCachedMediaUrl,signedMediaUrlValid} from '../lib/media-cache';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -154,7 +155,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
     const generation=++playbackGeneration.current,viewer=mediaCacheOwner();
     const local=await resolveCachedProfileFile(viewer,song.path);
     if(generation!==playbackGeneration.current||viewer!==mediaCacheOwner()||!queueRef.current.some(x=>x.path===song.path))return;
-    let url=local||(song.url.startsWith('blob:')?'':song.url);
+    let url=local||(isCachedMediaUrl(song.url)||!signedMediaUrlValid(song.url)?'':song.url);
     if(!url&&clientRef.current){const signed=await clientRef.current.storage.from('connect-profile-media').createSignedUrl(song.path,3600);url=signed.data?.signedUrl?mediaPlaybackUrl(signed.data.signedUrl):'';}
     if(generation!==playbackGeneration.current||viewer!==mediaCacheOwner()||!url)return;
     const audio=audioRef.current;if(!audio)return;

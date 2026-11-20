@@ -1,4 +1,5 @@
 'use client';
+import {isCachedMediaUrl,signedMediaUrlValid,mediaPlaybackUrl} from '../lib/media-cache';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -45,18 +46,7 @@ const MAX_SIZE = 100 * 1024 * 1024;
 
 // Keep signed audio/video/image requests on the working same-origin proxy
 // when Connect is opened through its alternate DuckDNS domain.
-function playbackUrl(url: string) {
-  if (typeof window === 'undefined' || window.location.hostname !== 'connect-chat.duckdns.org') return url;
-  const root = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  try {
-    const source = new URL(url);
-    const base = new URL(root);
-    if (source.hostname === base.hostname) return `${window.location.origin}/supabase${source.pathname}${source.search}${source.hash}`;
-    if (source.hostname === base.hostname.replace(/\.supabase\.co$/, '.storage.supabase.co'))
-      return `${window.location.origin}/supabase-storage${source.pathname}${source.search}${source.hash}`;
-  } catch { /* Signed URL may already be relative. */ }
-  return url;
-}
+function playbackUrl(url:string){return mediaPlaybackUrl(url);}
 
 function extension(name: string) { return name.split('.').pop()?.toLowerCase() || ''; }
 function validFile(file: File, kind: ProfileMediaKind) {
@@ -101,7 +91,7 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
     const valid=()=>sequence===previewSequence.current&&generation===fetchGeneration.current&&cacheLeaseValid(viewerId,epoch);
     try{
       let url=await resolveCachedProfileFile(viewerId,item.path);
-      if(!url)url=item.url.startsWith('blob:')?null:item.url;
+      if(!url)url=isCachedMediaUrl(item.url)||!signedMediaUrlValid(item.url)?null:item.url;
       if(!url){const signed=await client.storage.from(BUCKET).createSignedUrl(item.path,3600);if(signed.error)throw signed.error;url=signed.data?.signedUrl?playbackUrl(signed.data.signedUrl):null;}
       if(valid()&&url)setPreview({...item,url});
     }catch(err){if(valid())setError('Не удалось открыть файл: '+(err instanceof Error?err.message:String(err)));}

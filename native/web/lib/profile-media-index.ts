@@ -23,7 +23,7 @@ export async function removeProfileLibraryItem(viewer:string,owner:string,kind:P
 }
 export function profilePrefetchSelection(kind:ProfileLibraryKind,rows:ProfileLibraryRow[]){
  const caps={photos:{count:3,bytes:2*1024**2},videos:{count:1,bytes:4*1024**2},music:{count:1,bytes:4*1024**2}};
- const cap=caps[kind];return {cap,items:rows.filter(x=>(x.size||0)>0&&x.size!<=cap.bytes).slice(0,cap.count)};
+ const cap=caps[kind];return {cap,items:[] as ProfileLibraryRow[]};
 }
 export function allowProfilePrefetch(){
  const c=(navigator as Navigator&{connection?:{saveData?:boolean;effectiveType?:string}}).connection;

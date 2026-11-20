@@ -5,6 +5,7 @@
 // CONNECT_PWA_VOICE_VIDEO_GEOMETRY_FIX4_20261112
 // CONNECT_PWA_MEDIA_UX_FIX_V3_20261112
 
+import {createSignedMediaCache, isCachedMediaUrl, cacheMediaUrl} from '../lib/media-cache';
 import RecordingBar from '../components/ConnectRecordingBar';
 import CacheSettings from '../components/ConnectCacheSettings';
 import {warmOwnProfileLibraries,warmPeerProfileLibraries} from '../lib/profile-media-index';
@@ -14,7 +15,7 @@ import {resolveCachedStorageFile} from '../lib/media-cache';
 import {createAvatarDirectoryCache} from '../lib/avatar-directory-cache'; // CONNECT_ANDROID_AVATAR_EGRESS_GUARD_V1
 import { settingsMenuSegmentClasses } from '../lib/settings-menu-groups';
 import ConnectAdminUsage from '../components/ConnectAdminUsage';
-import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
+import {mediaIdentity, mediaCacheOwner, mediaCacheEpoch, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
 import {readChatWave, prewarmChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
 import { prefetchCachedMedia, prefetchChatAudio, prefetchStickerWebp } from '../lib/media-cache'; // CONNECT_PWA_CHAT_SPEED_STICKER_VOICE_V1_20261115
 import { readChatHistory, prewarmChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
@@ -56,21 +57,7 @@ const supabaseFetch: typeof fetch = (input, init) => {
 // Signed media URLs are used directly by <img>, <audio>, <video> and fetch().
 // The SDK custom fetch cannot intercept those browser requests, so route them
 // through the same-origin Vercel proxy on the DuckDNS domain as well.
-function mediaUrl(url: string): string {
-  if (!useSupabaseProxy || !url) return url;
-  try {
-    const parsed = new URL(url);
-    const base = new URL(supabaseUrl);
-    const storageHost = base.hostname.replace(/\.supabase\.co$/, '.storage.supabase.co');
-    if (parsed.hostname === base.hostname) {
-      return window.location.origin + '/supabase' + parsed.pathname + parsed.search + parsed.hash;
-    }
-    if (parsed.hostname === storageHost) {
-      return window.location.origin + '/supabase-storage' + parsed.pathname + parsed.search + parsed.hash;
-    }
-  } catch { /* Preserve unexpected URLs without breaking rendering. */ }
-  return url;
-}
+function mediaUrl(url:string):string{return cacheMediaUrl(url);}
 
 const CONNECT_LOCAL_LOGOUT_FLAG='connect-local-logout-v1';
 function locallyLoggedOut():boolean {try{return localStorage.getItem(CONNECT_LOCAL_LOGOUT_FLAG)==='1';}catch{return false;}}
@@ -92,15 +79,27 @@ const supabase = supabaseUrl && supabaseKey
     })
   : null;
 
-// Signed storage links expire independently of authentication. Renew only the
-// failing object through the existing session, never make a private bucket public.
-async function refreshMediaUrl(source: string): Promise<string | undefined> {
-  const identity = mediaIdentity(source);
-  if (!supabase || !identity) return;
-  const slash = identity.indexOf('/'), bucket = identity.slice(0, slash);
-  if (slash < 1 || !['connect-avatars', 'connect-attachments', 'connect-stickers', 'connect-profile-media'].includes(bucket)) return;
-  const {data} = await supabase.storage.from(bucket).createSignedUrl(identity.slice(slash + 1), 3600);
-  return data?.signedUrl ? mediaUrl(data.signedUrl) : undefined;
+// Signatures share the same account/session lease as durable media bytes.
+const signedMediaLinks=createSignedMediaCache({
+  lease:viewer=>viewer===mediaCacheOwner()?mediaCacheEpoch():null,
+  cached:async(viewer,bucket,path)=>{
+    const identity='/storage/v1/object/sign/'+bucket+'/'+path;
+    const local=await resolveCachedMedia(identity,viewer);
+    return isCachedMediaUrl(local)?local:null;
+  },
+  sign:async(_viewer,bucket,path)=>{
+    if(!supabase)return;
+    const {data,error}=await supabase.storage.from(bucket).createSignedUrl(path,3600);
+    return !error&&data?.signedUrl?mediaUrl(data.signedUrl):undefined;
+  },
+});
+function resolveAttachmentMedia(path:string,viewer:string){return signedMediaLinks.resolve(viewer,'connect-attachments',path);}
+async function refreshMediaUrl(source:string,force=false):Promise<string|undefined>{
+  const identity=mediaIdentity(source),viewer=mediaCacheOwner();
+  if(!supabase||!identity||!viewer)return;
+  const slash=identity.indexOf('/'),bucket=identity.slice(0,slash);
+  if(slash<1||!['connect-avatars','connect-attachments','connect-stickers','connect-profile-media'].includes(bucket))return;
+  return signedMediaLinks.resolve(viewer,bucket,identity.slice(slash+1),force);
 }
 
 type AlbumItem = {path:string;name:string;kind:'image'|'video'};
@@ -273,7 +272,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
     if(waveOwner&&path){
       const identity='/storage/v1/object/sign/connect-attachments/'+path;
       void resolveCachedMedia(identity,waveOwner).then(local=>{
-        if(current&&local.startsWith('blob:')&&(!audioRef.current||(audioRef.current.paused&&audioRef.current.currentTime===0)))setPlaySrc(local);
+        if(current&&isCachedMediaUrl(local)&&(!audioRef.current||(audioRef.current.paused&&audioRef.current.currentTime===0)))setPlaySrc(local);
       }).catch(()=>{});
     }
     return()=>{current=false;};
@@ -305,21 +304,18 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
         if(mediaCacheOwner()!==waveOwner)return null;
         const identity='/storage/v1/object/sign/connect-attachments/'+path;
         let local=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
-        if(!local.startsWith('blob:')){
-          await prefetchChatAudio(src,waveOwner,byteSize);
-          if(mediaCacheOwner()!==waveOwner)return null;
-          local=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
-        }
-        return local.startsWith('blob:')?local:null;
+        return isCachedMediaUrl(local)?local:null;
       }).then(()=>{if(!disposed)syncWave();}).catch(()=>{});
     };
-    const node=audioRef.current?.parentElement;
-    if(typeof IntersectionObserver==='undefined'||!node){generate();return()=>{disposed=true;window.removeEventListener('connect:chat-wave',updated);};}
+    const playback=audioRef.current;playback?.addEventListener('ended',generate);playback?.addEventListener('suspend',generate);
+    const detach=()=>{playback?.removeEventListener('ended',generate);playback?.removeEventListener('suspend',generate);};
+    const node=playback?.parentElement;
+    if(typeof IntersectionObserver==='undefined'||!node){generate();return()=>{disposed=true;detach();window.removeEventListener('connect:chat-wave',updated);};}
     const observer=new IntersectionObserver(entries=>{
       if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();generate();}
     },{root:node.closest('.message-scroll'),rootMargin:'80px 0px'});
     observer.observe(node);
-    return()=>{disposed=true;observer.disconnect();window.removeEventListener('connect:chat-wave',updated);};
+    return()=>{disposed=true;detach();observer.disconnect();window.removeEventListener('connect:chat-wave',updated);};
   }, [src,path,waveOwner,byteSize]);
 
   async function toggle() {
@@ -336,7 +332,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
       let current=playSrc||src||'';
       if(!current){
         const cached=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
-        current=cached.startsWith('blob:')?cached:(await refreshMediaUrl(identity)||'');
+        current=isCachedMediaUrl(cached)?cached:(await refreshMediaUrl(identity)||'');
         if(!current)throw new Error('Voice message URL is not ready');
         audio.src=current;setPlaySrc(current);
       }
@@ -345,7 +341,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
         await audio.play();
       } catch(firstError) {
         if(!navigator.onLine||audio.error?.code===3||audio.error?.code===4)throw firstError;
-        const renewed=await refreshMediaUrl(identity);
+        const renewed=await refreshMediaUrl(identity,true);
         if(!renewed||renewed===current)throw firstError;
         audio.src=renewed;setPlaySrc(renewed);audio.load();
         await audio.play();
@@ -660,10 +656,9 @@ async function cachedChatPoster(path:string):Promise<string|null>{
   if(!supabase||!path)return null;
   if(isNativeMediaRuntime()){
     const viewer=mediaCacheOwner(),identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
-    if(viewer){const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);if(local.startsWith('blob:'))return local;}
-    const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
-    if(error||!data?.signedUrl)return null;
-    const signed=mediaUrl(data.signedUrl);
+    if(viewer){const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);if(isCachedMediaUrl(local))return local;}
+    const signed=await resolveAttachmentMedia(path+'__poster.jpg',viewer);
+    if(!signed)return null;
     if(viewer)void prefetchCachedMedia(signed,viewer);
     return signed;
   }
@@ -673,16 +668,15 @@ async function cachedChatPoster(path:string):Promise<string|null>{
   const identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
   if(viewer){
     const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
-    if(local.startsWith('blob:')){rememberChatPoster(viewer,path,local);return local;}
+    if(isCachedMediaUrl(local)){rememberChatPoster(viewer,path,local);return local;}
   }
-  const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
-  if(error||!data?.signedUrl)return null;
-  const signed=mediaUrl(data.signedUrl);
+  const signed=await resolveAttachmentMedia(path+'__poster.jpg',viewer);
+  if(!signed)return null;
   if(viewer){
     await prefetchCachedMedia(signed,viewer);
     const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
-    if(local.startsWith('blob:')){rememberChatPoster(viewer,path,local);return local;}
-    rememberChatPoster(viewer,path,signed);
+    if(isCachedMediaUrl(local)){rememberChatPoster(viewer,path,local);return local;}
+    // Network fallbacks keep the signing coordinator's original expiry.
   }
   return signed;
 }
@@ -1124,7 +1118,6 @@ export default function Home() {
     const timer=window.setTimeout(()=>setChatDisplayReady(activeChat),1400);
     return()=>window.clearTimeout(timer);
   },[activeChat,user?.id]);
-  const signedMediaLifetimes=useRef(new Map<string,number>());
   const warmedChatWindows=useRef(new Map<string,number>());
   const [historyHasMore,setHistoryHasMore]=useState(false);
   const [historyLoadingMore,setHistoryLoadingMore]=useState(false);
@@ -1187,7 +1180,7 @@ export default function Home() {
   const [pendingFiles,setPendingFiles]=useState<File[]>([]);
   const [videoNoteOpen,setVideoNoteOpen]=useState(false);
   const [recording, setRecording] = useState(false);
-  useEffect(()=>{if(!user?.id)return;return installMediaCache(user.id, refreshMediaUrl);},[user?.id]);
+  useEffect(()=>{if(!user?.id)return;const release=installMediaCache(user.id, source=>refreshMediaUrl(source,true));return()=>{signedMediaLinks.clear(user.id);release();};},[user?.id]);
   useEffect(()=>{releaseHistoryMemory();return releaseHistoryMemory;},[user?.id]);
   useEffect(()=>{
     if(!user?.id||!supabase)return;const controller=new AbortController();
@@ -1658,7 +1651,7 @@ export default function Home() {
         try {
           const local=await resolveCachedMedia(identity,viewer);
           if(epoch!==stickerCatalogEpoch.current)return;
-          if(local.startsWith('blob:')){
+          if(isCachedMediaUrl(local)){
             setCustomStickerUrls(prev=>prev[st.id]===local?prev:{...prev,[st.id]:local});
             continue;
           }
@@ -1672,7 +1665,7 @@ export default function Home() {
           if(epoch!==stickerCatalogEpoch.current)return;
           const cached=await resolveCachedMedia(identity,viewer);
           if(epoch!==stickerCatalogEpoch.current)return;
-          const source=cached.startsWith('blob:')?cached:signed;
+          const source=isCachedMediaUrl(cached)?cached:signed;
           setCustomStickerUrls(prev=>prev[st.id]===source?prev:{...prev,[st.id]:source});
         }catch{/* Retry on next login/visibility refresh; never expose private packs. */}
       }
@@ -1704,14 +1697,14 @@ export default function Home() {
         try{
           const identity='/storage/v1/object/sign/connect-stickers/'+st.storage_path;
           const local=await resolveCachedMedia(identity,owner);
-          if(local.startsWith('blob:'))return [st.id,local] as const;
+          if(isCachedMediaUrl(local))return [st.id,local] as const;
           const {data:signed}=await client.storage.from('connect-stickers').createSignedUrl(st.storage_path,3600);
           if(!signed?.signedUrl)return null;
           const url=mediaUrl(signed.signedUrl);
           await prefetchStickerWebp(url,owner);
           if(!alive)return null;
           const cached=await resolveCachedMedia(identity,owner);
-          return [st.id,cached.startsWith('blob:')?cached:url] as const;
+          return [st.id,isCachedMediaUrl(cached)?cached:url] as const;
         }catch{return null;}
       }));
       if(!alive)return;
@@ -2863,33 +2856,26 @@ export default function Home() {
   useEffect(() => {
     if(!supabase||!user)return;
     let cancelled=false;
-    const client=supabase,viewer=user.id;
-    // Android also needs progressive, bounded signing for large audio-heavy chats.
+    const client=supabase,viewer=user.id,epoch=mediaCacheEpoch();
+    const current=()=>!cancelled&&mediaCacheOwner()===viewer&&mediaCacheEpoch()===epoch;
+    // Reconsider existing entries on chat entry; the resolver owns their real TTL.
     if(isNativeMediaRuntime()){
-      const selected=messages.filter(m=>!m.deleted_at&&(!activeChat||m.conversation_id===activeChat));
+      if(!activeChat)return;
+      const selected=messages.filter(m=>!m.deleted_at&&m.conversation_id===activeChat);
       const paths=Array.from(new Set([...selected].reverse().flatMap(m=>[...(m.attachment_path?[m.attachment_path]:[]),...parseAlbum(m.body).map(x=>x.path)])));
-      const missing=paths.filter(path=>!attachmentUrls[path]);
-      let cursor=0, audioWarm=0;
+      let cursor=0,audioWarm=0;
       const worker=async()=>{
-        while(!cancelled&&cursor<missing.length){
-          const path=missing[cursor++];
-          const meta=selected.find(m=>m.attachment_path===path);
-          const identity='/storage/v1/object/sign/connect-attachments/'+path;
-          try {
-            const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
-            let url=local.startsWith('blob:')?local:'';
-            if(!url){
-              const {data}=await client.storage.from('connect-attachments').createSignedUrl(path,3600);
-              url=data?.signedUrl?mediaUrl(data.signedUrl):'';
-            }
-            if(!url||cancelled)continue;
-            setAttachmentUrls(prev=>prev[path]?prev:{...prev,[path]:url});
-            if(meta?.attachment_kind==='audio'&&meta.attachment_size&&meta.attachment_size<=1024*1024&&audioWarm++<2)
-              void prefetchChatAudio(url,viewer,meta.attachment_size);
+        while(current()&&cursor<paths.length){
+          const path=paths[cursor++],meta=selected.find(m=>m.attachment_path===path);
+          try{
+            const url=await resolveAttachmentMedia(path,viewer);
+            if(!url||!current())continue;
+            setAttachmentUrls(prev=>!current()||prev[path]===url?prev:{...prev,[path]:url});
+            // No audio original is downloaded on chat entry.
           }catch{/* One failed attachment must not block the rest. */}
         }
       };
-      void Promise.all(Array.from({length:Math.min(4,missing.length)},()=>worker())).catch(()=>{});
+      void Promise.all(Array.from({length:Math.min(4,paths.length)},()=>worker())).catch(()=>{});
       return()=>{cancelled=true;};
     }
     if(!activeChat||historyReadyChat!==activeChat)return;
@@ -2904,38 +2890,30 @@ export default function Home() {
     let offset=0,recentLeft=Math.min(10,entries.length);
     if(!recentLeft)setChatDisplayReady(chatId);
     const worker=async()=>{
-      while(!cancelled&&offset<entries.length){
+      while(current()&&offset<entries.length){
         const index=offset++,item=entries[index],path=item.path;
         try{
-          const identity='/storage/v1/object/sign/connect-attachments/'+path;
-          const cached=await resolveCachedMedia(identity,viewer);
-          const previous=attachmentUrls[path];
-          let url=cached.startsWith('blob:')?cached:(previous&&(previous.startsWith('blob:')||(signedMediaLifetimes.current.get(path)||0)>Date.now()+60000)?previous:'');
-          if(!url){
-            const {data,error}=await client.storage.from('connect-attachments').createSignedUrl(path,3600);
-            if(!error&&data?.signedUrl){url=mediaUrl(data.signedUrl);signedMediaLifetimes.current.set(path,Date.now()+48*60*1000);}
-          }
-          if(!url)continue;
-          if(!cancelled)setAttachmentUrls(prev=>prev[path]===url?prev:{...prev,[path]:url});
+          const url=await resolveAttachmentMedia(path,viewer);
+          if(!url||!current())continue;
+          setAttachmentUrls(prev=>!current()||prev[path]===url?prev:{...prev,[path]:url});
           if(item.kind==='image'&&supportsPhotoPreview(path)){
             const thumb=photoPreviewPath(path),thumbIdentity='/storage/v1/object/sign/connect-attachments/'+thumb;
             let local=await resolveCachedMedia(thumbIdentity,viewer);
-            if(!local.startsWith('blob:')){
-              const signed=await client.storage.from('connect-attachments').createSignedUrl(thumb,3600);
-              if(signed.data?.signedUrl){const thumbUrl=mediaUrl(signed.data.signedUrl);
+            if(!isCachedMediaUrl(local)){
+              const thumbUrl=await resolveAttachmentMedia(thumb,viewer);
+              if(thumbUrl){
                 await prefetchCachedMedia(thumbUrl,viewer);
                 const hydrated=await resolveCachedMedia(thumbIdentity,viewer);
-                local=hydrated.startsWith('blob:')?hydrated:thumbUrl;
+                local=isCachedMediaUrl(hydrated)?hydrated:thumbUrl;
               }else local='';
             }
-            if(!cancelled)setPhotoPreviews(prev=>prev[path]=== (local||null)?prev:{...prev,[path]:local||null});
+            if(current())setPhotoPreviews(prev=>!current()||prev[path]=== (local||null)?prev:{...prev,[path]:local||null});
           }
           if(item.kind==='video')await cachedChatPoster(path).catch(()=>null);
-           if(item.kind==='audio'&&index<4&&item.size>0&&item.size<=1024*1024)
-             void prefetchChatAudio(url,viewer,item.size);
+          // No original prefetch: the first playback response persists its bytes.
         }catch{/* Never let a failed attachment block message navigation. */}
         finally{
-          if(index<10&&--recentLeft===0&&!cancelled){
+          if(index<10&&--recentLeft===0&&current()){
             warmedChatWindows.current.set(viewer+':'+chatId,Date.now()+42*60*1000);
             setChatDisplayReady(chatId);
           }
@@ -2949,7 +2927,7 @@ export default function Home() {
 
   useEffect(()=>{
     if(!supabase||!user)return;
-    const owner=user.id;
+    const owner=user.id,epoch=mediaCacheEpoch();let cancelled=false;
     const paths=[...new Set(messages.filter(m=>m.conversation_id===activeChat).flatMap(m=>[
       ...(m.attachment_kind==='image'&&m.attachment_path?[m.attachment_path]:[]),
       ...parseAlbum(m.body).filter(x=>x.kind==='image').map(x=>x.path)
@@ -2965,12 +2943,17 @@ export default function Home() {
       try{
         const local=await resolveCachedStorageFile(owner,'connect-attachments',photoPreviewPath(path));
         if(local)return {path,url:local};
-        const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(photoPreviewPath(path),3600);
-        if(error||!data?.signedUrl)return {path,url:null};
-        const signed=mediaUrl(data.signedUrl);void prefetchCachedMedia(signed,owner);
+        const signed=await resolveAttachmentMedia(photoPreviewPath(path),owner);
+        if(!signed)return {path,url:null};void prefetchCachedMedia(signed,owner);
         return {path,url:signed};
       }catch{return {path,url:null};}
-    })).then(items=>{if(activePreviewUser.current===owner){setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});for(const item of items)if(!item.url)retryPhotoPreview(item.path);}});
+    })).then(items=>{
+      if(!cancelled&&activePreviewUser.current===owner&&mediaCacheEpoch()===epoch){
+        setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});
+        for(const item of items){if(item.url)photoPreviewAttempts.current.delete(item.path);else retryPhotoPreview(item.path);}
+      }
+    }).finally(()=>{for(const path of paths)photoPreviewRequests.current.delete(path);});
+    return()=>{cancelled=true;for(const path of paths)photoPreviewRequests.current.delete(path);};
   },[messages,activeChat,user?.id,photoPreviewRetry]);
   useEffect(()=>{
     photoPreviewRequests.current.clear();photoPreviewAttempts.current.clear();
@@ -3146,8 +3129,8 @@ export default function Home() {
       setMessages(prev=>prev.some(x=>x.id===m.id)?prev:[...prev,m]);
       setLatest(prev=>({...prev,[chatId]:m}));
       setReplyTo(null);setPendingFiles([]);
-      const urls=await Promise.all(items.map(async x=>({path:x.path,result:await client.storage.from('connect-attachments').createSignedUrl(x.path,3600)})));
-      setAttachmentUrls(prev=>{const next={...prev};urls.forEach(x=>{if(x.result.data?.signedUrl)next[x.path]=mediaUrl(x.result.data.signedUrl)});return next});
+      const urls=await Promise.all(items.map(async x=>({path:x.path,url:await resolveAttachmentMedia(x.path,uid)})));
+      setAttachmentUrls(prev=>{if(mediaCacheOwner()!==uid)return prev;const next={...prev};urls.forEach(x=>{if(x.url)next[x.path]=x.url});return next});
       requestAnimationFrame(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight});
     }catch(e){setNotice('Не удалось отправить альбом: '+(e instanceof Error?e.message:String(e)))}
     finally{setBusy(false);setUploadProgress(null)}
@@ -3231,8 +3214,8 @@ export default function Home() {
       setMessages(prev=>prev.some(x=>x.id===m.id)?prev:[...prev,m]);
       setLatest(prev=>({...prev,[chatId]:m}));
       setReplyTo(null);
-      const signed=await supabase.storage.from('connect-attachments').createSignedUrl(path,3600);
-      if(signed.data?.signedUrl)setAttachmentUrls(prev=>({...prev,[path]:mediaUrl(signed.data!.signedUrl)}));
+      const signed=await resolveAttachmentMedia(path,user.id);
+      if(signed)setAttachmentUrls(prev=>mediaCacheOwner()===user.id?{...prev,[path]:signed}:prev);
       requestAnimationFrame(()=>{const el=scrollRef.current;if(el)el.scrollTop=el.scrollHeight;});
     } catch(e) {
       setNotice('Не удалось отправить вложение: '+(e instanceof Error?e.message:String(e)));
@@ -3498,7 +3481,7 @@ export default function Home() {
     setLatest({});setUnread({});readCache.current={};setPassword('');
     setAvatarUrls({});
     if(accountId)forgetUserChatPresentation(accountId);
-    warmedChatWindows.current.clear();signedMediaLifetimes.current.clear();
+    warmedChatWindows.current.clear();signedMediaLinks.clear(accountId||'');
     let signoutTimeout:ReturnType<typeof setTimeout>|undefined;
     try {
       const {error}=await Promise.race([

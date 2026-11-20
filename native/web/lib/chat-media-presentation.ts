@@ -87,7 +87,8 @@ export function prewarmChatWave(
     let context:AudioContext|null=null;
     try{
       const source=native?await resolveNativeLocal!():src;
-      if(!source||(native&&!source.startsWith('blob:')))return;
+      if(!source)return;
+      if(native&&!source.startsWith('blob:')){try{const u=new URL(source,location.href);if(u.origin!==location.origin||u.searchParams.get('__cm_local')!=='1')return;}catch{return;}}
       const controller=new AbortController();
       const timer=setTimeout(()=>controller.abort(),7000);
       let bytes:ArrayBuffer;

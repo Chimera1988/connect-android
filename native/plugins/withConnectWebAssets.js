@@ -19,6 +19,20 @@ const handler=String.raw`
     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
         android.net.Uri uri = request.getUrl();
         if (!"appassets.androidplatform.net".equalsIgnoreCase(uri.getHost())) {
+            // Narrow reflection avoids an app -> WebView library dependency cycle.
+            if (!request.isForMainFrame() && "GET".equals(request.getMethod())
+                && "https://connect-chat.duckdns.org".equals(uri.getScheme() + "://" + uri.getAuthority())
+                && uri.getQueryParameter("__cm") != null) {
+                try {
+                    Class<?> module = Class.forName("com.connect.messenger.ConnectFilesModule");
+                    Object response = module.getMethod("interceptMedia", android.content.Context.class, WebResourceRequest.class)
+                        .invoke(null, view.getContext(), request);
+                    if (response instanceof WebResourceResponse) return (WebResourceResponse) response;
+                } catch (ReflectiveOperationException unavailable) {
+                    return new WebResourceResponse("text/plain", "UTF-8", 503, "Media Unavailable",
+                        java.util.Collections.singletonMap("Cache-Control", "no-store"), new java.io.ByteArrayInputStream(new byte[0]));
+                }
+            }
             return super.shouldInterceptRequest(view, request);
         }
         java.util.Map<String, String> headers = new java.util.HashMap<>();

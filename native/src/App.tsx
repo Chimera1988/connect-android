@@ -252,11 +252,17 @@ function HybridConnect(){
           result={message:await testNativeMessagePush(ownerId)};break;
         }
         case 'notification:diagnostics':if(!ownerId)throw Error('Войдите в Connect');result=await getNativePushDiagnostics();break;
+        case 'media:cache':{
+          // Native storage verifies the encrypted session owner, including cold/offline startup.
+          const module=NativeModules.ConnectFilesModule;
+          result=typeof module?.mediaCache==='function'?JSON.parse(await module.mediaCache(p.userId,p.action,JSON.stringify(p))):{supported:false};break;
+        }
         case 'media:waveform':{
           const viewer=ownerId;if(!viewer)throw Error('Войдите в Connect');
-          const signed=await db.storage.from('connect-attachments').createSignedUrl(p.path as string,120);
-          if(signed.error||!signed.data?.signedUrl)throw Error('Аудио недоступно');
-          result=await getAudioWaveform(mediaUrl(signed.data.signedUrl),43);
+          const module=NativeModules.ConnectFilesModule;
+          const local=typeof module?.cachedMediaFile==='function'?await module.cachedMediaFile(viewer,'connect-attachments/'+p.path):null;
+          if(!local)throw Error('Волна доступна после загрузки аудио');
+          result=await getAudioWaveform(local,43);
           if(viewer!==ownerId)throw Error('Аккаунт изменился');break;
         }
         case 'calls:journal':{if(p.userId!==ownerId)throw Error('Аккаунт изменился');result=JSON.parse(await NativeModules.ConnectCallCoordinator.journal(p.userId,JSON.stringify(p)));break;}

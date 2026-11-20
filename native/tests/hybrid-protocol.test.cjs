@@ -157,3 +157,9 @@ test('native metadata catalogs reject credential fields, signed URLs and foreign
  for(const value of [{access_token:token},{nested:{signedUrl:'https://host/x?token='+token}},{items:[{path:'/x?token=secret'}]},{value:token}])assert.equal(read('history:catalog-write',{userId:uuid,key,epoch:0,value}),null);
  assert.equal(read('history:catalog-read',{userId:uuid,key:'auth'}),null);
 });
+
+test('media response-cache bridge validates owner, capability, storage identity and strict actions',()=>{
+ const base={userId:uuid,nonce};
+ for(const payload of [{...base,action:'bind',limitBytes:500*1024**2},{...base,action:'lookup',identity:'connect-attachments/'+uuid+'/voice.m4a',version:'v1'},{...base,action:'clear',category:'temporary',identity:'connect-attachments/x.mp4',retire:true},{...base,action:'stats'},{...base,action:'unbind'}])assert(read('media:cache',payload));
+ for(const payload of [{...base,action:'bind',limitBytes:Infinity},{...base,action:'bind',limitBytes:-1},{...base,userId:'bad',action:'stats'},{...base,nonce:'bad',action:'stats'},{...base,action:'lookup',identity:'connect-attachments/../private'},{...base,action:'lookup',identity:'https://evil/private'},{...base,action:'clear',category:'auth'},{...base,action:'stats',token:'secret'},{...base,action:'fetch',url:'https://evil'}])assert.equal(read('media:cache',payload),null);
+});

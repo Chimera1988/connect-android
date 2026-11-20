@@ -5,7 +5,7 @@ test('Android private device storage pins sticker files across cache trimming',(
   assert.match(cache,/CONNECT_ANDROID_STICKERS_PINNED_20261117/);
   assert.match(cache,/if \(row\.key\.startsWith\(owner \+ ':connect-stickers\/'\)\) continue;/);
   assert.match(cache,/const NAME = 'connect-media-v1'/);
-  assert.match(cache,/indexedDB\.open\(NAME, 3\)/);
+  assert.match(cache,/indexedDB\.open\(NAME, 4\)/);
 });
 test('viewer cache is keyed by stable storage path, never a signed token',()=>{
   const before=page.indexOf('const local=await resolveCachedMedia(identity,viewer);');
@@ -17,7 +17,7 @@ test('catalog bytes are persisted before the first signed image reaches the DOM'
   const fragment=page.slice(page.indexOf('CONNECT_ANDROID_STICKER_OFFLINE_FIRST_20261117'),page.indexOf("}catch{/* Retry on next login/visibility refresh"));
   assert.ok(fragment.indexOf('await prefetchStickerWebp(signed,viewer)')>=0);
   assert.ok(fragment.indexOf('await prefetchStickerWebp(signed,viewer)')<fragment.indexOf('setCustomStickerUrls(prev=>'));
-  assert.match(fragment,/cached\.startsWith\('blob:'\)\?cached:signed/);
+  assert.match(fragment,/isCachedMediaUrl\(cached\)\?cached:signed/);
 });
 test('received private sticker not in a public catalog is also cached first',()=>{
   assert.match(page,/await prefetchStickerWebp\(url,owner\);[\s\S]{0,180}await resolveCachedMedia\(identity,owner\)/);

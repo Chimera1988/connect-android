@@ -23,6 +23,14 @@ import java.util.concurrent.RejectedExecutionException
 /** User-selected SAF destinations; JavaScript receives opaque IDs, never URIs. */
 class ConnectFilesModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
   companion object {
+    @Volatile private var media:ConnectMediaStore?=null
+    private fun media(context:android.content.Context):ConnectMediaStore=media?:synchronized(this){media?:ConnectMediaStore(java.io.File(context.applicationContext.filesDir,"connect-media-cache-v1"),ConnectCallSession.BASE){ConnectCallSession.epoch}.also{media=it}}
+    @JvmStatic fun interceptMedia(context:android.content.Context,request:android.webkit.WebResourceRequest):android.webkit.WebResourceResponse?{
+      if(request.isForMainFrame||request.method!="GET")return null
+      val reply=media(context).open(request.url.toString(),request.requestHeaders)?:return null
+      val reason=when(reply.status){200->"OK";206->"Partial Content";403->"Forbidden";410->"Gone";416->"Range Not Satisfiable";else->"Media Unavailable"}
+      return android.webkit.WebResourceResponse(reply.type,null,reply.status,reason,reply.headers,reply.body)
+    }
     private const val REQUEST = 24731
     private const val MAX_BYTES = 100L * 1024 * 1024
     private const val MAX_CHUNK = 65536
@@ -76,6 +84,31 @@ class ConnectFilesModule(private val context: ReactApplicationContext) : ReactCo
     val save = saves.remove(id) ?: return
     try { save.output.close() } catch (_: Exception) { }
     if (remove) try { DocumentsContract.deleteDocument(context.contentResolver, save.uri) } catch (_: Exception) { }
+  }
+
+  // CONNECT_MEDIA_RESPONSE_CACHE_V1: only the authenticated bundled UI can bind.
+  @ReactMethod fun mediaCache(owner:String,action:String,payload:String,promise:Promise)=execute(promise){
+    require(payload.length<=8192)
+    val data=org.json.JSONObject(payload);val nonce=data.getString("nonce")
+    require(nonce.matches(Regex("[A-Za-z0-9_-]{32,128}")))
+    val cache=media(context)
+    if(action=="unbind"){cache.unbind(nonce);promise.resolve(org.json.JSONObject().put("supported",true).put("value",true).toString());return@execute}
+    require(owner.matches(Regex("[a-fA-F0-9-]{36}"))&&owner==ConnectCallSession.peekOwner(context)){"Media account changed"}
+    val value:Any?=if(action=="bind") {cache.bind(owner,nonce,data.getLong("limitBytes"));true}else{
+      cache.authorize(owner,nonce)
+      when(action){
+        "lookup"->cache.lookup(data.getString("identity"),data.optString("version"))?.let{org.json.JSONObject(it)}
+        "clear"->{cache.clear(data.getString("category"),if(data.has("identity"))data.getString("identity")else null,data.optBoolean("retire"));true}
+        "revive"->{cache.revive(data.getString("identity"));true}
+        "stats"->org.json.JSONObject(cache.stats())
+        else->throw IllegalArgumentException("Unknown media cache action")
+      }
+    }
+    promise.resolve(org.json.JSONObject().put("supported",true).put("protocol",1).put("value",value?:org.json.JSONObject.NULL).toString())
+  }
+  @ReactMethod fun cachedMediaFile(owner:String,identity:String,promise:Promise)=execute(promise){
+    require(owner==ConnectCallSession.peekOwner(context)){"Media account changed"}
+    promise.resolve(media(context).cachedFile(owner,identity))
   }
 
   @ReactMethod

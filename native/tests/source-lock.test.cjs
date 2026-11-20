@@ -42,15 +42,16 @@ test('API 37 resolves to the actual SDK package android-37.0 and tool drift is r
  }finally{f.cleanup();}
 });
 
-test('the final workflow SDK step requests the verified package instead of an unavailable API alias',()=>{
+test('the current release workflow SDK step requests the verified package instead of an unavailable API alias',()=>{
  const f=toolsFixture();
  try{
   const yaml=require('js-yaml');
-  const workflow=yaml.load(fs.readFileSync('../.github/workflows/connect-android-parity-notifications-final.yml','utf8'));
-  const step=workflow.jobs.verify.steps.find(s=>s.name==='Generate native project and derive SDK from installed Gradle sources');
+  const workflow=yaml.load(fs.readFileSync('../.github/workflows/connect-android-parity-release.yml','utf8'));
+  const step=workflow.jobs.verify.steps.find(s=>s.name==='Generate native project and install exact SDK tools');
   assert.ok(step,'SDK step must exist');
   f.write('verification/parity/.keep','');
-  f.write('bin/npx','#!/bin/bash\nset -euo pipefail\ntest "$*" = "--no-install expo prebuild --platform android --no-install --clean"\n');
+  f.write('scripts/release/validate.mjs',"import assert from 'node:assert/strict';assert.equal(process.argv[2],'prebuild');\n");
+  f.write('bin/npx','#!/bin/bash\nset -euo pipefail\ntest "$*" = "--no-install expo prebuild --platform android --no-install"\n');
   f.write('bin/sdkmanager',`#!${process.execPath}\nconst assert=require('node:assert/strict');\nassert.deepEqual(process.argv.slice(2),['--channel=3','platforms;android-37.0','build-tools;37.0.0','ndk;27.1.12297006','cmake;3.22.1','platform-tools']);\nrequire('node:fs').writeFileSync('sdk-request-verified','ok');\n`);
   for(const name of ['npx','sdkmanager'])fs.chmodSync(path.join(f.root,'bin',name),0o755);
   const result=cp.spawnSync('/bin/bash',['-e','-o','pipefail','-c',step.run],{cwd:f.root,encoding:'utf8',env:{...process.env,PATH:path.join(f.root,'bin')+path.delimiter+process.env.PATH}});

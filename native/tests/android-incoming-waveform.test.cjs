@@ -66,7 +66,7 @@ test('VoicePlayer only warms visible small recordings, including incoming; no na
  assert.match(PAGE,/CONNECT_ANDROID_INCOMING_VOICE_WAVE_CACHE_V1_20261116/);
  assert.match(PAGE,/IntersectionObserver/);
  assert.match(PAGE,/prewarmChatWave\(waveOwner,path,src,byteSize/);
- assert.match(PAGE,/prefetchChatAudio\(src,waveOwner,byteSize/);
+ assert.doesNotMatch(PAGE,/prefetchChatAudio\(src,waveOwner,byteSize/,'waveform must reuse the played response');
  assert.equal((PAGE.match(/<VoicePlayer\s+src=\{attachmentUrls\[m\.attachment_path\]\}\s+path=\{m\.attachment_path\}\s+byteSize=\{m\.attachment_size\|\|0\}/g)||[]).length,2);
  assert.doesNotMatch(PAGE,/onPlay=\{\(\) => \{setPlaying\(true\);setError\(false\);setBuffering\(false\);void nativeWave\(\);\}\}/);
 });
