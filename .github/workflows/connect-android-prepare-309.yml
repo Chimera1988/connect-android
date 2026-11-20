@@ -1,0 +1,176 @@
+name: Connect Android | Prepare APK 3.0.9
+run-name: Prepare native media cache APK 3.0.9 (27) on main
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: connect-android-production-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Update version and verify the existing native cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require current main and unmodified audited source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain)"
+          node scripts/check-parity-source.mjs
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Prepare the new APK identity, runtime and source lock
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          OLD = ('3.0.8', 26, 'connect-android-ota-v2-sdk58')
+          NEW = ('3.0.9', 27, 'connect-android-ota-v3-sdk58')
+          app = json.loads(Path('app.json').read_text())['expo']
+          package = json.loads(Path('package.json').read_text())
+          package_lock = json.loads(Path('package-lock.json').read_text())
+          current = (app['version'], app['android']['versionCode'], app['runtimeVersion'])
+          if current not in (OLD, NEW):
+              raise SystemExit(f'Unexpected version, build or runtime: {current!r}; refusing any edits')
+          if package['version'] != current[0] or package_lock['version'] != current[0] or package_lock['packages']['']['version'] != current[0]:
+              raise SystemExit('Package and lockfile identities differ; refusing any edits')
+          if app['android']['package'] != 'com.connect.messenger':
+              raise SystemExit('Unexpected package name')
+
+          def edit(name, pairs):
+              file = Path(name)
+              source = file.read_text()
+              for old, new in pairs:
+                  occurrences = source.count(old)
+                  if occurrences != 1:
+                      raise SystemExit(f'{name}: expected one occurrence of {old!r}, got {occurrences}')
+                  source = source.replace(old, new, 1)
+              file.write_text(source)
+
+          changed = []
+          if current == OLD:
+              edits = {
+                  'app.json': [
+                      ('"version": "3.0.8"', '"version": "3.0.9"'),
+                      ('"versionCode": 26', '"versionCode": 27'),
+                      ('"runtimeVersion": "connect-android-ota-v2-sdk58"', '"runtimeVersion": "connect-android-ota-v3-sdk58"'),
+                  ],
+                  'package.json': [
+                      ('"version": "3.0.8"', '"version": "3.0.9"'),
+                  ],
+                  'scripts/check-parity-source.mjs': [
+                      ("app.version!=='3.0.8'||app.android.versionCode!==26", "app.version!=='3.0.9'||app.android.versionCode!==27"),
+                  ],
+                  'tests/source-lock.test.cjs': [
+                      ("expo:{version:'3.0.8',android:{package:'com.connect.messenger',versionCode:26}", "expo:{version:'3.0.9',android:{package:'com.connect.messenger',versionCode:27}"),
+                  ],
+                  'tests/connect-ota-config-20261117.test.cjs': [
+                      ("assert.equal(app.version,'3.0.8')", "assert.equal(app.version,'3.0.9')"),
+                      ('assert.equal(app.android.versionCode,26)', 'assert.equal(app.android.versionCode,27)'),
+                      ("assert.equal(app.runtimeVersion,'connect-android-ota-v2-sdk58')", "assert.equal(app.runtimeVersion,'connect-android-ota-v3-sdk58')"),
+                  ],
+                  'tests/release-config.test.cjs': [
+                      ('assert.equal(expo.android.versionCode, 26)', 'assert.equal(expo.android.versionCode, 27)'),
+                  ],
+              }
+              # First validate every replacement against the unchanged working tree.
+              for name, pairs in edits.items():
+                  value = Path(name).read_text()
+                  for old, _ in pairs:
+                      if value.count(old) != 1:
+                          raise SystemExit(f'{name}: changed upstream; expected exactly one {old!r}')
+              locktext = Path('package-lock.json').read_text()
+              if locktext.count('"version": "3.0.8"') < 2 or locktext[:500].count('"version": "3.0.8"') != 2:
+                  raise SystemExit('Unexpected package-lock format; refusing edits')
+              for name, pairs in edits.items():
+                  edit(name, pairs)
+                  changed.append(name)
+              Path('package-lock.json').write_text(locktext.replace('"version": "3.0.8"', '"version": "3.0.9"', 2))
+              changed.append('package-lock.json')
+
+          lock_path = Path('PARITY_SOURCE_LOCK.json')
+          lock = json.loads(lock_path.read_text())
+          if not lock.get('files') or len(lock['files']) < 300:
+              raise SystemExit('Unexpected or incomplete source lock')
+          # Rehash only files deliberately updated by this installer.
+          for name in changed:
+              if name not in lock['files']:
+                  raise SystemExit(f'Source lock is missing {name}')
+              lock['files'][name] = hashlib.sha256(Path(name).read_bytes()).hexdigest()
+          if changed:
+              lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2) + '\n')
+          next_app = json.loads(Path('app.json').read_text())['expo']
+          assert (next_app['version'], next_app['android']['versionCode'], next_app['runtimeVersion']) == NEW
+          assert json.loads(Path('package-lock.json').read_text())['packages']['']['version'] == '3.0.9'
+          print('Prepared version 3.0.9 (27), new native OTA runtime v3; modified:', ', '.join(changed) if changed else 'none')
+          PY
+          node scripts/check-parity-source.mjs
+          git diff --check
+      - name: Install locked dependencies and run release regressions
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/check-parity-source.mjs
+          node scripts/release/config.mjs
+          npm run typecheck
+          npm run typecheck:web
+          npm test
+          npm run build:web
+          node scripts/release/validate.mjs source
+      - name: Confirm only approved files changed, commit to main
+        run: |
+          set -euo pipefail
+          git diff --check
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo '::error::main changed while verifying. No commit.'; exit 1; }
+          python3 - <<'PY'
+          import subprocess
+          allowed = {
+              'native/app.json', 'native/package.json', 'native/package-lock.json',
+              'native/PARITY_SOURCE_LOCK.json', 'native/scripts/check-parity-source.mjs',
+              'native/tests/source-lock.test.cjs',
+              'native/tests/connect-ota-config-20261117.test.cjs',
+              'native/tests/release-config.test.cjs',
+          }
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
+          unexpected = changed - allowed
+          if unexpected:
+              raise SystemExit(f'Unexpected changed files: {sorted(unexpected)}')
+          untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).strip()
+          if untracked:
+              raise SystemExit('Unexpected untracked files: ' + untracked)
+          print('Approved changed files:', ', '.join(sorted(changed)) if changed else 'none')
+          PY
+          if test -z "$(git diff --name-only)"; then
+            echo 'APK 3.0.9 already prepared; nothing to commit.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- app.json package.json package-lock.json PARITY_SOURCE_LOCK.json scripts/check-parity-source.mjs tests/source-lock.test.cjs tests/connect-ota-config-20261117.test.cjs tests/release-config.test.cjs
+          git diff --cached --check
+          git commit -m 'chore(android): prepare 3.0.9 native media cache and OTA runtime v3'
+          git push origin HEAD:main
+          echo 'Prepared APK 3.0.9 build 27 in main. Next: existing Connect Android | PWA parity release, mode=apk, previous_release=connect-android-v3.0.8-b26.' >> "$GITHUB_STEP_SUMMARY"
