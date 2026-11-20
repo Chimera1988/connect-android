@@ -1921,7 +1921,7 @@ jobs:
           assert.equal(app.android.package,'com.connect.messenger');assert.equal(app.version,'3.0.8');assert.equal(app.android.versionCode,26);
           assert.equal(app.runtimeVersion,'connect-android-ota-v2-sdk58');assert.equal(app.extra.eas.projectId,'430c7f08-3921-48d5-96d1-f7c3d686d3bf');
           assert.equal(app.updates.requestHeaders['expo-channel-name'],'production');
-          assert.equal(nativeBaseline().nativeSha256,'b1e3c53d0ab0c258944102b131a1f801ceae0304a158a9ec484e1637fbf7262d');
+          assert.equal(nativeBaseline().nativeSha256,'ee05c040f682570b414665ca4687a061aa233b0da55e1b4f3a7b0fa4504fe752');
           console.log('Native code changed: a new production-signed APK is required; no OTA is published by this workflow.');
           JS
           npx --no-install expo export --platform android --output-dir verification/parity/export 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/export.log"
