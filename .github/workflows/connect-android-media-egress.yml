@@ -1,0 +1,2027 @@
+# Standalone, main-only installer. Audited main: f5ccfee5c9a928ef3cbfed49a155a769437f41aa.
+# All repairs are inline and touch existing tracked files only. No server writes or release publication.
+# Upload this file to .github/workflows/connect-android-media-egress.yml, then run it manually on main.
+name: Connect ANDROID media egress
+run-name: Install verified ANDROID media cache on main
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: connect-media-egress-main
+  cancel-in-progress: false
+env:
+  CI: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  CONNECT_MEDIA_STATES: '{"native/PARITY_SOURCE_LOCK.json":{"before":"4a5af4a858a09a9c271345ecaebdc4e42f05bfcfba8cd1d901431da6ccd43af6","after":"040fa648e00ae2684549195a47ee32055afa385940dfa12231f1617a4fd63d5d"},"native/plugins/files/ConnectFilesModule.kt":{"before":"9d1b796460b934e921eb7b1968306db9a0ccdd1c8206c54b33cc2f696e5d1543","after":"bb11a04689ef83efc981636dadaef27a52ba8b7d39ca344ca4a4d3bedee9d20e"},"native/plugins/history-tests/HistoryStoreTest.kt":{"before":"d0ab8168f2f09fa5823fe769558af2bf7bf74ed6dc4264680ff2e1d47e4c408c","after":"80bb56e4586ff5ff5255d7c659bd72fad003e9ef5afecba772aabb34c73b941d"},"native/plugins/history/HistoryStore.kt":{"before":"bba34bed21fd67ff86ccee769ade14f7448e5ca2df9205272d9567817a93349d","after":"0207cafc32d64ab73cad6f5dfe210f6f16375cb47c8b34a9fbe67dc6584b612a"},"native/plugins/withConnectFiles.js":{"before":"cee20beb741889a9ccd7be106e645375ea0773bea665c2ceb104614ce55470d9","after":"e92294439a9c0eb7b449eb2e3d3edc0fd3547f01aa674114b4562e3490c64870"},"native/plugins/withConnectWebAssets.js":{"before":"7626c785bd73988ecb8f6249bb16895b779bdec42db14edec0e932f02d1c1ecc","after":"fb7374333621ea5ec24e0649cf4cda1371c07365bd73c105bab291c736414c88"},"native/src/App.tsx":{"before":"a6db2eb098d90b7279c0d73dc296f972c08d26593822794323018c36b29a2fbe","after":"422baf649243e32ecc75170c5e7950e4b0b1320c6a1494e8025ac0dad26ace53"},"native/src/hybridProtocol.ts":{"before":"b29cbee384258dfc91de2d858c31f894f4201798c71ce372d40ebfa31dac97f9","after":"1d5e1dc855749b4295dd4eca5f1d10befb21a1842c07e3d603297a6029de4756"},"native/tests/android-incoming-waveform.test.cjs":{"before":"89e46bd39844e870787560bb5c634641a6d2248a15c90d1528385c11c323a604","after":"61859f0cd3b55152dcbb573fef6fb10d7af1ade31af6574ae40d4166377b8277"},"native/tests/android-media-egress.test.cjs":{"before":"fc4aa5cf7fb3409d58c99f9681fa01e813687699870cbc15fab209dd04d179fe","after":"6654be5c207fd2eeb2c7d437fb5a7ca01b4ec240fd721aa3d6eb187c6e2e6c0e"},"native/tests/browser-cache.tsx":{"before":"828bbc9f366bcb83dcb53ba80bf807afedf524c0ea1edf5c785c242ec5969880","after":"4d243241e90ed5208c934f05892a801b729a51e4bd882bf09b27ecd44bad24ab"},"native/tests/hybrid-protocol.test.cjs":{"before":"74d57d03d9172531fc0533c512162ea52267c86bca43842db55a5a0c96df84fc","after":"10650b3272dfe328ec2e01085ace85ef078a7bc871c76bff12fa364aa61bd3f9"},"native/tests/pwa-logout-regression.test.cjs":{"before":"67597afbc497ebc0ff3ca3ca983bb61df1be1c8a394b819edbc6ddaed6c1cd9a","after":"b42b16a7534d3acfee23aa5b6b1184630d7997e7a2955d12e6f6c1dce3adc7fa"},"native/tests/source-lock.test.cjs":{"before":"c8c2965a9239ffe6091866d043bce4f6c45dfa0dc3ffb6f5d7292058e61b4fa9","after":"8f2aa61d5229fa443a36d0d380864770ea3a74d87bf8d06346e187bcf19834d5"},"native/tests/sticker-offline-cache-20261117.test.cjs":{"before":"d66392d69489dc13632ffaa76c22468109fa9e84b995a28d392fafc2a947233a","after":"bef57b6287c9d5b5ff37ae8210afbe2e61ffa12ab3067aa81d78a7e288aae889"},"native/web/app/page.tsx":{"before":"369988a7267f79ed80e68e451c676f0d14a9e95ec7dfe004074dd0731ff7d07d","after":"ed42f666b8d95651880d242b708948a128ac1fb98a76372e2ccf6ae68190796f"},"native/web/components/ConnectMusicSystem.tsx":{"before":"81860e92f68b78a2b0ada837712267815d6b8048249dd5aaa1b3c0459b3022bd","after":"562614f44150f0e97203809a6bd28588f59492de95daf86135fa976ec832055d"},"native/web/components/ConnectProfileMedia.tsx":{"before":"5cb2ec10462e6069477480b4c4a5e123ef8144d257916d5eb921fcdc6f5a5073","after":"1036c5339edb27dcb1430424613ef2d939974365b58a909ae3853b14b1610082"},"native/web/lib/chat-media-presentation.ts":{"before":"b3c170d39d5556b278c9c5fc15f2fbe0a36485e12291891edb8259c95b3bc40a","after":"0a7a58a100af5cbee1dff52d1ffd12e4480284654f7174fd48c4c3a65fc8247f"},"native/web/lib/media-cache.ts":{"before":"1af6172080ed3a96bfd8d4ef087cf473ee0e917ee586d65f698dfdbef7cfde29","after":"1853a81b9c8623fd311d348a95e3a5eca7b3a8f1b4d3a0aed5671568a1e96109"},"native/web/lib/profile-media-index.ts":{"before":"6b8ae45321b4bdb432c8df926354794819f6df4b749f36e224667904280ed55f","after":"09f41402833305d2793b4e03e685e045ef029fb02eb9c50d66d5ce5c4ff62261"}}'
+  CONNECT_MEDIA_GUARDS: '{"native/package.json":"19003b4949fa9b24067ed0dffaf64cf2f68da45c72d17808cf1898862c27509f","native/package-lock.json":"4441e0d62a9b4d8a3e10df56dfda52533fe5e7f2f625405f01a65605a7a8cfdb","native/tsconfig.json":"da1786c105d1877b8a2a8c10827220d2bd4a8c1cd47e720c2e764dfb737ebaa5","native/app.json":"8961fcfa0d6766bc17ddf803c29dc7f1fe96bc850727e84188b6511dc41390b4","native/web/tsconfig.json":"e353b30d4833ff1c145dfb54594f9517e9b3777d776b84c955c49e24775e04a4","native/web/vite.config.ts":"4b3dc10a049b2e7f8e8a3bb0b87ba8a9b005d2553e84958c928baea6d8fdf239","native/scripts/check-parity-source.mjs":"254f27e8fab3c26641a563435e29c21a21677ee780d9a10cf9ba89bcb0ba4718","native/scripts/release/config.mjs":"450c3a2021d1a63a03d7c19d73d230c07f0576f48783025daa2632dbb19e6f4d","native/scripts/release/validate.mjs":"23f7a88255dec86aa8174bf2d0b08c03a65a748b13f8bf971eee7b97bd269c5d","native/scripts/check_release_signing.py":"942d690c417acab5d0776379b2312e90e7c733a6fb4a32ebaa40803a77fe4cbf"}'
+  CONNECT_MEDIA_PATCH_000: |2
+    diff --git a/native/PARITY_SOURCE_LOCK.json b/native/PARITY_SOURCE_LOCK.json
+    index 865b794..f2997be 100644
+    --- a/native/PARITY_SOURCE_LOCK.json
+    +++ b/native/PARITY_SOURCE_LOCK.json
+    @@ -1,6 +1,6 @@
+     {
+       "androidBaseSha": "169681ee308b01799f2cf9df15a99e76f9dad56a",
+    -  "pwaSha": "9b4062cfd96faed8931cc2432ee9326b4c883ac2",
+    +  "pwaSha": "e1ee094860111e1fa5be8397bb63352535b61577",
+       "androidTools": {
+         "compileSdk": "37",
+         "sdkPlatform": "platforms;android-37.0",
+    @@ -8,7 +8,6 @@
+         "ndk": "27.1.12297006"
+       },
+       "files": {
+    -    "../.github/workflows/connect-android-parity-notifications-final.yml": "eb5c05df2db840a15b878177db09c097780118b068a229078dbce6381df43c0b",
+         ".env.example": "953ced803b9459769981a57149179eb76d7a534962d79c13083cbdb7f70735c9",
+         ".gitignore": "3497960610dc26a28030a0ccc34113e19f6d0a05554d53f5fa408494ae070888",
+         "app.json": "8961fcfa0d6766bc17ddf803c29dc7f1fe96bc850727e84188b6511dc41390b4",
+    @@ -27,12 +26,12 @@
+         "index.js": "f829508f1b848d7c5c8fe2a03da381b8e0f96a209aefba8a3844deeb3f3603a0",
+         "package-lock.json": "4441e0d62a9b4d8a3e10df56dfda52533fe5e7f2f625405f01a65605a7a8cfdb",
+         "package.json": "19003b4949fa9b24067ed0dffaf64cf2f68da45c72d17808cf1898862c27509f",
+    -    "plugins/files/ConnectFilesModule.kt": "9d1b796460b934e921eb7b1968306db9a0ccdd1c8206c54b33cc2f696e5d1543",
+    +    "plugins/files/ConnectFilesModule.kt": "bb11a04689ef83efc981636dadaef27a52ba8b7d39ca344ca4a4d3bedee9d20e",
+         "plugins/files/ConnectFilesPackage.kt": "70979cb3622f5295a45b33b13cdb4f4674470de6716d9ad67e9d19b27cc94cbe",
+    -    "plugins/history-tests/HistoryStoreTest.kt": "d0ab8168f2f09fa5823fe769558af2bf7bf74ed6dc4264680ff2e1d47e4c408c",
+    +    "plugins/history-tests/HistoryStoreTest.kt": "80bb56e4586ff5ff5255d7c659bd72fad003e9ef5afecba772aabb34c73b941d",
+         "plugins/history/ConnectHistoryModule.kt": "3c3a5a22af8923aaa3a4fdb75ff2f229c498987a85c78b155e1a6ded67802f00",
+         "plugins/history/HistoryCatalogPolicy.kt": "f13584cdf50adfab6de68a6d11c8081c132f07e53283a43400bb5712ac12df4f",
+    -    "plugins/history/HistoryStore.kt": "bba34bed21fd67ff86ccee769ade14f7448e5ca2df9205272d9567817a93349d",
+    +    "plugins/history/HistoryStore.kt": "0207cafc32d64ab73cad6f5dfe210f6f16375cb47c8b34a9fbe67dc6584b612a",
+         "plugins/launcher-icons/drawable-nodpi/connect_launcher_v303_bg.png": "4c57c68bebf3da50d1156a6b19200ce28a594ae92e4aeb922a2e52d4a47fc805",
+         "plugins/launcher-icons/drawable-nodpi/connect_launcher_v303_fg.png": "53692da576317f7377e364e86b7d2948c3255a5cc33e1449f23608738d556ed8",
+         "plugins/launcher-icons/drawable-nodpi/ic_launcher_background.png": "4c57c68bebf3da50d1156a6b19200ce28a594ae92e4aeb922a2e52d4a47fc805",
+    @@ -99,7 +98,7 @@
+         "plugins/waveform/ConnectWaveformPackage.java": "ba57a6231f6de93f2c93395daba4ba1e784f4c6603782cf0a2e6460f5ae91efd",
+         "plugins/withConnectAndroidCompatibility.js": "42972eaf735d8c2919fefe076e2fda5008d40165741b9db6b0b1a3e9da7c98c7",
+         "plugins/withConnectBuiltinSounds.js": "296fb802a5f67ec76db8982b0d938db514f6abd97335d24de610a832b27f6cec",
+    -    "plugins/withConnectFiles.js": "cee20beb741889a9ccd7be106e645375ea0773bea665c2ceb104614ce55470d9",
+    +    "plugins/withConnectFiles.js": "e92294439a9c0eb7b449eb2e3d3edc0fd3547f01aa674114b4562e3490c64870",
+         "plugins/withConnectHistory.js": "148408810bee4cd0431bb18dc3a2496ed66e6c1269707094663b2b92a6ab1b0f",
+         "plugins/withConnectKeyboard.js": "adb88116ee013eec8c5c5924ed568c8b42ebb2fd73e015d77d8231de4a3e1573",
+         "plugins/withConnectLauncherIcons.js": "540d9d9dbd679b35ca5fcbafb1e55e43ab765b2da4a05f75ac4ef27ca94c83cf",
+    @@ -107,7 +106,7 @@
+         "plugins/withConnectSounds.js": "5b8372442f7c9a867b111c007a46fe4ff051bb00538d40f5d22dfb09a693912b",
+         "plugins/withConnectTelecom.js": "75b2d0ef8c95d21160fa0c444d192955966523965279762aac3c21d85c925969",
+         "plugins/withConnectWaveform.js": "07d6c578dba1e02dc04529d7f2856150d522762f934424f980cf2470809ad9fa",
+    -    "plugins/withConnectWebAssets.js": "7626c785bd73988ecb8f6249bb16895b779bdec42db14edec0e932f02d1c1ecc",
+    +    "plugins/withConnectWebAssets.js": "fb7374333621ea5ec24e0649cf4cda1371c07365bd73c105bab291c736414c88",
+         "scripts/check-parity-source.mjs": "254f27e8fab3c26641a563435e29c21a21677ee780d9a10cf9ba89bcb0ba4718",
+         "scripts/check_release_signing.py": "942d690c417acab5d0776379b2312e90e7c733a6fb4a32ebaa40803a77fe4cbf",
+         "scripts/embed-web.mjs": "948f184c341821bf5e3667b819abb25829d8060ec7cea034fa7af3af9699a92c",
+    @@ -119,7 +118,7 @@
+         "scripts/verify-call-resources.py": "cfe785d9a7692eb39abe251fc10b02301f1a345c5695dfb5ffbe8af652628980",
+         "shared/call-missed-fixtures.tsv": "0709375ba37a6302c2ce6b3dbf8abc9d82ec1be20ea9b806c076a1ecf8fb6a00",
+         "shared/call-missed-policy.json": "5289083182fbbb93de4cbd9d9987dac0ecfb21b86339468f09d25a2dd41122a8",
+    -    "src/App.tsx": "a6db2eb098d90b7279c0d73dc296f972c08d26593822794323018c36b29a2fbe",
+    +    "src/App.tsx": "422baf649243e32ecc75170c5e7950e4b0b1320c6a1494e8025ac0dad26ace53",
+         "src/ConnectHybridFiles.ts": "d18520aeba19011df591489da0fd9aff068d8d1f0eb9161671ccdf13a40237bc",
+         "src/ConnectHybridRecorder.tsx": "277c5bf7bc244ae46d210609d3c450cefc991a3f7c2d6500b7facd41c8445c74",
+         "src/ConnectNativeAlbum.tsx": "64f6603bfd13b0993f19085c101d09be8cc4b013f9669430402466eebd21b9b7",
+    @@ -156,7 +155,7 @@
+         "src/call-journal.ts": "5e2e41b75340de126281df21eced7c7143c8bcc4080b3c35a8551b9aa681ecd3",
+         "src/call-missed.ts": "446b5ba2322135d7685e57d0fa5adb5ece29978c1fb900730d51286c09cde520",
+         "src/hybridMigration.ts": "12fe6b2c80300d9210f4ca679aef040afa0012e142dec38031290e65fdfa1be9",
+    -    "src/hybridProtocol.ts": "b29cbee384258dfc91de2d858c31f894f4201798c71ce372d40ebfa31dac97f9",
+    +    "src/hybridProtocol.ts": "1d5e1dc855749b4295dd4eca5f1d10befb21a1842c07e3d603297a6029de4756",
+         "src/nativeAppUtils.ts": "da6d42c3b2041a19abb8527ebbeda2bc913f60f656530b597768b86f83c9248f",
+         "src/nativeColorUtils.ts": "793dbc2419216e7ca5ba202f17b514967eb52553921ab470f4ed12c7afdd3c5c",
+         "src/nativeMediaPreview.ts": "e35a3bfa73ecee52f2018d91c6aac6c3af9e4322ff3f56accfa876993620316a",
+    @@ -165,7 +164,7 @@
+         "src/theme.ts": "741e153f30f4b0e89c79fc2a11e19824572eb92c405d324ec1fc4459e5eee743",
+         "tests/android-compatibility.test.cjs": "126f706e6c7c4b24966cdf78f56be5c81546b7e1ad3b0c915b68e2f57993734e",
+         "tests/app-utils.test.cjs": "94549ead346d3535f3234ba34da1a19b491181e0c3385565e814f321b5d8c140",
+    -    "tests/browser-cache.tsx": "828bbc9f366bcb83dcb53ba80bf807afedf524c0ea1edf5c785c242ec5969880",
+    +    "tests/browser-cache.tsx": "4d243241e90ed5208c934f05892a801b729a51e4bd882bf09b27ecd44bad24ab",
+         "tests/call-bridge-timeout.test.cjs": "7410dfac83c1b85f5bd4ef14b6aae83be4eb8ad2627dce92dfb7cbcb6a25c976",
+         "tests/call-history-status.test.cjs": "f8449f7fcee49751efae6460ffb6c5424284839d8b6f7a027773f5b2f422732a",
+         "tests/call-runtime.test.cjs": "938f18341c0e28cb497e57ab7e6a5c2941158561608f83063493601697476dde",
+    @@ -175,7 +174,7 @@
+         "tests/export-chats.test.cjs": "4a52afc235a0baca0221801633c815ad7452b010532a777884ef98a3f576a8c6",
+         "tests/glass-panel.test.cjs": "d5055435f2dbb4f53c9f60865a6dfc17a2ecccbd23e7e10cf23ecbf24103716b",
+         "tests/hybrid-migration.test.cjs": "2972a7d6aa42ed11b3f800e8906b0d6673f374408b4b2de15dd96234ae576383",
+    -    "tests/hybrid-protocol.test.cjs": "74d57d03d9172531fc0533c512162ea52267c86bca43842db55a5a0c96df84fc",
+    +    "tests/hybrid-protocol.test.cjs": "10650b3272dfe328ec2e01085ace85ef078a7bc871c76bff12fa364aa61bd3f9",
+         "tests/inbox-delivery.test.cjs": "8477630edab7874b6b3766e9ebd25021519e859788a93ec01278fd50a8fbb9a9",
+         "tests/keyboard-icons.test.cjs": "ab57cb9ea76dbf11b15c7cf57a1d06e45eead58b9b1acd779324143685eff93d",
+         "tests/missed-policy.test.cjs": "c2aa39a79d0cfb26530a594132fdac255c3b4a09165943b0cbc385f33fc871bd",
+    @@ -189,7 +188,7 @@
+         "tests/recorder-permission.test.cjs": "22019eee251648f02867a9349c19a94980c502a003e78365a2276f6d5b20b070",
+         "tests/release-config.test.cjs": "5f5e03d4956e1894e68e08a1cddf5cf4b769331b5ea4f8da60eb5e488b168eeb",
+         "tests/scenes.test.cjs": "ec7961dc196453a802e88f23128f70169f946ed1b11deee2ea4b955a91b01ba7",
+    -    "tests/source-lock.test.cjs": "c8c2965a9239ffe6091866d043bce4f6c45dfa0dc3ffb6f5d7292058e61b4fa9",
+    +    "tests/source-lock.test.cjs": "8f2aa61d5229fa443a36d0d380864770ea3a74d87bf8d06346e187bcf19834d5",
+         "tests/telecom-race.test.cjs": "29b29903479e705ae8d4b197abf034965590c7ffbe8a6e2794c0ed62142d61b5",
+         "tests/voice-controller.test.cjs": "7f8c31297007b8e9b6c734a7e81df2b614cba5c107c9487f442907bcdde829f6",
+         "tests/waveform.test.cjs": "0156ed9629aaf011ebd325dd3046f4847a6c2e2fb5353fa6e7f5771c7169b7af",
+    @@ -204,7 +203,7 @@
+         "web/app/globals.css": "29c312acbcda32fdd4fff3eba85ac68383f5ae9c4fc450332896a6f09f5845cc",
+         "web/app/liquid-glass.css": "9c09c1f49fcbcd4bc66735da0fa4cbd289d58914fe33459017e920b7ead31871",
+         "web/app/music-system.css": "785aa2a3f387ea0fe71892549dd1fec493b5c0f37f642e3079828889d7f3e367",
+    -    "web/app/page.tsx": "369988a7267f79ed80e68e451c676f0d14a9e95ec7dfe004074dd0731ff7d07d",
+    +    "web/app/page.tsx": "ed42f666b8d95651880d242b708948a128ac1fb98a76372e2ccf6ae68190796f",
+         "web/app/profile-media.css": "0115f2ccd489a4a362a58313e5da9921c895bbe821dc67866fb91918d79cb5e2",
+         "web/components/ConnectAudioCalls.tsx": "8424af1ec46ccbf6b6a928d6929bb98acad7b9e32c3942c3d0cd5c4f9255d015",
+         "web/components/ConnectCacheSettings.tsx": "d5e27bf0827b4e913de7663491da6e16edfd414701a7be1140297748f780f0ab",
+    @@ -214,9 +213,9 @@
+         "web/components/ConnectDynamicTheme.tsx": "ec8b82224c4e55023001757449834ecebff987baceaabfbf6925a9498b6ca2fc",
+         "web/components/ConnectGalleryViewer.tsx": "88e590923beeea881ee928b5333eb3208a3a6bb859a69913ef15942594ae7e1d",
+         "web/components/ConnectHiddenMembers.tsx": "8fddffd939046b67f82a46bb5fe257ffe9b8e8299ecbf97f02135be6b28e10cb",
+    -    "web/components/ConnectMusicSystem.tsx": "81860e92f68b78a2b0ada837712267815d6b8048249dd5aaa1b3c0459b3022bd",
+    +    "web/components/ConnectMusicSystem.tsx": "562614f44150f0e97203809a6bd28588f59492de95daf86135fa976ec832055d",
+         "web/components/ConnectNotificationSettings.tsx": "fe2db5dbff4d3bf4a149265f00292acad70f84ce35a862ee248f0035129d7838",
+    -    "web/components/ConnectProfileMedia.tsx": "5cb2ec10462e6069477480b4c4a5e123ef8144d257916d5eb921fcdc6f5a5073",
+    +    "web/components/ConnectProfileMedia.tsx": "1036c5339edb27dcb1430424613ef2d939974365b58a909ae3853b14b1610082",
+         "web/components/ConnectPushGuardian.tsx": "9556e6c438e0ef1eae4dfc260e11778075c06dd24b02f28f49d42b0754f2f8a7",
+         "web/components/ConnectRecordingBar.tsx": "4603cc7a5090d6ef18b673f948d2ad15d0981248270327a4fc5b0c1549f680c6",
+         "web/components/ConnectSonicRunner.tsx": "1fd547e56f99d39e6752acc6ca577af1cb2ee3ee7a5168a1b497587028a0b11a",
+    @@ -238,16 +237,16 @@
+         "web/lib/call-missed.ts": "6eb3e2686d5eacae4ff5d3c3d0442dc983c2e37071f0837ca9198bf755dc015b",
+         "web/lib/chat-activity.ts": "0f769360793b063e36b027b91bea7af58d21eec01d148400ba2503735a7bdac8",
+         "web/lib/chat-history-cache.ts": "93ba2b3d55925ae517da14d732a6daa930bdd2f1a98bd823e8473e208bbf3b89",
+    -    "web/lib/chat-media-presentation.ts": "b3c170d39d5556b278c9c5fc15f2fbe0a36485e12291891edb8259c95b3bc40a",
+    +    "web/lib/chat-media-presentation.ts": "0a7a58a100af5cbee1dff52d1ffd12e4480284654f7174fd48c4c3a65fc8247f",
+         "web/lib/chat-order.ts": "a090f501035c9d1c6be1d2ca864f42ea5bb76cb9f85f9412a164b81f080f5bf2",
+         "web/lib/chat-thumbnails.ts": "50266aec64c798da498c85db3d556929cdd82e83762fdc9a1df760a240aa048a",
+         "web/lib/connect-call-output.ts": "29fff41a11d2736f441d699637e3c392f65ddc8147e0b30a36f326d155ebdc9b",
+         "web/lib/connect-media-optimizer.ts": "af1e737f7954e455402e72b902a0bbe6b6db104283a052964731013e0441ee29",
+         "web/lib/connect-push-repair.ts": "f0db214eda5f1fa2f15302ac3a56de2c53d50e85dec3fa018a7b75582d8807ff",
+    -    "web/lib/media-cache.ts": "1af6172080ed3a96bfd8d4ef087cf473ee0e917ee586d65f698dfdbef7cfde29",
+    +    "web/lib/media-cache.ts": "1853a81b9c8623fd311d348a95e3a5eca7b3a8f1b4d3a0aed5671568a1e96109",
+         "web/lib/native-catalog.ts": "a28352c726a4af6ddd445fb03d9e00aa7962e312d457fd0f3e264a5d73a6b39b",
+         "web/lib/olm-engine.ts": "ebfc713db1a691bc136408e8468c0444d14fced4e3c36766e07f09b55f2ab68d",
+    -    "web/lib/profile-media-index.ts": "6b8ae45321b4bdb432c8df926354794819f6df4b749f36e224667904280ed55f",
+    +    "web/lib/profile-media-index.ts": "09f41402833305d2793b4e03e685e045ef029fb02eb9c50d66d5ce5c4ff62261",
+         "web/lib/profile-thumbnails.ts": "8f74ebd3217de9d807f65c2e507857a0c8201ec5386df42cb901086ab53e8e67",
+         "web/lib/secure-vault.ts": "45266bf7cd5111e083bd96e284ebd25dfda36356074339f3376a5e97edaad5ad",
+         "web/lib/sticker-webp-transport.ts": "e82279c063bd3c7813c68f7a696246b2fbfc1302f959ad91dcbc82bedfde0c87",
+    @@ -379,8 +378,8 @@
+         "tests/android-ui-polish.test.cjs": "5489436a915639490abb2ce27cb88f1e9151d42232c8fea41fc363b332b95ca3",
+         "tests/android-nav-journal-parity.test.cjs": "44326c10dc8cf2a8999eb2e52629fcb9ffff4633e61946edd1dd12be359a8a1e",
+         "web/lib/avatar-directory-cache.ts": "4216e0f6ea2e30470509f9c0d5050f80eb6595b59eb3a512f51d50cb193fdd4b",
+    -    "tests/android-media-egress.test.cjs": "fc4aa5cf7fb3409d58c99f9681fa01e813687699870cbc15fab209dd04d179fe",
+    -    "tests/android-incoming-waveform.test.cjs": "89e46bd39844e870787560bb5c634641a6d2248a15c90d1528385c11c323a604",
+    +    "tests/android-media-egress.test.cjs": "6654be5c207fd2eeb2c7d437fb5a7ca01b4ec240fd721aa3d6eb187c6e2e6c0e",
+    +    "tests/android-incoming-waveform.test.cjs": "61859f0cd3b55152dcbb573fef6fb10d7af1ade31af6574ae40d4166377b8277",
+         "web/components/ConnectOtaSettings.tsx": "89d3c2220e2f8dee9afc81726d5da2fa256521c7d53f8ee363de9aa74ce013ef",
+         "tests/connect-ota-about-20261117.test.cjs": "d09292ab8044fc4f515d6478129aaa00daffa7fc0c8db67f68e5274e108bde7f",
+         "src/ConnectApkUpdates.ts": "4be722db05c1ddf843eb80bee0696518a194bc991d196ceee2b78b89fc9fdda3",
+    @@ -391,8 +390,8 @@
+         "web/app/admin-usage.css": "912b17a2660b8c2d672b8c429662c0ea9c54ecb045890905b85ea98fd796e782",
+         "web/components/ConnectAdminUsage.tsx": "0a89f551a04254d5d3ec3fdfb4613289b2b6ce8b08caefa0238e3bb6d0fc6a9f",
+         "web/lib/settings-menu-groups.ts": "22618e2350d396bb68ba78a172b3632446dc6b528361b8dbc81de0c94112408e",
+    -    "tests/sticker-offline-cache-20261117.test.cjs": "d66392d69489dc13632ffaa76c22468109fa9e84b995a28d392fafc2a947233a",
+    -    "tests/pwa-logout-regression.test.cjs": "67597afbc497ebc0ff3ca3ca983bb61df1be1c8a394b819edbc6ddaed6c1cd9a",
+    +    "tests/sticker-offline-cache-20261117.test.cjs": "bef57b6287c9d5b5ff37ae8210afbe2e61ffa12ab3067aa81d78a7e288aae889",
+    +    "tests/pwa-logout-regression.test.cjs": "b42b16a7534d3acfee23aa5b6b1184630d7997e7a2955d12e6f6c1dce3adc7fa",
+         "tests/installed-identity.test.cjs": "1aae6136012ac9de1879c25f1d1935c3cf65a5bdf96b7fcf4995df77c78af215",
+         "tests/connect-ota-config-20261117.test.cjs": "2e71209d259e1d75b55bfabf7211914d2d900eb74f3a63664931ba1167138247",
+         "tests/native-logout-fence.test.cjs": "35c340aa22bb38b40646e6020715d285d907e3a2d0002a00be969f322beb4979",
+    diff --git a/native/plugins/files/ConnectFilesModule.kt b/native/plugins/files/ConnectFilesModule.kt
+    index 6572438..5e64c7f 100644
+    --- a/native/plugins/files/ConnectFilesModule.kt
+    +++ b/native/plugins/files/ConnectFilesModule.kt
+    @@ -23,6 +23,14 @@ import java.util.concurrent.RejectedExecutionException
+     /** User-selected SAF destinations; JavaScript receives opaque IDs, never URIs. */
+     class ConnectFilesModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
+       companion object {
+    +    @Volatile private var media:ConnectMediaStore?=null
+    +    private fun media(context:android.content.Context):ConnectMediaStore=media?:synchronized(this){media?:ConnectMediaStore(java.io.File(context.applicationContext.filesDir,"connect-media-cache-v1"),ConnectCallSession.BASE){ConnectCallSession.epoch}.also{media=it}}
+  CONNECT_MEDIA_PATCH_001: |2
+    +    @JvmStatic fun interceptMedia(context:android.content.Context,request:android.webkit.WebResourceRequest):android.webkit.WebResourceResponse?{
+    +      if(request.isForMainFrame||request.method!="GET")return null
+    +      val reply=media(context).open(request.url.toString(),request.requestHeaders)?:return null
+    +      val reason=when(reply.status){200->"OK";206->"Partial Content";403->"Forbidden";410->"Gone";416->"Range Not Satisfiable";else->"Media Unavailable"}
+    +      return android.webkit.WebResourceResponse(reply.type,null,reply.status,reason,reply.headers,reply.body)
+    +    }
+         private const val REQUEST = 24731
+         private const val MAX_BYTES = 100L * 1024 * 1024
+         private const val MAX_CHUNK = 65536
+    @@ -78,6 +86,31 @@ class ConnectFilesModule(private val context: ReactApplicationContext) : ReactCo
+         if (remove) try { DocumentsContract.deleteDocument(context.contentResolver, save.uri) } catch (_: Exception) { }
+       }
+ 
+    +  // CONNECT_MEDIA_RESPONSE_CACHE_V1: only the authenticated bundled UI can bind.
+    +  @ReactMethod fun mediaCache(owner:String,action:String,payload:String,promise:Promise)=execute(promise){
+    +    require(payload.length<=8192)
+    +    val data=org.json.JSONObject(payload);val nonce=data.getString("nonce")
+    +    require(nonce.matches(Regex("[A-Za-z0-9_-]{32,128}")))
+    +    val cache=media(context)
+    +    if(action=="unbind"){cache.unbind(nonce);promise.resolve(org.json.JSONObject().put("supported",true).put("value",true).toString());return@execute}
+    +    require(owner.matches(Regex("[a-fA-F0-9-]{36}"))&&owner==ConnectCallSession.peekOwner(context)){"Media account changed"}
+    +    val value:Any?=if(action=="bind") {cache.bind(owner,nonce,data.getLong("limitBytes"));true}else{
+    +      cache.authorize(owner,nonce)
+    +      when(action){
+    +        "lookup"->cache.lookup(data.getString("identity"),data.optString("version"))?.let{org.json.JSONObject(it)}
+    +        "clear"->{cache.clear(data.getString("category"),if(data.has("identity"))data.getString("identity")else null,data.optBoolean("retire"));true}
+    +        "revive"->{cache.revive(data.getString("identity"));true}
+    +        "stats"->org.json.JSONObject(cache.stats())
+    +        else->throw IllegalArgumentException("Unknown media cache action")
+    +      }
+    +    }
+    +    promise.resolve(org.json.JSONObject().put("supported",true).put("protocol",1).put("value",value?:org.json.JSONObject.NULL).toString())
+    +  }
+    +  @ReactMethod fun cachedMediaFile(owner:String,identity:String,promise:Promise)=execute(promise){
+    +    require(owner==ConnectCallSession.peekOwner(context)){"Media account changed"}
+    +    promise.resolve(media(context).cachedFile(owner,identity))
+    +  }
+    +
+       @ReactMethod
+       fun startSave(name: String, mime: String, promise: Promise) {
+         if (destroyed) { promise.reject("CONNECT_SAVE_CLOSED", "Приложение закрыто"); return }
+    diff --git a/native/plugins/history-tests/HistoryStoreTest.kt b/native/plugins/history-tests/HistoryStoreTest.kt
+    index b1f39ec..f2f6e0d 100644
+    --- a/native/plugins/history-tests/HistoryStoreTest.kt
+    +++ b/native/plugins/history-tests/HistoryStoreTest.kt
+    @@ -98,3 +98,93 @@ class HistoryStoreTest{
+         }
+ 
+     }
+    +
+    +// CONNECT_MEDIA_RESPONSE_CACHE_V1: real HTTP, disk, seeking and account fencing.
+    +private class MediaHttpFixture:java.io.Closeable {
+    +    val server=com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1",0),0)
+    +    val origin="http://127.0.0.1:${server.address.port}"
+    +    val hits=java.util.Collections.synchronizedList(mutableListOf<Pair<String,Long>>())
+    +    val data=java.util.concurrent.ConcurrentHashMap<String,ByteArray>()
+    +    @Volatile var tag="\"one\""
+    +    @Volatile var unavailable=false
+    +    @Volatile var truncate=false
+    +    private val pool=java.util.concurrent.Executors.newCachedThreadPool()
+    +    init{server.executor=pool;server.createContext("/"){exchange->
+    +        val value=data[exchange.requestURI.path]
+    +        if(unavailable||value==null){exchange.sendResponseHeaders(503,-1);exchange.close()}else{
+    +            var start=0L;var end=value.size.toLong()-1;var status=200
+    +            val raw=exchange.requestHeaders.getFirst("Range");val condition=exchange.requestHeaders.getFirst("If-Range")
+    +            if(raw!=null&&(condition==null||condition==tag)){
+    +                val match=Regex("bytes=(\\d*)-(\\d*)").matchEntire(raw)
+    +                if(match!=null){val a=match.groupValues[1];val b=match.groupValues[2];start=if(a.isEmpty())maxOf(0,value.size-b.toLong())else a.toLong();end=if(a.isEmpty()||b.isEmpty())value.size.toLong()-1 else minOf(value.size.toLong()-1,b.toLong());status=206}
+    +            }
+    +            val size=end-start+1;hits.add(raw.orEmpty() to size)
+    +            exchange.responseHeaders.add("ETag",tag);exchange.responseHeaders.add("Accept-Ranges","bytes");exchange.responseHeaders.add("Content-Type",if(exchange.requestURI.path.endsWith(".png"))"image/png" else if(exchange.requestURI.path.endsWith(".m4a"))"audio/mp4" else "video/mp4")
+    +            if(status==206)exchange.responseHeaders.add("Content-Range","bytes $start-$end/${value.size}")
+    +            exchange.sendResponseHeaders(status,size+if(truncate)7 else 0)
+    +            try{exchange.responseBody.use{it.write(value,start.toInt(),size.toInt())}}catch(_:java.io.IOException){}finally{exchange.close()}
+    +        }
+    +    };server.start()}
+    +    fun add(name:String,size:Int=512*1024):ByteArray{val bytes=ByteArray(size){(it*31).toByte()};data["/supabase/storage/v1/object/sign/connect-attachments/$name"]=bytes;return bytes}
+    +    fun url(name:String,nonce:String,token:String="first")="$origin/supabase/storage/v1/object/sign/connect-attachments/$name?token=$token&__cm=$nonce"
+    +    override fun close(){server.stop(0);pool.shutdownNow()}
+    +}
+    +class MediaResponseCacheTest {
+    +    private val nonce="0123456789abcdef0123456789abcdef"
+    +    private val next="fedcba9876543210fedcba9876543210"
+    +    private fun consume(reply:ConnectMediaReply?)=requireNotNull(reply).body.use{it.readBytes()}
+    +    private fun fixture(body:(ConnectMediaStore,MediaHttpFixture,java.io.File,java.util.concurrent.atomic.AtomicInteger)->Unit){
+    +        val folder=Files.createTempDirectory("connect-media-test-").toFile();val epoch=java.util.concurrent.atomic.AtomicInteger(1)
+    +        MediaHttpFixture().use{http->try{val cache=ConnectMediaStore(folder,http.origin,{epoch.get()});cache.bind("alice",nonce,500L*1024*1024);body(cache,http,folder,epoch)}finally{folder.deleteRecursively()}}
+    +    }
+    +    @Test fun firstBodyAndOneHundredOfflinePhotoReopensUseOneGet()=fixture{cache,http,_,_->
+    +        val data=http.add("photo.png",5*1024*1024);assertArrayEquals(data,consume(cache.open(http.url("photo.png",nonce))));assertEquals(1,http.hits.size);assertNotNull(cache.lookup("connect-attachments/photo.png"));http.unavailable=true
+    +        repeat(100){assertArrayEquals(data,consume(cache.open(http.url("photo.png",nonce,"expired-$it"))))};assertEquals(1,http.hits.size)
+    +    }
+    +    @Test fun voiceAudioAndVideoRangesNeverRepeatSavedBytesAndBecomeFullyOffline()=fixture{cache,http,_,_->
+    +        for(name in listOf("voice.m4a","audio.m4a","video.mp4","circle.mp4")){
+    +            http.hits.clear();val data=http.add(name);val url=http.url(name,nonce)
+    +            assertArrayEquals(data.copyOfRange(0,1024),consume(cache.open(url,mapOf("Range" to "bytes=0-1023"))));assertNull(cache.lookup("connect-attachments/$name"))
+    +            repeat(20){assertArrayEquals(data.copyOfRange(0,1024),consume(cache.open(url,mapOf("Range" to "bytes=0-1023"))))};assertEquals(1,http.hits.size)
+    +            assertArrayEquals(data.copyOfRange(65536,66560),consume(cache.open(url,mapOf("Range" to "bytes=65536-66559"))))
+    +            assertArrayEquals(data,consume(cache.open(url,mapOf("Range" to "bytes=0-"))));assertNotNull(cache.lookup("connect-attachments/$name"))
+    +            assertEquals(data.size.toLong(),http.hits.sumOf{it.second});assertTrue(http.hits.all{it.first.isNotEmpty()})
+    +            val before=http.hits.size;http.unavailable=true
+    +            assertArrayEquals(data.copyOfRange(data.size-2048,data.size),consume(cache.open(url,mapOf("Range" to "bytes=-2048"))))
+    +            assertArrayEquals(data,consume(cache.open(url)));assertEquals(416,cache.open(url,mapOf("Range" to "bytes=999999999-"))!!.status);assertEquals(before,http.hits.size);http.unavailable=false
+    +        }
+    +    }
+    +    @Test fun partialOrTruncatedFilesAreNeverAdvertisedAsComplete()=fixture{cache,http,_,_->
+    +        val data=http.add("partial.mp4");val url=http.url("partial.mp4",nonce)
+    +        consume(cache.open(url,mapOf("Range" to "bytes=0-1023")));assertNull(cache.lookup("connect-attachments/partial.mp4"));http.unavailable=true
+    +        assertEquals(503,cache.open(url,mapOf("Range" to "bytes=0-"))!!.status);assertNull(cache.lookup("connect-attachments/partial.mp4"));http.unavailable=false
+    +        http.add("truncated.png",4096);http.truncate=true
+    +        try{consume(cache.open(http.url("truncated.png",nonce)));fail("truncated response accepted")}catch(_:java.io.IOException){}
+    +        assertNull(cache.lookup("connect-attachments/truncated.png"));assertEquals(data.size,512*1024)
+    +    }
+    +    @Test fun changedEtagsCannotSpliceOldAndNewRepresentations()=fixture{cache,http,_,_->
+    +        val original=http.add("version.mp4");val url=http.url("version.mp4",nonce)
+    +        consume(cache.open(url,mapOf("Range" to "bytes=0-1023")));http.tag="\"two\"";val replacement=original.map{(it.toInt() xor 85).toByte()}.toByteArray();http.data["/supabase/storage/v1/object/sign/connect-attachments/version.mp4"]=replacement
+    +        assertArrayEquals(replacement,consume(cache.open(url,mapOf("Range" to "bytes=0-"))));assertArrayEquals(replacement,consume(cache.open(url)));assertNotNull(cache.lookup("connect-attachments/version.mp4"))
+    +    }
+    +    @Test fun clearRetireAndVersionChangesInvalidateOnlyTheIntendedFile()=fixture{cache,http,_,_->
+    +        val one=http.add("one.png",4096);val two=http.add("two.png",4096);consume(cache.open(http.url("one.png",nonce)))
+    +        val pending=cache.open(http.url("two.png",nonce))!!
+    +        cache.clear("photos","connect-attachments/one.png",true);assertArrayEquals(two,consume(pending));assertNull(cache.lookup("connect-attachments/one.png"));assertNotNull(cache.lookup("connect-attachments/two.png"));assertEquals(410,cache.open(http.url("one.png",nonce))!!.status);cache.revive("connect-attachments/one.png");assertArrayEquals(one,consume(cache.open(http.url("one.png",nonce))))
+    +        cache.revive("connect-attachments/one.png");assertArrayEquals(one,consume(cache.open(http.url("one.png",nonce))));assertNotNull(cache.lookup("connect-attachments/one.png","v1"));assertNull(cache.lookup("connect-attachments/one.png","v2"));cache.clear("temporary");assertEquals(0L,cache.stats().values.sum())
+    +    }
+    +    @Test fun logoutAndAccountSwitchFenceOldStreamsAndPrivateCacheUrls()=fixture{cache,http,_,epoch->
+    +        val data=http.add("private.png");consume(cache.open(http.url("private.png",nonce)));http.add("pending.mp4");val pending=cache.open(http.url("pending.mp4",nonce))!!;val first=ByteArray(1024);assertEquals(1024,pending.body.read(first))
+    +        epoch.incrementAndGet();cache.bind("bob",next,500L*1024*1024)
+    +        try{pending.body.read(first);fail("old lease read after logout")}catch(_:java.io.IOException){}finally{pending.body.close()}
+    +        assertNull(cache.lookup("connect-attachments/private.png"));assertEquals(403,cache.open(http.url("private.png",nonce))!!.status)
+    +        epoch.incrementAndGet();cache.bind("alice",next,500L*1024*1024);http.unavailable=true;assertArrayEquals(data,consume(cache.open(http.url("private.png",next))));assertNull(cache.lookup("connect-attachments/pending.mp4"))
+    +    }
+    +    @Test fun simultaneousImageConsumersShareTheFirstDownload()=fixture{cache,http,_,_->
+    +        val expected=http.add("parallel.png",256*1024);val executor=java.util.concurrent.Executors.newFixedThreadPool(8);val start=java.util.concurrent.CountDownLatch(1)
+    +        try{val futures=(1..8).map{executor.submit<ByteArray>{start.await();consume(cache.open(http.url("parallel.png",nonce)))}};start.countDown();futures.forEach{assertArrayEquals(expected,it.get(20,java.util.concurrent.TimeUnit.SECONDS))};assertEquals(1,http.hits.size)}finally{executor.shutdownNow()}
+    +    }
+    +    @Test fun lookupAndIdleChatOpeningNeverStartNetworkDownloads()=fixture{cache,http,_,_->
+    +        http.add("big.mp4",2*1024*1024);repeat(100){assertNull(cache.lookup("connect-attachments/big.mp4"))};assertTrue(http.hits.isEmpty())
+    +    }
+    +}
+    diff --git a/native/plugins/history/HistoryStore.kt b/native/plugins/history/HistoryStore.kt
+    index 8ebd7c6..cf26bb0 100644
+    --- a/native/plugins/history/HistoryStore.kt
+    +++ b/native/plugins/history/HistoryStore.kt
+    @@ -134,3 +134,202 @@ internal class HistoryStore(private val db:HistoryDb,private val codec:HistoryCo
+             }
+         }
+     }
+    +
+    +// CONNECT_MEDIA_RESPONSE_CACHE_V1 — shared file/Range engine; no auth/history schema change.
+    +internal data class ConnectMediaReply(val status:Int,val type:String,val headers:Map<String,String>,val body:java.io.InputStream)
+    +internal class ConnectMediaStore(private val root:java.io.File,private val origin:String,private val sessionEpoch:()->Int){
+    +    private data class Scope(val user:String,val nonce:String,val authEpoch:Int,val serial:Long,var limit:Long)
+    +    private data class Meta(val id:String,var type:String,var tag:String,var total:Long,var complete:Boolean,var used:Long,var version:String,val ranges:MutableList<LongRange>)
+    +    private data class Lease(val scope:Scope,val id:String,val fileEpoch:Long,val categories:Map<String,Long>)
+    +    private val gate=java.lang.Object()
+    +    @Volatile private var scope:Scope?=null
+    +    private var serial=0L
+    +    private val generations=mutableMapOf<String,Long>()
+    +    private val categoryEpochs=mutableMapOf<String,Long>()
+    +    private val versions=mutableMapOf<String,String>()
+    +    private val flights=mutableMapOf<String,Int>()
+    +    private val maxFile=2L*1024*1024*1024
+    +    private fun hash(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString(""){"%02x".format(it)}
+    +    private fun folder(s:Scope)=java.io.File(root,hash(s.user)).apply{mkdirs()}
+    +    private fun path(s:Scope,id:String,suffix:String)=java.io.File(folder(s),hash(id)+suffix)
+    +    private fun key(s:Scope,id:String)=s.user+":"+id
+    +    private fun category(id:String,type:String="")=when{ id.startsWith("connect-avatars/")->"system";type.startsWith("image/")->"photos";type.startsWith("video/")||id.matches(Regex(".*[.](mp4|webm|mov)$",RegexOption.IGNORE_CASE))->"videos";type.startsWith("audio/")||id.matches(Regex(".*[.](mp3|m4a|aac|ogg|opus|wav|flac)$",RegexOption.IGNORE_CASE))->"audio";id.matches(Regex(".*[.](png|jpe?g|webp|gif|svg)$",RegexOption.IGNORE_CASE))||id.startsWith("connect-stickers/")->"photos";else->"other"}
+    +    private fun strong(tag:String)=tag.startsWith('"')&&tag.endsWith('"')&&!tag.contains('\r')&&!tag.contains('\n')&&tag.length<=512
+    +    private fun validId(id:String)=id.length in 3..4096&&id.substringBefore('/') in setOf("connect-attachments","connect-avatars","connect-stickers","connect-profile-media")&&id.split('/').none{it.isEmpty()||it=="."||it==".."}&&!id.any{it<' '||it=='\\'||it=='?'||it=='#'}
+    +    fun bind(user:String,nonce:String,limit:Long)=synchronized(gate){
+    +        require(user.length in 1..128&&nonce.matches(Regex("[A-Za-z0-9_-]{32,128}"))&&limit in 0..maxFile)
+    +        val old=scope
+    +        if(old?.user==user&&old.nonce==nonce&&old.authEpoch==sessionEpoch())old.limit=limit
+    +        else scope=Scope(user,nonce,sessionEpoch(),++serial,limit)
+    +        gate.notifyAll()
+    +    }
+    +    fun unbind(nonce:String)=synchronized(gate){if(scope?.nonce==nonce){scope=null;serial++;gate.notifyAll()}}
+    +    fun authorize(user:String,nonce:String)=synchronized(gate){val s=current();require(s.user==user&&s.nonce==nonce)}
+  CONNECT_MEDIA_PATCH_002: |2
+    +    fun cachedFile(user:String,identity:String):String?=synchronized(gate){val s=current();require(s.user==user&&validId(identity));val m=read(s,identity);if(m?.complete==true&&!path(s,identity,".retired").exists())path(s,identity,".bytes").toURI().toString()else null}
+    +    private fun current():Scope=scope?.takeIf{it.authEpoch==sessionEpoch()}?:throw java.io.IOException("Media account changed")
+    +    private fun lease(s:Scope,id:String)=Lease(s,id,generations[key(s,id)]?:0,listOf("system","photos","videos","audio","other").associateWith{categoryEpochs[s.user+":"+it]?:0})
+    +    private fun authorized(l:Lease)=scope===l.scope&&l.scope.authEpoch==sessionEpoch()
+    +    private fun valid(l:Lease,type:String="")=authorized(l)&&(generations[key(l.scope,l.id)]?:0)==l.fileEpoch&&(categoryEpochs[l.scope.user+":"+category(l.id,type)]?:0)==l.categories[category(l.id,type)]&&!path(l.scope,l.id,".retired").exists()
+    +    private fun merged(parts:List<LongRange>):MutableList<LongRange>{val out=mutableListOf<LongRange>();for(p in parts.sortedBy{it.first}){if(out.isNotEmpty()&&p.first<=out.last().last+1){val old=out.removeAt(out.lastIndex);out.add(old.first..maxOf(old.last,p.last))}else out.add(p)};return out}
+    +    private fun read(s:Scope,id:String):Meta?{
+    +        val file=path(s,id,".meta");if(!file.isFile)return null
+    +        return try{val p=java.util.Properties();file.inputStream().use{p.load(it)};val total=p.getProperty("total","-1").toLong();val spans=p.getProperty("ranges","").split(',').filter{it.isNotEmpty()}.map{val a=it.split(':');a[0].toLong()..a[1].toLong()};require(total in -1..maxFile&&spans.all{it.first>=0&&it.last>=it.first&&it.last<maxFile});val data=path(s,id,".bytes");if(!data.isFile||spans.any{it.last>=data.length()})return null;Meta(id,p.getProperty("type","application/octet-stream"),p.getProperty("tag",""),total,p.getProperty("complete")=="true",p.getProperty("used","0").toLong(),p.getProperty("version",""),merged(spans))}catch(_:Exception){null}
+    +    }
+    +    private fun save(s:Scope,m:Meta){
+    +        val p=java.util.Properties();p.setProperty("id",m.id);p.setProperty("type",m.type);p.setProperty("tag",m.tag);p.setProperty("total",m.total.toString());p.setProperty("complete",m.complete.toString());p.setProperty("used",m.used.toString());p.setProperty("version",m.version);p.setProperty("ranges",m.ranges.joinToString(","){"${it.first}:${it.last}"})
+    +        val file=path(s,m.id,".meta");val temp=java.io.File(file.path+".tmp");java.io.FileOutputStream(temp).use{p.store(it,null);it.fd.sync()};check(temp.renameTo(file)){"Cannot persist media index"}
+    +    }
+    +    private fun remove(s:Scope,id:String,retire:Boolean=false){
+    +        generations[key(s,id)]=(generations[key(s,id)]?:0)+1
+    +        listOf(".bytes",".meta",".meta.tmp").forEach{path(s,id,it).delete()}
+    +        if(retire)path(s,id,".retired").writeText("retired")
+    +    }
+    +    private fun all(s:Scope)=folder(s).listFiles().orEmpty().filter{it.name.endsWith(".meta")}.mapNotNull{file->try{val p=java.util.Properties();file.inputStream().use{p.load(it)};p.getProperty("id")?.takeIf(::validId)?.let{read(s,it)}}catch(_:Exception){null}}
+    +    private fun bytes(m:Meta)=m.ranges.sumOf{it.last-it.first+1}
+    +    private fun trim(s:Scope,keep:String){
+    +        val rows=all(s).sortedBy{it.used};var temporary=rows.filter{category(it.id,it.type)!="system"}.sumOf(::bytes);var system=rows.filter{category(it.id,it.type)=="system"}.sumOf(::bytes)
+    +        for(m in rows){if(m.id==keep||m.id.startsWith("connect-stickers/"))continue;val protected=category(m.id,m.type)=="system";if(if(protected)system<=64L*1024*1024 else temporary<=s.limit)continue;remove(s,m.id);if(protected)system-=bytes(m) else temporary-=bytes(m)}
+    +    }
+    +    fun clear(category:String,identity:String?=null,retire:Boolean=false)=synchronized(gate){
+    +        val s=current();require(category in setOf("temporary","system","photos","videos","audio","other"));if(identity!=null){require(validId(identity));remove(s,identity,retire)}else{
+    +            val affected=if(category=="temporary")listOf("photos","videos","audio","other")else listOf(category)
+    +            for(kind in affected)categoryEpochs[s.user+":"+kind]=(categoryEpochs[s.user+":"+kind]?:0)+1
+    +            all(s).filter{category(it.id,it.type) in affected}.forEach{remove(s,it.id)}
+    +        };gate.notifyAll()
+    +    }
+    +    fun revive(identity:String)=synchronized(gate){val s=current();require(validId(identity));path(s,identity,".retired").delete();Unit}
+    +    fun stats():Map<String,Long> =synchronized(gate){val s=current();val rows=all(s);listOf("system","photos","videos","audio","other").associateWith{kind->rows.filter{category(it.id,it.type)==kind}.sumOf(::bytes)}}
+    +    fun lookup(identity:String,version:String=""):Map<String,Any>?=synchronized(gate){
+    +        val s=current();require(validId(identity)&&version.length<=512)
+    +        if(version.isNotEmpty()){
+    +            val old=versions[key(s,identity)]?:read(s,identity)?.version.orEmpty();versions[key(s,identity)]=version
+    +            if(old.isNotEmpty()&&old!=version)remove(s,identity)
+    +        }
+    +        if(path(s,identity,".retired").exists())return null
+    +        val m=read(s,identity)?:return null;if(!m.complete)return null
+    +        m.used=System.currentTimeMillis();if(version.isNotEmpty())m.version=version;save(s,m)
+    +        val encoded=identity.split('/').joinToString("/"){java.net.URLEncoder.encode(it,"UTF-8").replace("+","%20")}
+    +        mapOf("complete" to true,"url" to "$origin/supabase/storage/v1/object/authenticated/$encoded?__cm=${s.nonce}&__cm_local=1","size" to m.total,"type" to m.type)
+    +    }
+    +    private fun error(status:Int,total:Long?=null)=ConnectMediaReply(status,"text/plain",buildMap{put("Cache-Control","no-store");if(total!=null)put("Content-Range","bytes */$total")},java.io.ByteArrayInputStream(byteArrayOf()))
+    +    private fun bounds(range:String?,total:Long):LongRange?{
+    +        if(range==null||range.contains(','))return 0L..(total-1)
+    +        val match=Regex("bytes=(\\d*)-(\\d*)").matchEntire(range)?:return null
+    +        val a=match.groupValues[1];val b=match.groupValues[2];if(a.isEmpty()&&b.isEmpty())return null
+    +        return try{val start=if(a.isEmpty())maxOf(0,total-b.toLong())else a.toLong();val end=if(a.isEmpty()||b.isEmpty())total-1 else minOf(total-1,b.toLong());if(start<0||start>=total||end<start)null else start..end}catch(_:Exception){null}
+    +    }
+    +    private fun response(m:Meta,range:String?,body:java.io.InputStream):ConnectMediaReply{
+    +        val span=bounds(range,m.total)?:return error(416,m.total);val partial=range!=null&&!range.contains(',');val headers=mutableMapOf("Content-Type" to m.type,"Accept-Ranges" to "bytes","Content-Length" to (span.last-span.first+1).toString(),"Cache-Control" to "private, no-store")
+    +        if(m.tag.isNotEmpty())headers["ETag"]=m.tag;if(partial)headers["Content-Range"]="bytes ${span.first}-${span.last}/${m.total}"
+    +        return ConnectMediaReply(if(partial)206 else 200,m.type,headers,body)
+    +    }
+    +    private fun covers(m:Meta,span:LongRange)=m.ranges.any{it.first<=span.first&&it.last>=span.last}
+    +    private fun local(l:Lease,m:Meta,range:String?):ConnectMediaReply{
+    +        val span=bounds(range,m.total)?:return error(416,m.total);val file=java.io.RandomAccessFile(path(l.scope,l.id,".bytes"),"r");file.seek(span.first);var left=span.last-span.first+1
+    +        val body=object:java.io.InputStream(){override fun read():Int{val one=ByteArray(1);return if(read(one,0,1)<0)-1 else one[0].toInt() and 255};override fun read(b:ByteArray,off:Int,len:Int):Int{synchronized(gate){if(!authorized(l))throw java.io.IOException("Media account changed");if(left<=0)return -1;val n=file.read(b,off,minOf(left,len.toLong()).toInt());if(n<0)throw java.io.IOException("Incomplete cached media");left-=n;return n}};override fun close(){file.close()}}
+    +        return response(m,range,body)
+    +    }
+    +    private fun clean(uri:java.net.URI):String{val query=uri.rawQuery.orEmpty().split('&').filter{it.substringBefore('=') !in setOf("__cm","__cm_local")}.filter{it.isNotEmpty()}.joinToString("&");return uri.scheme+"://"+uri.rawAuthority+uri.rawPath+(if(query.isEmpty())"" else "?$query")}
+    +    fun open(url:String,headers:Map<String,String> = emptyMap()):ConnectMediaReply?{
+    +        val uri=try{java.net.URI(url)}catch(_:Exception){return null};val base=java.net.URI(origin)
+    +        if(uri.scheme!=base.scheme||uri.host!=base.host||uri.port!=base.port||uri.rawUserInfo!=null)return null
+    +        val match=Regex(".*/storage/v1/object/(?:sign|public|authenticated)/(.+)").matchEntire(uri.path)?:return null
+    +        val id=match.groupValues[1];if(!validId(id))return null
+    +        val query=uri.rawQuery.orEmpty().split('&').associate{it.substringBefore('=') to it.substringAfter('=',"")};val cap=query["__cm"]?:return null
+    +        var range=headers.entries.find{it.key.equals("Range",true)}?.value
+    +        val localOnly=query["__cm_local"]=="1"
+    +        val s:Scope;var l:Lease;var meta:Meta?;var reserved=false
+    +        synchronized(gate){
+    +            s=try{current()}catch(_:Exception){return error(403)};if(cap!=s.nonce)return error(403);l=lease(s,id);if(!valid(l))return error(410)
+    +            meta=read(s,id)
+    +            val condition=headers.entries.find{it.key.equals("If-Range",true)}?.value
+    +            if(condition!=null&&condition!=meta?.tag)range=null
+    +            if(meta?.complete==true){meta!!.used=System.currentTimeMillis();save(s,meta!!);return local(l,meta!!,range)}
+    +            if(localOnly)return error(504)
+    +            if(meta!=null&&strong(meta!!.tag)){
+    +                val span=bounds(range,meta!!.total)?:return error(416,meta!!.total)
+    +                if(covers(meta!!,span))return local(l,meta!!,range)
+    +            }
+    +            if(category(id)!in setOf("audio","videos")&&(flights[key(s,id)]?:0)>0){
+    +                val until=System.currentTimeMillis()+20000
+    +                while((flights[key(s,id)]?:0)>0&&valid(l)&&System.currentTimeMillis()<until)gate.wait(100)
+    +                if(!valid(l))return error(403);meta=read(s,id);if(meta?.complete==true)return local(l,meta!!,range)
+    +                if((flights[key(s,id)]?:0)>0)return error(503)
+    +            }
+    +            if(category(id)!in setOf("audio","videos")){flights[key(s,id)]=(flights[key(s,id)]?:0)+1;reserved=true}
+    +        }
+    +        if(meta!=null&&strong(meta!!.tag)&&meta!!.total>0){
+    +            val span=bounds(range,meta!!.total)?:return error(416,meta!!.total)
+    +            val spans=meta!!.ranges.toList();var first=span.first
+    +            while(first<=span.last){val covered=spans.find{first in it}?:break;first=covered.last+1}
+    +            val end=minOf(span.last,spans.filter{it.first>first}.minOfOrNull{it.first-1}?:span.last)
+    +            val initial=network(clean(uri),headers,l,"bytes=$first-$end",meta!!.tag,reserved)
+    +            if(initial.status==206&&initial.headers["ETag"]==meta!!.tag){
+    +                val actualRange=initial.headers["Content-Range"].orEmpty();if(actualRange!="bytes $first-$end/${meta!!.total}"){initial.body.close();return error(502)}
+    +                var offset=span.first;var source:java.io.InputStream?=null;var sourceEnd=-1L;var initialUsed=false
+    +                val body=object:java.io.InputStream(){
+    +                    override fun read():Int{val a=ByteArray(1);return if(read(a,0,1)<0)-1 else a[0].toInt() and 255}
+    +                    override fun read(b:ByteArray,off:Int,len:Int):Int{
+    +                        if(offset>span.last)return -1
+    +                        synchronized(gate){if(!valid(l,meta!!.type))throw java.io.IOException("Media lease changed")}
+    +                        if(source==null||offset>sourceEnd){source?.close();val latest=synchronized(gate){read(s,id)?:throw java.io.IOException("Media cache cleared")};val cached=latest.ranges.find{offset in it}
+    +                            if(cached!=null){sourceEnd=minOf(cached.last,span.last);source=local(l,latest,"bytes=$offset-$sourceEnd").body}
+    +                            else{sourceEnd=minOf(span.last,latest.ranges.filter{it.first>offset}.minOfOrNull{it.first-1}?:span.last);val reply=if(!initialUsed&&offset==first){initialUsed=true;initial}else network(clean(uri),headers,l,"bytes=$offset-$sourceEnd",meta!!.tag);if(reply.status!=206||reply.headers["ETag"]!=meta!!.tag){reply.body.close();synchronized(gate){remove(s,id)};throw java.io.IOException("Media changed during playback")};source=reply.body}}
+    +                        val n=source!!.read(b,off,minOf(len.toLong(),sourceEnd-offset+1).toInt());if(n<0)throw java.io.IOException("Truncated media range");offset+=n;return n
+    +                    }
+    +                    override fun close(){source?.close();if(!initialUsed)initial.body.close()}
+    +                }
+    +                return response(meta!!,range,body)
+    +            }
+    +            // If-Range failed: forward the complete new representation, never splice versions.
+    +            return initial
+    +        }
+    +        return network(clean(uri),headers,l,range,null,reserved)
+    +    }
+    +    private fun network(url:String,headers:Map<String,String>,oldLease:Lease,range:String?,ifRange:String?,reserved:Boolean=false):ConnectMediaReply{
+    +        val s=oldLease.scope;val id=oldLease.id;var l=oldLease
+    +        synchronized(gate){if(!valid(l)){if(reserved){val n=(flights[key(s,id)]?:1)-1;if(n<=0)flights.remove(key(s,id))else flights[key(s,id)]=n;gate.notifyAll()};return error(403)};if(!reserved)flights[key(s,id)]=(flights[key(s,id)]?:0)+1}
+    +        var released=false
+    +        fun release(){synchronized(gate){if(!released){released=true;val n=(flights[key(s,id)]?:1)-1;if(n<=0)flights.remove(key(s,id))else flights[key(s,id)]=n;gate.notifyAll()}}}
+    +        val c=java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    +        try{
+    +            c.instanceFollowRedirects=false;c.connectTimeout=8000;c.readTimeout=15000;c.useCaches=false;c.setRequestProperty("Accept-Encoding","identity")
+    +            for((name,value)in headers)if(name.lowercase() in setOf("authorization","apikey","accept")&&value.length<=32768)c.setRequestProperty(name,value)
+    +            if(range!=null)c.setRequestProperty("Range",range);if(ifRange!=null)c.setRequestProperty("If-Range",ifRange)
+    +            val status=c.responseCode
+    +            val resultHeaders=mutableMapOf<String,String>();for(name in listOf("ETag","Last-Modified","Content-Range","Content-Length","Content-Disposition","Accept-Ranges","Content-Type"))c.getHeaderField(name)?.let{resultHeaders[name]=it};resultHeaders["Cache-Control"]="private, no-store"
+    +            val type=(c.contentType?:"application/octet-stream").substringBefore(';').lowercase();val stream=if(status>=400)c.errorStream?:java.io.ByteArrayInputStream(byteArrayOf()) else c.inputStream
+    +            val match=Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(c.getHeaderField("Content-Range").orEmpty());val start=if(status==206)match?.groupValues?.get(1)?.toLongOrNull()?:-1 else 0L
+    +            val expected=if(status==206)match?.let{it.groupValues[2].toLong()-start+1}?:-1 else c.getHeaderFieldLong("Content-Length",-1)
+    +            val total=if(status==206)match?.groupValues?.get(3)?.toLongOrNull()?:-1 else expected
+    +            val tag=c.getHeaderField("ETag").orEmpty();val cacheable=status in listOf(200,206)&&start>=0&&total<=minOf(maxFile,s.limit)&&!type.startsWith("text/html")&&!type.startsWith("application/json")&&(status!=206||expected>0&&total>0&&start+expected<=total)
+    +            if(!cacheable){release();val pass=object:java.io.FilterInputStream(stream){override fun close(){try{super.close()}finally{c.disconnect()}}};return ConnectMediaReply(if(status in 300..399)502 else status,type,resultHeaders,pass)}
+    +            fun uncached():ConnectMediaReply{release();return ConnectMediaReply(status,type,resultHeaders,object:java.io.FilterInputStream(stream){override fun close(){try{super.close()}finally{c.disconnect()}}})}
+    +            try{synchronized(gate){
+  CONNECT_MEDIA_PATCH_003: |2
+    +                if(!valid(l,type)){stream.close();c.disconnect();release();return error(403)}
+    +                val previous=read(s,id)
+    +                if(previous!=null&&(!strong(tag)||previous.tag!=tag||previous.total!=total))remove(s,id)
+    +                l=lease(s,id);if(read(s,id)==null)save(s,Meta(id,type,tag,total,false,System.currentTimeMillis(),versions[key(s,id)].orEmpty(),mutableListOf()))
+    +            }
+    +            }catch(_:Exception){return uncached()}
+    +            val file=try{java.io.RandomAccessFile(path(s,id,".bytes"),"rw").apply{seek(start)}}catch(_:Exception){return uncached()};var seen=0L;var committed=0L;var closed=false;var writable=true
+    +            fun checkpoint(eof:Boolean){
+    +                if(eof&&expected>=0&&seen!=expected)throw java.io.IOException("Truncated media body")
+    +                synchronized(gate){if(!writable||!valid(l,type))return
+    +                    try{val m=read(s,id)?:Meta(id,type,tag,total,false,System.currentTimeMillis(),versions[key(s,id)].orEmpty(),mutableListOf())
+    +                        if(seen>0){file.fd.sync();val spans=merged(m.ranges+listOf(start..(start+seen-1)));m.ranges.clear();m.ranges.addAll(spans);if(eof&&m.total<0)m.total=seen;m.used=System.currentTimeMillis();val coherent=strong(tag)||(start==0L&&(eof||expected>=0&&seen==expected));m.complete=coherent&&m.total>0&&m.ranges.size==1&&m.ranges[0].first==0L&&m.ranges[0].last==m.total-1;save(s,m);committed=seen;trim(s,id)}
+    +                    }catch(_:Exception){writable=false}
+    +                }
+    +            }
+    +            val body=object:java.io.InputStream(){
+    +                override fun read():Int{val a=ByteArray(1);return if(read(a,0,1)<0)-1 else a[0].toInt() and 255}
+    +                override fun read(b:ByteArray,off:Int,len:Int):Int{
+    +                    synchronized(gate){if(!authorized(l))throw java.io.IOException("Media account changed")}
+    +                    return try{val n=stream.read(b,off,len);if(n<0){checkpoint(true);close();-1}else{if(expected>=0&&seen+n>expected)throw java.io.IOException("Oversized media range");synchronized(gate){if(!authorized(l))throw java.io.IOException("Media account changed");if(!valid(l,type))writable=false;if(start+seen+n>minOf(maxFile,s.limit))writable=false;if(writable)try{file.write(b,off,n)}catch(_:Exception){writable=false};seen+=n};if(seen-committed>=256*1024||expected>=0&&seen==expected)checkpoint(false);n}}catch(e:Exception){close();throw e}
+    +                }
+    +                override fun close(){if(closed)return;closed=true;try{checkpoint(false)}finally{try{try{file.close()}catch(_:java.io.IOException){}}finally{try{stream.close()}finally{c.disconnect();release()}}}}
+    +            }
+    +            return ConnectMediaReply(status,type,resultHeaders,body)
+    +        }catch(e:Exception){c.disconnect();release();throw e}
+    +    }
+    +}
+    diff --git a/native/plugins/withConnectFiles.js b/native/plugins/withConnectFiles.js
+    index 66f0d10..34ed4ac 100644
+    --- a/native/plugins/withConnectFiles.js
+    +++ b/native/plugins/withConnectFiles.js
+    @@ -16,6 +16,9 @@ module.exports=function withConnectFiles(config){
+         fs.mkdirSync(pkg,{recursive:true});
+         for(const file of ['ConnectFilesModule.kt','ConnectFilesPackage.kt'])
+           fs.copyFileSync(path.join(__dirname,'files',file),path.join(pkg,file));
+    +    const proguard=path.join(mod.modRequest.platformProjectRoot,'app','proguard-rules.pro');
+    +    const rule='-keep class com.connect.messenger.ConnectFilesModule { public static android.webkit.WebResourceResponse interceptMedia(android.content.Context, android.webkit.WebResourceRequest); }';
+    +    const rules=fs.readFileSync(proguard,'utf8');if(!rules.includes(rule))fs.writeFileSync(proguard,rules+'\n'+rule+'\n');
+         return mod;
+       }]);
+     };
+    diff --git a/native/plugins/withConnectWebAssets.js b/native/plugins/withConnectWebAssets.js
+    index 14b3b3b..d7c004f 100644
+    --- a/native/plugins/withConnectWebAssets.js
+    +++ b/native/plugins/withConnectWebAssets.js
+    @@ -19,6 +19,20 @@ const handler=String.raw`
+         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+             android.net.Uri uri = request.getUrl();
+             if (!"appassets.androidplatform.net".equalsIgnoreCase(uri.getHost())) {
+    +            // Narrow reflection avoids an app -> WebView library dependency cycle.
+    +            if (!request.isForMainFrame() && "GET".equals(request.getMethod())
+    +                && "https://connect-chat.duckdns.org".equals(uri.getScheme() + "://" + uri.getAuthority())
+    +                && uri.getQueryParameter("__cm") != null) {
+    +                try {
+    +                    Class<?> module = Class.forName("com.connect.messenger.ConnectFilesModule");
+    +                    Object response = module.getMethod("interceptMedia", android.content.Context.class, WebResourceRequest.class)
+    +                        .invoke(null, view.getContext(), request);
+    +                    if (response instanceof WebResourceResponse) return (WebResourceResponse) response;
+    +                } catch (ReflectiveOperationException unavailable) {
+    +                    return new WebResourceResponse("text/plain", "UTF-8", 503, "Media Unavailable",
+    +                        java.util.Collections.singletonMap("Cache-Control", "no-store"), new java.io.ByteArrayInputStream(new byte[0]));
+    +                }
+    +            }
+                 return super.shouldInterceptRequest(view, request);
+             }
+             java.util.Map<String, String> headers = new java.util.HashMap<>();
+    diff --git a/native/src/App.tsx b/native/src/App.tsx
+    index 21baf40..7033d0d 100644
+    --- a/native/src/App.tsx
+    +++ b/native/src/App.tsx
+    @@ -252,11 +252,17 @@ function HybridConnect(){
+               result={message:await testNativeMessagePush(ownerId)};break;
+             }
+             case 'notification:diagnostics':if(!ownerId)throw Error('Войдите в Connect');result=await getNativePushDiagnostics();break;
+    +        case 'media:cache':{
+    +          // Native storage verifies the encrypted session owner, including cold/offline startup.
+    +          const module=NativeModules.ConnectFilesModule;
+    +          result=typeof module?.mediaCache==='function'?JSON.parse(await module.mediaCache(p.userId,p.action,JSON.stringify(p))):{supported:false};break;
+    +        }
+             case 'media:waveform':{
+               const viewer=ownerId;if(!viewer)throw Error('Войдите в Connect');
+    -          const signed=await db.storage.from('connect-attachments').createSignedUrl(p.path as string,120);
+    -          if(signed.error||!signed.data?.signedUrl)throw Error('Аудио недоступно');
+    -          result=await getAudioWaveform(mediaUrl(signed.data.signedUrl),43);
+    +          const module=NativeModules.ConnectFilesModule;
+    +          const local=typeof module?.cachedMediaFile==='function'?await module.cachedMediaFile(viewer,'connect-attachments/'+p.path):null;
+    +          if(!local)throw Error('Волна доступна после загрузки аудио');
+    +          result=await getAudioWaveform(local,43);
+               if(viewer!==ownerId)throw Error('Аккаунт изменился');break;
+             }
+             case 'calls:journal':{if(p.userId!==ownerId)throw Error('Аккаунт изменился');result=JSON.parse(await NativeModules.ConnectCallCoordinator.journal(p.userId,JSON.stringify(p)));break;}
+    diff --git a/native/src/hybridProtocol.ts b/native/src/hybridProtocol.ts
+    index 4dc886f..1d58bd3 100644
+    --- a/native/src/hybridProtocol.ts
+    +++ b/native/src/hybridProtocol.ts
+    @@ -15,7 +15,7 @@ export type HybridCommand =
+       | 'updates:info' | 'updates:check' | 'updates:download' | 'updates:apply' | 'updates:apk-check' | 'updates:apk-open'
+       | 'notification:status' | 'notification:connect' | 'notification:test'
+       | 'notification:diagnostics'
+    -  | 'media:waveform'
+    +  | 'media:waveform' | 'media:cache'
+       | 'calls:journal'
+       | 'history:catalog-retire' | 'history:catalog-read' | 'history:catalog-write' | 'history:catalog-drop'
+       | 'history:read' | 'history:page' | 'history:chunk' | 'history:write' | 'history:drop' | 'history:wipe' | 'history:stats' | 'history:limit'
+    @@ -87,6 +87,19 @@ function payloadValid(command: string, value: unknown): boolean {
+         case 'updates:info':case 'updates:check':case 'updates:download':case 'updates:apply':case 'updates:apk-check':case 'updates:apk-open':return fields(value,[]);
+         case 'notification:status':case 'notification:connect':case 'notification:test':return fields(value,[]);
+         case 'notification:diagnostics':return fields(value,[]);
+    +    case 'media:cache':{
+    +      if(!fields(value,['action','userId','nonce'],['identity','version','category','retire','limitBytes'])||!uuid(value.userId)||!text(value.nonce,128,32)||!NONCE.test(value.nonce))return false;
+    +      const common=['action','userId','nonce'];
+    +      const identity=()=>text(value.identity,4096,3)&&/^(connect-attachments|connect-avatars|connect-stickers|connect-profile-media)\//.test(value.identity)&&!(value.identity as string).split('/').some(x=>!x||x==='.'||x==='..')&&!/[?\\#\u0000-\u0020]/.test(value.identity as string);
+    +      switch(value.action){
+    +        case 'bind':return fields(value,[...common,'limitBytes'])&&Number.isSafeInteger(value.limitBytes)&&Number(value.limitBytes)>=0&&Number(value.limitBytes)<=2147483648;
+    +        case 'lookup':return fields(value,[...common,'identity'],['version'])&&identity()&&(value.version===undefined||text(value.version,512));
+    +        case 'clear':return fields(value,[...common,'category'],['identity','retire'])&&['temporary','system','photos','videos','audio','other'].includes(value.category as string)&&(value.identity===undefined||identity())&&(value.retire===undefined||typeof value.retire==='boolean');
+    +        case 'revive':return fields(value,[...common,'identity'])&&identity();
+    +        case 'stats':case 'unbind':return fields(value,common);
+    +        default:return false;
+    +      }
+    +    }
+         case 'media:waveform':return fields(value,['path'])&&text(value.path,1000,1)&&/^[a-fA-F0-9-]{36}\/[a-zA-Z0-9_./-]+$/.test(value.path as string)&&!(value.path as string).includes('..');
+         case 'calls:journal':return fields(value,['userId','action'],['rows','at'])&&uuid(value.userId)&&['state','seed','view','close','reconcile'].includes(value.action as string)&&(value.rows===undefined||Array.isArray(value.rows)&&value.rows.length<=200&&value.rows.every(r=>record(r)&&fields(r,['id','conversation_id','caller_id','callee_id','status','created_at','answered_at','ended_at'],['hidden'])&&uuid(r.id)&&uuid(r.callee_id)&&uuid(r.caller_id)&&text(r.created_at,48,20)&&text(r.status,20)&&(r.answered_at===null||text(r.answered_at,48))&&(r.ended_at===null||text(r.ended_at,48))&&(r.hidden===undefined||typeof r.hidden==='boolean')))&&(value.at===undefined||Number.isFinite(value.at));
+         case 'history:catalog-retire':return fields(value,['userId','key','path'])&&uuid(value.userId)&&text(value.key,90,1)&&/^profile:[a-fA-F0-9-]{36}:(photos|videos|music)$/.test(value.key as string)&&text(value.path,1000,1)&&!(value.path as string).includes('..')&&!/[?\\]/.test(value.path as string)&&safeCatalog(value.path);
+    diff --git a/native/tests/android-incoming-waveform.test.cjs b/native/tests/android-incoming-waveform.test.cjs
+    index e3baf7f..4d25893 100644
+    --- a/native/tests/android-incoming-waveform.test.cjs
+    +++ b/native/tests/android-incoming-waveform.test.cjs
+    @@ -66,7 +66,7 @@ test('VoicePlayer only warms visible small recordings, including incoming; no na
+      assert.match(PAGE,/CONNECT_ANDROID_INCOMING_VOICE_WAVE_CACHE_V1_20261116/);
+      assert.match(PAGE,/IntersectionObserver/);
+      assert.match(PAGE,/prewarmChatWave\(waveOwner,path,src,byteSize/);
+    - assert.match(PAGE,/prefetchChatAudio\(src,waveOwner,byteSize/);
+    + assert.doesNotMatch(PAGE,/prefetchChatAudio\(src,waveOwner,byteSize/,'waveform must reuse the played response');
+      assert.equal((PAGE.match(/<VoicePlayer\s+src=\{attachmentUrls\[m\.attachment_path\]\}\s+path=\{m\.attachment_path\}\s+byteSize=\{m\.attachment_size\|\|0\}/g)||[]).length,2);
+      assert.doesNotMatch(PAGE,/onPlay=\{\(\) => \{setPlaying\(true\);setError\(false\);setBuffering\(false\);void nativeWave\(\);\}\}/);
+     });
+    diff --git a/native/tests/android-media-egress.test.cjs b/native/tests/android-media-egress.test.cjs
+    index 05296cd..0ba9f08 100644
+    --- a/native/tests/android-media-egress.test.cjs
+    +++ b/native/tests/android-media-egress.test.cjs
+    @@ -76,7 +76,20 @@ test('native chat never silently replaces a missing JPEG preview with the full-s
+     test('Android keeps voice/video bounded and user-account media-cache identities',()=>{
+      assert.match(app,/preload="none"/);
+      assert.equal((app.match(/userPaused=useRef\(isNativeMediaRuntime\(\)\)/g)||[]).length,2,'both native inline videos and video notes must wait for an explicit tap');
+    - assert.match(app,/prefetchChatAudio\(url,viewer,meta\.attachment_size\)/);
+    + assert.doesNotMatch(app,/prefetchChatAudio\(url,viewer,meta\.attachment_size\)/,'chat entry must not prefetch voice originals');
+      assert.match(media,/cacheLeaseValid\(user,epoch\)/);
+    - assert.match(media,/id\.startsWith\('connect-avatars\/'\)\?1024\*1024:512\*1024/);
+    + assert.match(media,/if\(id\.startsWith\('connect-avatars\/'\)\)return 1024\*1024/);
+    + assert.match(media,/thumb\\.webp\|poster\\.jpg/);
+    +});
+    +
+    +test('native chat link expiry replaces once, prefers complete local files, and discards late logout/chat results',async()=>{
+    + const code=ts.transpileModule(media,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+    + const out={};new Function('exports','require',code)(out,()=>({}));
+    + let now=0,signs=0,local=null,epoch=1,release;
+    + const cache=out.createSignedMediaCache({now:()=>now,lease:()=>epoch,cached:async()=>local,sign:async()=>{signs++;return 'signed-'+signs;}});
+    + assert.equal(await cache.resolve('alice','connect-attachments','voice'),'signed-1');for(let i=0;i<100;i++)assert.equal(await cache.resolve('alice','connect-attachments','voice'),'signed-1');assert.equal(signs,1);
+    + now+=3600001;const renewed=await Promise.all([cache.resolve('alice','connect-attachments','voice'),cache.resolve('alice','connect-attachments','voice')]);assert.deepEqual(renewed,['signed-2','signed-2']);assert.equal(signs,2);
+    + local='https://connect-chat.duckdns.org/supabase/storage/v1/object/authenticated/connect-attachments/voice?__cm_local=1&__cm=capability';now+=3600001;assert.equal(await cache.resolve('alice','connect-attachments','voice'),local);assert.equal(signs,2);
+    + local=null;const late=out.createSignedMediaCache({lease:()=>epoch,cached:async()=>null,sign:()=>new Promise(r=>release=r)}).resolve('alice','connect-attachments','late');while(!release)await new Promise(r=>setImmediate(r));epoch++;release('stale');assert.equal(await late,undefined);
+    + assert.match(app,/if\(!url\|\|!current\(\)\)continue/);assert.doesNotMatch(app,/setAttachmentUrls\(prev=>prev\[path\]\?prev:/);
+     });
+    diff --git a/native/tests/browser-cache.tsx b/native/tests/browser-cache.tsx
+    index 05bfa9f..e6a0c4b 100644
+    --- a/native/tests/browser-cache.tsx
+    +++ b/native/tests/browser-cache.tsx
+    @@ -19,6 +19,7 @@ const viewer='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',peer='bbbbbbbb-bbbb-4bbb-8bb
+     const profileRetired=new Set<string>();
+     const catalogs=new Map<string,any>(),history=new Map<string,any[]>(),retired=new Set<string>();let reads=0,downloads=0;let holdRead=false,releaseRead:(()=>void)|undefined;
+     (window as any).ConnectNative={request:async(command:string,p:any)=>{
+    + if(command==='media:cache')return{supported:false};
+      if(p.userId!==activeOwner)throw Error('Account changed');
+      const key=p.userId+':'+(p.key||p.conversationId);
+      if(command==='history:catalog-read'){const saved=catalogs.get(key);return{value:saved?.items?{items:saved.items.filter((x:any)=>!profileRetired.has(p.userId+':'+x.path))}:saved||null,epoch:1};}
+    @@ -43,11 +44,11 @@ window.fetch=async(input,init)=>{
+     const signed=(path:string,token='one')=>location.origin+'/storage/v1/object/sign/connect-profile-media/'+path+'?token='+token;
+     const delay=()=>new Promise(resolve=>setTimeout(resolve,0));
+  CONNECT_MEDIA_PATCH_004: |2
+     await test('real IndexedDB reuses bytes across expiring signed URLs and honors versions',async()=>{
+    - const path=peer+'/photos/a.webp';assert(!await resolveCachedProfileFile(viewer,path,'v1'),'initial miss');
+    - await prefetchProfileFile(signed(path),viewer,'photos',2048);const count=downloads;
+    + const path=peer+'/music/a.mp3';assert(!await resolveCachedProfileFile(viewer,path,'v1'),'initial miss');
+    + await prefetchProfileFile(signed(path),viewer,'music',2048);const count=downloads;
+      const local=await resolveCachedProfileFile(viewer,path,'v1');assert(local?.startsWith('blob:'),'local object URL');
+    - await prefetchProfileFile(signed(path,'new-token'),viewer,'photos',2048);assert(downloads===count,'signed URL change downloaded twice');
+    - assert(!await resolveCachedProfileFile(viewer,path,'v2'),'stale version reused');await prefetchProfileFile(signed(path),viewer,'photos',2048);
+    + await prefetchProfileFile(signed(path,'new-token'),viewer,'music',2048);assert(downloads===count,'signed URL change downloaded twice');
+    + assert(!await resolveCachedProfileFile(viewer,path,'v2'),'stale version reused');await prefetchProfileFile(signed(path),viewer,'music',2048);
+      const fresh=await resolveCachedProfileFile(viewer,path,'v2');assert(fresh&&fresh!==local,'version did not invalidate object URL');
+     });
+     await test('streaming cap cancels oversized data even without content length',async()=>{
+    @@ -55,14 +56,14 @@ await test('streaming cap cancels oversized data even without content length',as
+      assert(await boundedMediaBody(response,1024)===null&&cancelled,'unbounded download');
+     });
+     await test('retired profile path cannot be restored by an in-flight download',async()=>{
+    - const path=peer+'/photos/pending.webp';const task=prefetchProfileFile(signed(path),viewer,'photos',2048);
+    + const path=peer+'/music/pending.mp3';const task=prefetchProfileFile(signed(path),viewer,'music',2048);
+      while(!pendingRelease)await delay();await retireCachedProfileFile(viewer,path);pendingRelease();pendingRelease=undefined;await task;
+      assert(!await resolveCachedProfileFile(viewer,path),'retired bytes resurrected');
+     });
+     await test('account change cancels pending cache writes and isolates downloaded media',async()=>{
+    - const path=peer+'/photos/pending-account.webp',task=prefetchProfileFile(signed(path),viewer,'photos',2048);
+    + const path=peer+'/music/pending-account.mp3',task=prefetchProfileFile(signed(path),viewer,'music',2048);
+      while(!pendingRelease)await delay();stop();activeOwner=other;stop=installMediaCache(other);pendingRelease();pendingRelease=undefined;await task;
+    - assert(!await resolveCachedProfileFile(other,peer+'/photos/a.webp'),'other account read bytes');
+    + assert(!await resolveCachedProfileFile(other,peer+'/music/a.mp3'),'other account read bytes');
+      stop();activeOwner=viewer;stop=installMediaCache(viewer);assert(!await resolveCachedProfileFile(viewer,path),'old download survived logout');
+     });
+     await test('SQLite catalog bridge stores stable paths only and isolates viewer and media owner',async()=>{
+    @@ -72,12 +73,12 @@ await test('SQLite catalog bridge stores stable paths only and isolates viewer a
+      for(const value of [{token:'secret'},{url:signed(row.path)},{credential:'eyJabc.payload.signature'}])assert(!safeCatalog(value),'credentials accepted');
+      activeOwner=other;assert(await readProfileLibrary(other,peer,'photos')===null,'wrong viewer catalog');activeOwner=viewer;
+     });
+    -await test('peer warmup limits three photos, one video and one track and skips oversized files',async()=>{
+    +await test('peer warmup loads metadata without downloading originals',async()=>{
+      const rows=(kind:string)=>Array.from({length:8},(_,i)=>({id:String(i),name:'budget-'+i+(kind==='music'?'.mp3':kind==='videos'?'.mp4':'.webp'),created_at:'2026-11-11T00:00:00Z',updated_at:'v1',metadata:{size:i===0?10*1024**2:1000}}));
+      let signCount=0;
+      const client:any={storage:{from:()=>({list:async(directory:string)=>({data:rows(directory.split('/')[1])}),createSignedUrls:async(paths:string[])=>{signCount+=paths.length;return{data:paths.map(path=>({path,signedUrl:signed(path)}))};}})}};
+    - await warmPeerProfileLibraries(client,viewer,peer);
+    - assert(signCount===5,'prefetch selected '+signCount+' files instead of 5');
+    + const beforeDownloads=downloads;await warmPeerProfileLibraries(client,viewer,peer);
+    + assert(signCount===0,'catalog warmup signed originals without user intent');assert(downloads===beforeDownloads,'photo/video originals downloaded during metadata warmup');
+      for(const kind of ['photos','videos','music'] as const){const selection=profilePrefetchSelection(kind,[{path:'huge',createdAt:'',size:100*1024**2}]);assert(selection.items.length===0,'large original selected');}
+     });
+     await test('hot history opens offline, deduplicates native reads and honors deletion',async()=>{
+    @@ -96,7 +97,10 @@ await test('inbox write during chunk hydration retries without losing cached his
+      assert((await loading)?.messages.length===2,'hydration discarded after concurrent inbox write');
+     });
+     await test('profile UI displays cached catalog while server list is unavailable',async()=>{
+    - const row={path:peer+'/photos/offline.webp',createdAt:'2026-11-11T00:00:00Z',size:4};await writeProfileLibrary(viewer,peer,'photos',[row]);await prefetchProfileFile(signed(row.path),viewer,'photos',2048);
+    + const row={path:peer+'/photos/offline.webp',createdAt:'2026-11-11T00:00:00Z',size:4};await writeProfileLibrary(viewer,peer,'photos',[row]);
+    + // Seed genuine existing photo bytes; background original prefetch is forbidden.
+    + const request=indexedDB.open('connect-media-v1',4);const db=await new Promise<IDBDatabase>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+    + await new Promise<void>((resolve,reject)=>{const tx=db.transaction('objects','readwrite');tx.objectStore('objects').put({key:viewer+':connect-profile-media/'+row.path,user:viewer,category:'photos',size:imageBytes.length,used:Date.now(),bytes:imageBytes.buffer,type:'image/png'});tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});db.close();
+      const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+      let gallerySigns=0;const client:any={storage:{from:()=>({list:()=>new Promise(()=>{}),createSignedUrl:async(path:string)=>{gallerySigns++;return{data:{signedUrl:signed(path,'gallery-refreshed')}};}})}};
+      root.render(<ConnectProfileMedia client={client} viewerId={viewer} userId={peer} kind="photos" onBack={()=>{}} onAvatar={()=>{}} isOwner={false}/>);
+    @@ -108,10 +112,20 @@ await test('profile UI displays cached catalog while server list is unavailable'
+      (document.querySelector('.connect-full-gallery-icon[aria-label="Закрыть просмотр"]') as HTMLButtonElement).click();await delay();await clearCachedMedia('temporary');
+      (container.querySelector('.connect-profile-photo-thumb') as HTMLButtonElement).click();
+      for(let i=0;i<25&&!gallerySigns;i++)await delay();
+    - for(let i=0;i<25&&!document.querySelector('.connect-full-gallery-stage img');i++)await delay();
+    + for(let i=0;i<200&&!document.querySelector('.connect-full-gallery-stage img')?.getAttribute('src')?.includes('gallery-refreshed');i++)await new Promise(r=>setTimeout(r,5));
+      assert(gallerySigns===1&&document.querySelector('.connect-full-gallery-stage img')?.getAttribute('src')?.includes('gallery-refreshed'),'gallery reused a revoked blob URL after clearing');
+      root.unmount();container.remove();
+     });
+    +await test('a delayed image error preserves a decoded local blob and an unrelated pending fill',async()=>{
+    + const avatar=location.origin+'/storage/v1/object/sign/connect-avatars/'+viewer+'/delayed.webp';await prefetchCachedMedia(avatar,viewer);
+    + const local=await resolveCachedMedia(avatar,viewer);assert(local.startsWith('blob:'),'avatar not cached');
+    + const image=new Image();image.src=local;document.body.append(image);await image.decode();await new Promise(r=>setTimeout(r,40));
+    + let evictions=0;const changed=()=>evictions++;window.addEventListener('connect:cache-changed',changed);
+    + const path=peer+'/music/pending-delayed.mp3',fill=prefetchProfileFile(signed(path),viewer,'music',2048);while(!pendingRelease)await delay();
+    + try{image.dispatchEvent(new Event('error'));await new Promise(r=>setTimeout(r,40));pendingRelease();pendingRelease=undefined;await fill;
+    + assert(evictions===0,'decoded image evicted on delayed error');assert((await resolveCachedMedia(avatar,viewer)).startsWith('blob:'),'valid cached bytes removed');assert(await resolveCachedProfileFile(viewer,path),'unrelated pending fill canceled');
+    + }finally{window.removeEventListener('connect:cache-changed',changed);image.remove();pendingRelease?.();pendingRelease=undefined;}
+    +});
+     await test('ordinary media clear preserves system avatars and drops temporary bytes',async()=>{
+      const avatar=location.origin+'/storage/v1/object/sign/connect-avatars/'+viewer+'/avatar.webp?token=one';
+      await prefetchCachedMedia(avatar,viewer);assert((await cacheStats()).system>0,'avatar missing');
+    @@ -132,6 +146,7 @@ await test('music selection obtains a network URL after its cached blob was clea
+       await clearCachedMedia('temporary');(container.querySelector('.connect-minimal-track-main') as HTMLButtonElement).click();
+       for(let i=0;i<25&&!signCount;i++)await delay();
+       assert(signCount===1,'cleared blob was reused instead of signing a network URL');
+    +  for(let i=0;i<200&&!container.querySelector('audio')?.getAttribute('src')?.includes('token=refreshed');i++)await new Promise(r=>setTimeout(r,5));
+       assert(container.querySelector('audio')?.getAttribute('src')?.includes('token=refreshed'),'player source not refreshed');
+      }finally{root.unmount();container.remove();HTMLMediaElement.prototype.play=play;}
+     });
+    diff --git a/native/tests/hybrid-protocol.test.cjs b/native/tests/hybrid-protocol.test.cjs
+    index 3bfd007..38aa5d5 100644
+    --- a/native/tests/hybrid-protocol.test.cjs
+    +++ b/native/tests/hybrid-protocol.test.cjs
+    @@ -157,3 +157,9 @@ test('native metadata catalogs reject credential fields, signed URLs and foreign
+      for(const value of [{access_token:token},{nested:{signedUrl:'https://host/x?token='+token}},{items:[{path:'/x?token=secret'}]},{value:token}])assert.equal(read('history:catalog-write',{userId:uuid,key,epoch:0,value}),null);
+      assert.equal(read('history:catalog-read',{userId:uuid,key:'auth'}),null);
+     });
+    +
+    +test('media response-cache bridge validates owner, capability, storage identity and strict actions',()=>{
+    + const base={userId:uuid,nonce};
+    + for(const payload of [{...base,action:'bind',limitBytes:500*1024**2},{...base,action:'lookup',identity:'connect-attachments/'+uuid+'/voice.m4a',version:'v1'},{...base,action:'clear',category:'temporary',identity:'connect-attachments/x.mp4',retire:true},{...base,action:'stats'},{...base,action:'unbind'}])assert(read('media:cache',payload));
+    + for(const payload of [{...base,action:'bind',limitBytes:Infinity},{...base,action:'bind',limitBytes:-1},{...base,userId:'bad',action:'stats'},{...base,nonce:'bad',action:'stats'},{...base,action:'lookup',identity:'connect-attachments/../private'},{...base,action:'lookup',identity:'https://evil/private'},{...base,action:'clear',category:'auth'},{...base,action:'stats',token:'secret'},{...base,action:'fetch',url:'https://evil'}])assert.equal(read('media:cache',payload),null);
+    +});
+    diff --git a/native/tests/pwa-logout-regression.test.cjs b/native/tests/pwa-logout-regression.test.cjs
+    index 8e25e3f..1b7b612 100644
+    --- a/native/tests/pwa-logout-regression.test.cjs
+    +++ b/native/tests/pwa-logout-regression.test.cjs
+    @@ -23,7 +23,7 @@ function makeLogout(result){
+         setLatest:()=>{},setUnread:()=>{},readCache:{current:{}},setPassword:()=>{},
+         historyWarmStamps:{current:{}},inboxMediaWarm:{current:{clear(){}}},
+         avatarCacheEpoch:{current:0},setAvatarUrls:()=>{},forgetUserChatPresentation:()=>{},
+    -    warmedChatWindows:{current:{clear(){}}},signedMediaLifetimes:{current:{clear(){}}},
+    +    warmedChatWindows:{current:{clear(){}}},signedMediaLinks:{clear(){}},
+         clearStoredConnectAuth:()=>events.push(['purgeTokens']),
+         wipeUserHistory:async()=>events.push(['wipe']),
+       };
+    diff --git a/native/tests/source-lock.test.cjs b/native/tests/source-lock.test.cjs
+    index 6aad997..8cccf40 100644
+    --- a/native/tests/source-lock.test.cjs
+    +++ b/native/tests/source-lock.test.cjs
+    @@ -42,15 +42,16 @@ test('API 37 resolves to the actual SDK package android-37.0 and tool drift is r
+      }finally{f.cleanup();}
+     });
+ 
+    -test('the final workflow SDK step requests the verified package instead of an unavailable API alias',()=>{
+    +test('the current release workflow SDK step requests the verified package instead of an unavailable API alias',()=>{
+      const f=toolsFixture();
+      try{
+       const yaml=require('js-yaml');
+    -  const workflow=yaml.load(fs.readFileSync('../.github/workflows/connect-android-parity-notifications-final.yml','utf8'));
+    -  const step=workflow.jobs.verify.steps.find(s=>s.name==='Generate native project and derive SDK from installed Gradle sources');
+    +  const workflow=yaml.load(fs.readFileSync('../.github/workflows/connect-android-parity-release.yml','utf8'));
+    +  const step=workflow.jobs.verify.steps.find(s=>s.name==='Generate native project and install exact SDK tools');
+       assert.ok(step,'SDK step must exist');
+       f.write('verification/parity/.keep','');
+    -  f.write('bin/npx','#!/bin/bash\nset -euo pipefail\ntest "$*" = "--no-install expo prebuild --platform android --no-install --clean"\n');
+    +  f.write('scripts/release/validate.mjs',"import assert from 'node:assert/strict';assert.equal(process.argv[2],'prebuild');\n");
+    +  f.write('bin/npx','#!/bin/bash\nset -euo pipefail\ntest "$*" = "--no-install expo prebuild --platform android --no-install"\n');
+       f.write('bin/sdkmanager',`#!${process.execPath}\nconst assert=require('node:assert/strict');\nassert.deepEqual(process.argv.slice(2),['--channel=3','platforms;android-37.0','build-tools;37.0.0','ndk;27.1.12297006','cmake;3.22.1','platform-tools']);\nrequire('node:fs').writeFileSync('sdk-request-verified','ok');\n`);
+       for(const name of ['npx','sdkmanager'])fs.chmodSync(path.join(f.root,'bin',name),0o755);
+       const result=cp.spawnSync('/bin/bash',['-e','-o','pipefail','-c',step.run],{cwd:f.root,encoding:'utf8',env:{...process.env,PATH:path.join(f.root,'bin')+path.delimiter+process.env.PATH}});
+    diff --git a/native/tests/sticker-offline-cache-20261117.test.cjs b/native/tests/sticker-offline-cache-20261117.test.cjs
+    index 88c94d2..26c75aa 100644
+    --- a/native/tests/sticker-offline-cache-20261117.test.cjs
+    +++ b/native/tests/sticker-offline-cache-20261117.test.cjs
+    @@ -5,7 +5,7 @@ test('Android private device storage pins sticker files across cache trimming',(
+       assert.match(cache,/CONNECT_ANDROID_STICKERS_PINNED_20261117/);
+       assert.match(cache,/if \(row\.key\.startsWith\(owner \+ ':connect-stickers\/'\)\) continue;/);
+       assert.match(cache,/const NAME = 'connect-media-v1'/);
+    -  assert.match(cache,/indexedDB\.open\(NAME, 3\)/);
+    +  assert.match(cache,/indexedDB\.open\(NAME, 4\)/);
+     });
+     test('viewer cache is keyed by stable storage path, never a signed token',()=>{
+       const before=page.indexOf('const local=await resolveCachedMedia(identity,viewer);');
+    @@ -17,7 +17,7 @@ test('catalog bytes are persisted before the first signed image reaches the DOM'
+       const fragment=page.slice(page.indexOf('CONNECT_ANDROID_STICKER_OFFLINE_FIRST_20261117'),page.indexOf("}catch{/* Retry on next login/visibility refresh"));
+       assert.ok(fragment.indexOf('await prefetchStickerWebp(signed,viewer)')>=0);
+       assert.ok(fragment.indexOf('await prefetchStickerWebp(signed,viewer)')<fragment.indexOf('setCustomStickerUrls(prev=>'));
+    -  assert.match(fragment,/cached\.startsWith\('blob:'\)\?cached:signed/);
+    +  assert.match(fragment,/isCachedMediaUrl\(cached\)\?cached:signed/);
+     });
+     test('received private sticker not in a public catalog is also cached first',()=>{
+  CONNECT_MEDIA_PATCH_005: |2
+       assert.match(page,/await prefetchStickerWebp\(url,owner\);[\s\S]{0,180}await resolveCachedMedia\(identity,owner\)/);
+    diff --git a/native/web/app/page.tsx b/native/web/app/page.tsx
+    index 6671b48..392094d 100644
+    --- a/native/web/app/page.tsx
+    +++ b/native/web/app/page.tsx
+    @@ -5,6 +5,7 @@
+     // CONNECT_PWA_VOICE_VIDEO_GEOMETRY_FIX4_20261112
+     // CONNECT_PWA_MEDIA_UX_FIX_V3_20261112
+ 
+    +import {createSignedMediaCache, isCachedMediaUrl, cacheMediaUrl} from '../lib/media-cache';
+     import RecordingBar from '../components/ConnectRecordingBar';
+     import CacheSettings from '../components/ConnectCacheSettings';
+     import {warmOwnProfileLibraries,warmPeerProfileLibraries} from '../lib/profile-media-index';
+    @@ -14,7 +15,7 @@ import {resolveCachedStorageFile} from '../lib/media-cache';
+     import {createAvatarDirectoryCache} from '../lib/avatar-directory-cache'; // CONNECT_ANDROID_AVATAR_EGRESS_GUARD_V1
+     import { settingsMenuSegmentClasses } from '../lib/settings-menu-groups';
+     import ConnectAdminUsage from '../components/ConnectAdminUsage';
+    -import {mediaIdentity, mediaCacheOwner, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
+    +import {mediaIdentity, mediaCacheOwner, mediaCacheEpoch, resolveCachedMedia, installMediaCache, clearCachedMedia, linkMessageMedia, purgeDeletedMedia, storeGeneratedChatPoster} from '../lib/media-cache';
+     import {readChatWave, prewarmChatWave, getHotChatPoster, rememberChatPoster, forgetUserChatPresentation, isNativeMediaRuntime} from '../lib/chat-media-presentation';
+     import { prefetchCachedMedia, prefetchChatAudio, prefetchStickerWebp } from '../lib/media-cache'; // CONNECT_PWA_CHAT_SPEED_STICKER_VOICE_V1_20261115
+     import { readChatHistory, prewarmChatHistory, readOlderChatHistory, readNewerChatHistory, writeChatHistory, wipeChatHistory, dropCachedMessage, dropCachedMessageById, wipeUserHistory } from '../lib/chat-history-cache';
+    @@ -56,21 +57,7 @@ const supabaseFetch: typeof fetch = (input, init) => {
+     // Signed media URLs are used directly by <img>, <audio>, <video> and fetch().
+     // The SDK custom fetch cannot intercept those browser requests, so route them
+     // through the same-origin Vercel proxy on the DuckDNS domain as well.
+    -function mediaUrl(url: string): string {
+    -  if (!useSupabaseProxy || !url) return url;
+    -  try {
+    -    const parsed = new URL(url);
+    -    const base = new URL(supabaseUrl);
+    -    const storageHost = base.hostname.replace(/\.supabase\.co$/, '.storage.supabase.co');
+    -    if (parsed.hostname === base.hostname) {
+    -      return window.location.origin + '/supabase' + parsed.pathname + parsed.search + parsed.hash;
+    -    }
+    -    if (parsed.hostname === storageHost) {
+    -      return window.location.origin + '/supabase-storage' + parsed.pathname + parsed.search + parsed.hash;
+    -    }
+    -  } catch { /* Preserve unexpected URLs without breaking rendering. */ }
+    -  return url;
+    -}
+    +function mediaUrl(url:string):string{return cacheMediaUrl(url);}
+ 
+     const CONNECT_LOCAL_LOGOUT_FLAG='connect-local-logout-v1';
+     function locallyLoggedOut():boolean {try{return localStorage.getItem(CONNECT_LOCAL_LOGOUT_FLAG)==='1';}catch{return false;}}
+    @@ -92,15 +79,27 @@ const supabase = supabaseUrl && supabaseKey
+         })
+       : null;
+ 
+    -// Signed storage links expire independently of authentication. Renew only the
+    -// failing object through the existing session, never make a private bucket public.
+    -async function refreshMediaUrl(source: string): Promise<string | undefined> {
+    -  const identity = mediaIdentity(source);
+    -  if (!supabase || !identity) return;
+    -  const slash = identity.indexOf('/'), bucket = identity.slice(0, slash);
+    -  if (slash < 1 || !['connect-avatars', 'connect-attachments', 'connect-stickers', 'connect-profile-media'].includes(bucket)) return;
+    -  const {data} = await supabase.storage.from(bucket).createSignedUrl(identity.slice(slash + 1), 3600);
+    -  return data?.signedUrl ? mediaUrl(data.signedUrl) : undefined;
+    +// Signatures share the same account/session lease as durable media bytes.
+    +const signedMediaLinks=createSignedMediaCache({
+    +  lease:viewer=>viewer===mediaCacheOwner()?mediaCacheEpoch():null,
+    +  cached:async(viewer,bucket,path)=>{
+    +    const identity='/storage/v1/object/sign/'+bucket+'/'+path;
+    +    const local=await resolveCachedMedia(identity,viewer);
+    +    return isCachedMediaUrl(local)?local:null;
+    +  },
+    +  sign:async(_viewer,bucket,path)=>{
+    +    if(!supabase)return;
+    +    const {data,error}=await supabase.storage.from(bucket).createSignedUrl(path,3600);
+    +    return !error&&data?.signedUrl?mediaUrl(data.signedUrl):undefined;
+    +  },
+    +});
+    +function resolveAttachmentMedia(path:string,viewer:string){return signedMediaLinks.resolve(viewer,'connect-attachments',path);}
+    +async function refreshMediaUrl(source:string,force=false):Promise<string|undefined>{
+    +  const identity=mediaIdentity(source),viewer=mediaCacheOwner();
+    +  if(!supabase||!identity||!viewer)return;
+    +  const slash=identity.indexOf('/'),bucket=identity.slice(0,slash);
+    +  if(slash<1||!['connect-avatars','connect-attachments','connect-stickers','connect-profile-media'].includes(bucket))return;
+    +  return signedMediaLinks.resolve(viewer,bucket,identity.slice(slash+1),force);
+     }
+ 
+     type AlbumItem = {path:string;name:string;kind:'image'|'video'};
+    @@ -273,7 +272,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
+         if(waveOwner&&path){
+           const identity='/storage/v1/object/sign/connect-attachments/'+path;
+           void resolveCachedMedia(identity,waveOwner).then(local=>{
+    -        if(current&&local.startsWith('blob:')&&(!audioRef.current||(audioRef.current.paused&&audioRef.current.currentTime===0)))setPlaySrc(local);
+    +        if(current&&isCachedMediaUrl(local)&&(!audioRef.current||(audioRef.current.paused&&audioRef.current.currentTime===0)))setPlaySrc(local);
+           }).catch(()=>{});
+         }
+         return()=>{current=false;};
+    @@ -305,21 +304,18 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
+             if(mediaCacheOwner()!==waveOwner)return null;
+             const identity='/storage/v1/object/sign/connect-attachments/'+path;
+             let local=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
+    -        if(!local.startsWith('blob:')){
+    -          await prefetchChatAudio(src,waveOwner,byteSize);
+    -          if(mediaCacheOwner()!==waveOwner)return null;
+    -          local=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
+    -        }
+    -        return local.startsWith('blob:')?local:null;
+    +        return isCachedMediaUrl(local)?local:null;
+           }).then(()=>{if(!disposed)syncWave();}).catch(()=>{});
+         };
+    -    const node=audioRef.current?.parentElement;
+    -    if(typeof IntersectionObserver==='undefined'||!node){generate();return()=>{disposed=true;window.removeEventListener('connect:chat-wave',updated);};}
+    +    const playback=audioRef.current;playback?.addEventListener('ended',generate);playback?.addEventListener('suspend',generate);
+    +    const detach=()=>{playback?.removeEventListener('ended',generate);playback?.removeEventListener('suspend',generate);};
+    +    const node=playback?.parentElement;
+    +    if(typeof IntersectionObserver==='undefined'||!node){generate();return()=>{disposed=true;detach();window.removeEventListener('connect:chat-wave',updated);};}
+         const observer=new IntersectionObserver(entries=>{
+           if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();generate();}
+         },{root:node.closest('.message-scroll'),rootMargin:'80px 0px'});
+         observer.observe(node);
+    -    return()=>{disposed=true;observer.disconnect();window.removeEventListener('connect:chat-wave',updated);};
+    +    return()=>{disposed=true;detach();observer.disconnect();window.removeEventListener('connect:chat-wave',updated);};
+       }, [src,path,waveOwner,byteSize]);
+ 
+       async function toggle() {
+    @@ -336,7 +332,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
+           let current=playSrc||src||'';
+           if(!current){
+             const cached=await resolveCachedMedia(identity,waveOwner).catch(()=>identity);
+    -        current=cached.startsWith('blob:')?cached:(await refreshMediaUrl(identity)||'');
+    +        current=isCachedMediaUrl(cached)?cached:(await refreshMediaUrl(identity)||'');
+             if(!current)throw new Error('Voice message URL is not ready');
+             audio.src=current;setPlaySrc(current);
+           }
+    @@ -345,7 +341,7 @@ const VoicePlayer = memo(function VoicePlayer({ src, path, byteSize, sentAt, min
+             await audio.play();
+           } catch(firstError) {
+             if(!navigator.onLine||audio.error?.code===3||audio.error?.code===4)throw firstError;
+    -        const renewed=await refreshMediaUrl(identity);
+    +        const renewed=await refreshMediaUrl(identity,true);
+             if(!renewed||renewed===current)throw firstError;
+             audio.src=renewed;setPlaySrc(renewed);audio.load();
+             await audio.play();
+    @@ -660,10 +656,9 @@ async function cachedChatPoster(path:string):Promise<string|null>{
+       if(!supabase||!path)return null;
+       if(isNativeMediaRuntime()){
+         const viewer=mediaCacheOwner(),identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
+    -    if(viewer){const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);if(local.startsWith('blob:'))return local;}
+    -    const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
+    -    if(error||!data?.signedUrl)return null;
+    -    const signed=mediaUrl(data.signedUrl);
+    +    if(viewer){const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);if(isCachedMediaUrl(local))return local;}
+    +    const signed=await resolveAttachmentMedia(path+'__poster.jpg',viewer);
+    +    if(!signed)return null;
+         if(viewer)void prefetchCachedMedia(signed,viewer);
+         return signed;
+       }
+    @@ -673,16 +668,15 @@ async function cachedChatPoster(path:string):Promise<string|null>{
+       const identity='/storage/v1/object/sign/connect-attachments/'+path+'__poster.jpg';
+       if(viewer){
+         const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+    -    if(local.startsWith('blob:')){rememberChatPoster(viewer,path,local);return local;}
+    +    if(isCachedMediaUrl(local)){rememberChatPoster(viewer,path,local);return local;}
+       }
+    -  const {data,error}=await supabase.storage.from('connect-attachments').createSignedUrl(path+'__poster.jpg',3600);
+    -  if(error||!data?.signedUrl)return null;
+    -  const signed=mediaUrl(data.signedUrl);
+    +  const signed=await resolveAttachmentMedia(path+'__poster.jpg',viewer);
+    +  if(!signed)return null;
+       if(viewer){
+         await prefetchCachedMedia(signed,viewer);
+         const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+    -    if(local.startsWith('blob:')){rememberChatPoster(viewer,path,local);return local;}
+    -    rememberChatPoster(viewer,path,signed);
+    +    if(isCachedMediaUrl(local)){rememberChatPoster(viewer,path,local);return local;}
+    +    // Network fallbacks keep the signing coordinator's original expiry.
+       }
+       return signed;
+     }
+    @@ -1124,7 +1118,6 @@ export default function Home() {
+         const timer=window.setTimeout(()=>setChatDisplayReady(activeChat),1400);
+         return()=>window.clearTimeout(timer);
+       },[activeChat,user?.id]);
+    -  const signedMediaLifetimes=useRef(new Map<string,number>());
+       const warmedChatWindows=useRef(new Map<string,number>());
+       const [historyHasMore,setHistoryHasMore]=useState(false);
+       const [historyLoadingMore,setHistoryLoadingMore]=useState(false);
+    @@ -1187,7 +1180,7 @@ export default function Home() {
+       const [pendingFiles,setPendingFiles]=useState<File[]>([]);
+       const [videoNoteOpen,setVideoNoteOpen]=useState(false);
+       const [recording, setRecording] = useState(false);
+    -  useEffect(()=>{if(!user?.id)return;return installMediaCache(user.id, refreshMediaUrl);},[user?.id]);
+    +  useEffect(()=>{if(!user?.id)return;const release=installMediaCache(user.id, source=>refreshMediaUrl(source,true));return()=>{signedMediaLinks.clear(user.id);release();};},[user?.id]);
+       useEffect(()=>{releaseHistoryMemory();return releaseHistoryMemory;},[user?.id]);
+       useEffect(()=>{
+         if(!user?.id||!supabase)return;const controller=new AbortController();
+    @@ -1658,7 +1651,7 @@ export default function Home() {
+             try {
+               const local=await resolveCachedMedia(identity,viewer);
+               if(epoch!==stickerCatalogEpoch.current)return;
+    -          if(local.startsWith('blob:')){
+    +          if(isCachedMediaUrl(local)){
+                 setCustomStickerUrls(prev=>prev[st.id]===local?prev:{...prev,[st.id]:local});
+                 continue;
+               }
+    @@ -1672,7 +1665,7 @@ export default function Home() {
+               if(epoch!==stickerCatalogEpoch.current)return;
+               const cached=await resolveCachedMedia(identity,viewer);
+               if(epoch!==stickerCatalogEpoch.current)return;
+    -          const source=cached.startsWith('blob:')?cached:signed;
+    +          const source=isCachedMediaUrl(cached)?cached:signed;
+               setCustomStickerUrls(prev=>prev[st.id]===source?prev:{...prev,[st.id]:source});
+             }catch{/* Retry on next login/visibility refresh; never expose private packs. */}
+           }
+    @@ -1704,14 +1697,14 @@ export default function Home() {
+             try{
+               const identity='/storage/v1/object/sign/connect-stickers/'+st.storage_path;
+               const local=await resolveCachedMedia(identity,owner);
+    -          if(local.startsWith('blob:'))return [st.id,local] as const;
+    +          if(isCachedMediaUrl(local))return [st.id,local] as const;
+               const {data:signed}=await client.storage.from('connect-stickers').createSignedUrl(st.storage_path,3600);
+               if(!signed?.signedUrl)return null;
+               const url=mediaUrl(signed.signedUrl);
+               await prefetchStickerWebp(url,owner);
+               if(!alive)return null;
+               const cached=await resolveCachedMedia(identity,owner);
+    -          return [st.id,cached.startsWith('blob:')?cached:url] as const;
+    +          return [st.id,isCachedMediaUrl(cached)?cached:url] as const;
+             }catch{return null;}
+           }));
+           if(!alive)return;
+    @@ -2863,33 +2856,26 @@ export default function Home() {
+       useEffect(() => {
+         if(!supabase||!user)return;
+         let cancelled=false;
+    -    const client=supabase,viewer=user.id;
+    -    // Android also needs progressive, bounded signing for large audio-heavy chats.
+    +    const client=supabase,viewer=user.id,epoch=mediaCacheEpoch();
+    +    const current=()=>!cancelled&&mediaCacheOwner()===viewer&&mediaCacheEpoch()===epoch;
+    +    // Reconsider existing entries on chat entry; the resolver owns their real TTL.
+         if(isNativeMediaRuntime()){
+    -      const selected=messages.filter(m=>!m.deleted_at&&(!activeChat||m.conversation_id===activeChat));
+    +      if(!activeChat)return;
+    +      const selected=messages.filter(m=>!m.deleted_at&&m.conversation_id===activeChat);
+           const paths=Array.from(new Set([...selected].reverse().flatMap(m=>[...(m.attachment_path?[m.attachment_path]:[]),...parseAlbum(m.body).map(x=>x.path)])));
+    -      const missing=paths.filter(path=>!attachmentUrls[path]);
+    -      let cursor=0, audioWarm=0;
+    +      let cursor=0,audioWarm=0;
+           const worker=async()=>{
+    -        while(!cancelled&&cursor<missing.length){
+    -          const path=missing[cursor++];
+    -          const meta=selected.find(m=>m.attachment_path===path);
+    -          const identity='/storage/v1/object/sign/connect-attachments/'+path;
+    -          try {
+    -            const local=await resolveCachedMedia(identity,viewer).catch(()=>identity);
+    -            let url=local.startsWith('blob:')?local:'';
+    -            if(!url){
+    -              const {data}=await client.storage.from('connect-attachments').createSignedUrl(path,3600);
+    -              url=data?.signedUrl?mediaUrl(data.signedUrl):'';
+    -            }
+    -            if(!url||cancelled)continue;
+    -            setAttachmentUrls(prev=>prev[path]?prev:{...prev,[path]:url});
+  CONNECT_MEDIA_PATCH_006: |2
+    -            if(meta?.attachment_kind==='audio'&&meta.attachment_size&&meta.attachment_size<=1024*1024&&audioWarm++<2)
+    -              void prefetchChatAudio(url,viewer,meta.attachment_size);
+    +        while(current()&&cursor<paths.length){
+    +          const path=paths[cursor++],meta=selected.find(m=>m.attachment_path===path);
+    +          try{
+    +            const url=await resolveAttachmentMedia(path,viewer);
+    +            if(!url||!current())continue;
+    +            setAttachmentUrls(prev=>!current()||prev[path]===url?prev:{...prev,[path]:url});
+    +            // No audio original is downloaded on chat entry.
+               }catch{/* One failed attachment must not block the rest. */}
+             }
+           };
+    -      void Promise.all(Array.from({length:Math.min(4,missing.length)},()=>worker())).catch(()=>{});
+    +      void Promise.all(Array.from({length:Math.min(4,paths.length)},()=>worker())).catch(()=>{});
+           return()=>{cancelled=true;};
+         }
+         if(!activeChat||historyReadyChat!==activeChat)return;
+    @@ -2904,38 +2890,30 @@ export default function Home() {
+         let offset=0,recentLeft=Math.min(10,entries.length);
+         if(!recentLeft)setChatDisplayReady(chatId);
+         const worker=async()=>{
+    -      while(!cancelled&&offset<entries.length){
+    +      while(current()&&offset<entries.length){
+             const index=offset++,item=entries[index],path=item.path;
+             try{
+    -          const identity='/storage/v1/object/sign/connect-attachments/'+path;
+    -          const cached=await resolveCachedMedia(identity,viewer);
+    -          const previous=attachmentUrls[path];
+    -          let url=cached.startsWith('blob:')?cached:(previous&&(previous.startsWith('blob:')||(signedMediaLifetimes.current.get(path)||0)>Date.now()+60000)?previous:'');
+    -          if(!url){
+    -            const {data,error}=await client.storage.from('connect-attachments').createSignedUrl(path,3600);
+    -            if(!error&&data?.signedUrl){url=mediaUrl(data.signedUrl);signedMediaLifetimes.current.set(path,Date.now()+48*60*1000);}
+    -          }
+    -          if(!url)continue;
+    -          if(!cancelled)setAttachmentUrls(prev=>prev[path]===url?prev:{...prev,[path]:url});
+    +          const url=await resolveAttachmentMedia(path,viewer);
+    +          if(!url||!current())continue;
+    +          setAttachmentUrls(prev=>!current()||prev[path]===url?prev:{...prev,[path]:url});
+               if(item.kind==='image'&&supportsPhotoPreview(path)){
+                 const thumb=photoPreviewPath(path),thumbIdentity='/storage/v1/object/sign/connect-attachments/'+thumb;
+                 let local=await resolveCachedMedia(thumbIdentity,viewer);
+    -            if(!local.startsWith('blob:')){
+    -              const signed=await client.storage.from('connect-attachments').createSignedUrl(thumb,3600);
+    -              if(signed.data?.signedUrl){const thumbUrl=mediaUrl(signed.data.signedUrl);
+    +            if(!isCachedMediaUrl(local)){
+    +              const thumbUrl=await resolveAttachmentMedia(thumb,viewer);
+    +              if(thumbUrl){
+                     await prefetchCachedMedia(thumbUrl,viewer);
+                     const hydrated=await resolveCachedMedia(thumbIdentity,viewer);
+    -                local=hydrated.startsWith('blob:')?hydrated:thumbUrl;
+    +                local=isCachedMediaUrl(hydrated)?hydrated:thumbUrl;
+                   }else local='';
+                 }
+    -            if(!cancelled)setPhotoPreviews(prev=>prev[path]=== (local||null)?prev:{...prev,[path]:local||null});
+    +            if(current())setPhotoPreviews(prev=>!current()||prev[path]=== (local||null)?prev:{...prev,[path]:local||null});
+               }
+               if(item.kind==='video')await cachedChatPoster(path).catch(()=>null);
+    -           if(item.kind==='audio'&&index<4&&item.size>0&&item.size<=1024*1024)
+    -             void prefetchChatAudio(url,viewer,item.size);
+    +          // No original prefetch: the first playback response persists its bytes.
+             }catch{/* Never let a failed attachment block message navigation. */}
+             finally{
+    -          if(index<10&&--recentLeft===0&&!cancelled){
+    +          if(index<10&&--recentLeft===0&&current()){
+                 warmedChatWindows.current.set(viewer+':'+chatId,Date.now()+42*60*1000);
+                 setChatDisplayReady(chatId);
+               }
+    @@ -2949,7 +2927,7 @@ export default function Home() {
+ 
+       useEffect(()=>{
+         if(!supabase||!user)return;
+    -    const owner=user.id;
+    +    const owner=user.id,epoch=mediaCacheEpoch();let cancelled=false;
+         const paths=[...new Set(messages.filter(m=>m.conversation_id===activeChat).flatMap(m=>[
+           ...(m.attachment_kind==='image'&&m.attachment_path?[m.attachment_path]:[]),
+           ...parseAlbum(m.body).filter(x=>x.kind==='image').map(x=>x.path)
+    @@ -2965,12 +2943,17 @@ export default function Home() {
+           try{
+             const local=await resolveCachedStorageFile(owner,'connect-attachments',photoPreviewPath(path));
+             if(local)return {path,url:local};
+    -        const {data,error}=await supabase!.storage.from('connect-attachments').createSignedUrl(photoPreviewPath(path),3600);
+    -        if(error||!data?.signedUrl)return {path,url:null};
+    -        const signed=mediaUrl(data.signedUrl);void prefetchCachedMedia(signed,owner);
+    +        const signed=await resolveAttachmentMedia(photoPreviewPath(path),owner);
+    +        if(!signed)return {path,url:null};void prefetchCachedMedia(signed,owner);
+             return {path,url:signed};
+           }catch{return {path,url:null};}
+    -    })).then(items=>{if(activePreviewUser.current===owner){setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});for(const item of items)if(!item.url)retryPhotoPreview(item.path);}});
+    +    })).then(items=>{
+    +      if(!cancelled&&activePreviewUser.current===owner&&mediaCacheEpoch()===epoch){
+    +        setPhotoPreviews(prev=>{const next={...prev};for(const item of items)next[item.path]=item.url;return next;});
+    +        for(const item of items){if(item.url)photoPreviewAttempts.current.delete(item.path);else retryPhotoPreview(item.path);}
+    +      }
+    +    }).finally(()=>{for(const path of paths)photoPreviewRequests.current.delete(path);});
+    +    return()=>{cancelled=true;for(const path of paths)photoPreviewRequests.current.delete(path);};
+       },[messages,activeChat,user?.id,photoPreviewRetry]);
+       useEffect(()=>{
+         photoPreviewRequests.current.clear();photoPreviewAttempts.current.clear();
+    @@ -3146,8 +3129,8 @@ export default function Home() {
+           setMessages(prev=>prev.some(x=>x.id===m.id)?prev:[...prev,m]);
+           setLatest(prev=>({...prev,[chatId]:m}));
+           setReplyTo(null);setPendingFiles([]);
+    -      const urls=await Promise.all(items.map(async x=>({path:x.path,result:await client.storage.from('connect-attachments').createSignedUrl(x.path,3600)})));
+    -      setAttachmentUrls(prev=>{const next={...prev};urls.forEach(x=>{if(x.result.data?.signedUrl)next[x.path]=mediaUrl(x.result.data.signedUrl)});return next});
+    +      const urls=await Promise.all(items.map(async x=>({path:x.path,url:await resolveAttachmentMedia(x.path,uid)})));
+    +      setAttachmentUrls(prev=>{if(mediaCacheOwner()!==uid)return prev;const next={...prev};urls.forEach(x=>{if(x.url)next[x.path]=x.url});return next});
+           requestAnimationFrame(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight});
+         }catch(e){setNotice('Не удалось отправить альбом: '+(e instanceof Error?e.message:String(e)))}
+         finally{setBusy(false);setUploadProgress(null)}
+    @@ -3231,8 +3214,8 @@ export default function Home() {
+           setMessages(prev=>prev.some(x=>x.id===m.id)?prev:[...prev,m]);
+           setLatest(prev=>({...prev,[chatId]:m}));
+           setReplyTo(null);
+    -      const signed=await supabase.storage.from('connect-attachments').createSignedUrl(path,3600);
+    -      if(signed.data?.signedUrl)setAttachmentUrls(prev=>({...prev,[path]:mediaUrl(signed.data!.signedUrl)}));
+    +      const signed=await resolveAttachmentMedia(path,user.id);
+    +      if(signed)setAttachmentUrls(prev=>mediaCacheOwner()===user.id?{...prev,[path]:signed}:prev);
+           requestAnimationFrame(()=>{const el=scrollRef.current;if(el)el.scrollTop=el.scrollHeight;});
+         } catch(e) {
+           setNotice('Не удалось отправить вложение: '+(e instanceof Error?e.message:String(e)));
+    @@ -3498,7 +3481,7 @@ export default function Home() {
+         setLatest({});setUnread({});readCache.current={};setPassword('');
+         setAvatarUrls({});
+         if(accountId)forgetUserChatPresentation(accountId);
+    -    warmedChatWindows.current.clear();signedMediaLifetimes.current.clear();
+    +    warmedChatWindows.current.clear();signedMediaLinks.clear(accountId||'');
+         let signoutTimeout:ReturnType<typeof setTimeout>|undefined;
+         try {
+           const {error}=await Promise.race([
+    diff --git a/native/web/components/ConnectMusicSystem.tsx b/native/web/components/ConnectMusicSystem.tsx
+    index c3bb2df..ac9165a 100644
+    --- a/native/web/components/ConnectMusicSystem.tsx
+    +++ b/native/web/components/ConnectMusicSystem.tsx
+    @@ -1,4 +1,5 @@
+     'use client';
+    +import {isCachedMediaUrl,signedMediaUrlValid} from '../lib/media-cache';
+ 
+     import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+     import { createPortal } from 'react-dom';
+    @@ -154,7 +155,7 @@ export function ConnectMusicProvider({children}:{children:ReactNode}) {
+         const generation=++playbackGeneration.current,viewer=mediaCacheOwner();
+         const local=await resolveCachedProfileFile(viewer,song.path);
+         if(generation!==playbackGeneration.current||viewer!==mediaCacheOwner()||!queueRef.current.some(x=>x.path===song.path))return;
+    -    let url=local||(song.url.startsWith('blob:')?'':song.url);
+    +    let url=local||(isCachedMediaUrl(song.url)||!signedMediaUrlValid(song.url)?'':song.url);
+         if(!url&&clientRef.current){const signed=await clientRef.current.storage.from('connect-profile-media').createSignedUrl(song.path,3600);url=signed.data?.signedUrl?mediaPlaybackUrl(signed.data.signedUrl):'';}
+         if(generation!==playbackGeneration.current||viewer!==mediaCacheOwner()||!url)return;
+         const audio=audioRef.current;if(!audio)return;
+    diff --git a/native/web/components/ConnectProfileMedia.tsx b/native/web/components/ConnectProfileMedia.tsx
+    index de85a8d..630a30b 100644
+    --- a/native/web/components/ConnectProfileMedia.tsx
+    +++ b/native/web/components/ConnectProfileMedia.tsx
+    @@ -1,4 +1,5 @@
+     'use client';
+    +import {isCachedMediaUrl,signedMediaUrlValid,mediaPlaybackUrl} from '../lib/media-cache';
+ 
+     import { useCallback, useEffect, useRef, useState } from 'react';
+     import type { SupabaseClient } from '@supabase/supabase-js';
+    @@ -45,18 +46,7 @@ const MAX_SIZE = 100 * 1024 * 1024;
+ 
+     // Keep signed audio/video/image requests on the working same-origin proxy
+     // when Connect is opened through its alternate DuckDNS domain.
+    -function playbackUrl(url: string) {
+    -  if (typeof window === 'undefined' || window.location.hostname !== 'connect-chat.duckdns.org') return url;
+    -  const root = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    -  try {
+    -    const source = new URL(url);
+    -    const base = new URL(root);
+    -    if (source.hostname === base.hostname) return `${window.location.origin}/supabase${source.pathname}${source.search}${source.hash}`;
+    -    if (source.hostname === base.hostname.replace(/\.supabase\.co$/, '.storage.supabase.co'))
+    -      return `${window.location.origin}/supabase-storage${source.pathname}${source.search}${source.hash}`;
+    -  } catch { /* Signed URL may already be relative. */ }
+    -  return url;
+    -}
+    +function playbackUrl(url:string){return mediaPlaybackUrl(url);}
+ 
+     function extension(name: string) { return name.split('.').pop()?.toLowerCase() || ''; }
+     function validFile(file: File, kind: ProfileMediaKind) {
+    @@ -101,7 +91,7 @@ export default function ConnectProfileMedia({ client, userId, viewerId, kind, on
+         const valid=()=>sequence===previewSequence.current&&generation===fetchGeneration.current&&cacheLeaseValid(viewerId,epoch);
+         try{
+           let url=await resolveCachedProfileFile(viewerId,item.path);
+    -      if(!url)url=item.url.startsWith('blob:')?null:item.url;
+    +      if(!url)url=isCachedMediaUrl(item.url)||!signedMediaUrlValid(item.url)?null:item.url;
+           if(!url){const signed=await client.storage.from(BUCKET).createSignedUrl(item.path,3600);if(signed.error)throw signed.error;url=signed.data?.signedUrl?playbackUrl(signed.data.signedUrl):null;}
+           if(valid()&&url)setPreview({...item,url});
+         }catch(err){if(valid())setError('Не удалось открыть файл: '+(err instanceof Error?err.message:String(err)));}
+    diff --git a/native/web/lib/chat-media-presentation.ts b/native/web/lib/chat-media-presentation.ts
+    index dfb05e6..c385bfe 100644
+    --- a/native/web/lib/chat-media-presentation.ts
+    +++ b/native/web/lib/chat-media-presentation.ts
+    @@ -87,7 +87,8 @@ export function prewarmChatWave(
+         let context:AudioContext|null=null;
+         try{
+           const source=native?await resolveNativeLocal!():src;
+    -      if(!source||(native&&!source.startsWith('blob:')))return;
+    +      if(!source)return;
+    +      if(native&&!source.startsWith('blob:')){try{const u=new URL(source,location.href);if(u.origin!==location.origin||u.searchParams.get('__cm_local')!=='1')return;}catch{return;}}
+           const controller=new AbortController();
+           const timer=setTimeout(()=>controller.abort(),7000);
+           let bytes:ArrayBuffer;
+    diff --git a/native/web/lib/media-cache.ts b/native/web/lib/media-cache.ts
+    index 0d22d9b..7435e8d 100644
+    --- a/native/web/lib/media-cache.ts
+    +++ b/native/web/lib/media-cache.ts
+    @@ -10,13 +10,15 @@ type Entry = {
+         blob?: Blob;
+         bytes?: ArrayBuffer;
+         type?: string;
+    +    stream?:boolean;
+    +    etag?:string;
+         version?:string;
+     };
+     const NAME = 'connect-media-v1', STORE = 'objects';
+     let opening: Promise<IDBDatabase> | undefined;
+     let owner = '';
+     let mediaEpoch=0;
+    -const controllers=new Set<AbortController>();
+    +const controllers=new Map<string,AbortController>();
+     const versions=new Map<string,string>();
+     export function mediaCacheOwner(){return owner;}
+     export function mediaCacheEpoch(){return mediaEpoch;}
+    @@ -30,6 +32,8 @@ async function nativeHistoryBytes(){
+     }
+     const objectUrls = new Map<string, string>(), pending = new Map<string, Promise<void>>();
+     const originals = new Map<string, string>();
+    +// Invalidate one deleted fill without disturbing unrelated downloads.
+    +const fileEpochs=new Map<string,number>();
+     type MediaElement = HTMLImageElement | HTMLMediaElement;
+     type Binding = { source: string; current: string; retried: boolean };
+     const bindings = new Map<MediaElement, Binding>();
+    @@ -41,7 +45,7 @@ function restoreUrl(url: string) {
+             }
+         }
+         URL.revokeObjectURL(url);
+    -    originals.delete(url);
+    +    // Keep the source identity for stale UI blob URLs until account teardown.
+     }
+     function contentType(key: string, type = '') {
+         type = type.split(';')[0].toLowerCase();
+    @@ -78,9 +82,9 @@ export function mediaCategory(key: string, type = ''): CacheCategory {
+             return 'photos';
+         return 'other';
+     }
+    -function db() { return opening ??= new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open(NAME, 3); r.onupgradeneeded = () => { if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE, { keyPath: 'key' });
+    +function db() { return opening ??= new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open(NAME, 4); r.onupgradeneeded = () => { if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE, { keyPath: 'key' });
+             if(!r.result.objectStoreNames.contains('links'))r.result.createObjectStore('links');
+    -        if(!r.result.objectStoreNames.contains('retired'))r.result.createObjectStore('retired'); }; r.onsuccess = () => { r.result.onversionchange = () => { r.result.close(); opening = undefined; }; resolve(r.result); }; r.onerror = () => { opening = undefined; reject(r.error); }; }); }
+  CONNECT_MEDIA_PATCH_007: |2
+    +        if(!r.result.objectStoreNames.contains('retired'))r.result.createObjectStore('retired');if(!r.result.objectStoreNames.contains('media-ranges')){const ranges=r.result.createObjectStore('media-ranges',{keyPath:'key'});ranges.createIndex('file','file');ranges.createIndex('kind','kind');ranges.createIndex('fileStart',['file','start']);} }; r.onsuccess = () => { r.result.onversionchange = () => { r.result.close(); opening = undefined; }; resolve(r.result); }; r.onerror = () => { opening = undefined; reject(r.error); }; }); }
+     async function run<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> { const d = await db(); return new Promise((resolve, reject) => { const t = d.transaction(STORE, mode), r = operation(t.objectStore(STORE)); let value: T; r.onsuccess = () => { value = r.result; }; t.oncomplete = () => resolve(value); t.onerror = () => reject(t.error || r.error); t.onabort = () => reject(t.error || Error('Cache transaction aborted')); }); }
+     async function entries() { return run<Entry[]>('readonly', s => s.getAll()); }
+     export function cacheLimit() { try {
+    @@ -90,17 +94,20 @@ catch {
+         return 'auto';
+     } }
+     export function setCacheLimit(value: string) { if (!(value in LIMITS))
+    -    throw Error('Недопустимый лимит кеша'); localStorage.setItem('connect-cache-limit', value); void trimCache(); }
+    +    throw Error('Недопустимый лимит кеша'); localStorage.setItem('connect-cache-limit', value);void updateResponseCacheLimit(); void trimCache(); }
+     export async function cacheStats() { const result: Record<CacheCategory, number> = { system: 0, photos: 0, videos: 0, audio: 0, other: 0 }; for (const row of await entries())
+         if (row.user === owner)
+    -        result[row.category] += row.size; return result; }
+    +        result[row.category] += row.size;return responseCacheStats(result); }
+     export async function clearCachedMedia(category: CacheCategory | 'temporary', identity?: string) {
+    -    mediaEpoch++;for(const controller of controllers)controller.abort();controllers.clear();
+    +    const viewer=owner;
+    +    if(identity){const key=viewer+':'+identity;fileEpochs.set(key,(fileEpochs.get(key)||0)+1);controllers.get(key)?.abort();pending.delete(key);}
+    +    else{mediaEpoch++;for(const controller of controllers.values())controller.abort();controllers.clear();pending.clear();}
+    +    await clearResponseParts(category,identity,viewer);
+         const rows = await entries();
+         for (const row of rows) {
+    -        if (row.user !== owner || !identity && row.category === 'system')
+    +        if (row.user !== viewer || !identity && row.category === 'system')
+                 continue;
+    -        if (identity ? row.key !== owner + ':' + identity : category !== 'temporary' && row.category !== category)
+    +        if (identity ? row.key !== viewer + ':' + identity : category !== 'temporary' && row.category !== category)
+                 continue;
+             await run('readwrite', s => s.delete(row.key));
+             const url = objectUrls.get(row.key);
+    @@ -122,6 +129,7 @@ export async function trimCache() {
+             const avatar = row.category === 'system' && !row.key.includes(':core'), expired = Boolean((window as Window & {ConnectAndroid?:unknown;ConnectNative?:unknown}).ConnectAndroid||(window as Window & {ConnectAndroid?:unknown;ConnectNative?:unknown}).ConnectNative) && Date.now() - row.used > 30 * 86400000;
+             if (row.category === 'system' ? !avatar || avatars <= 64 * 1024 ** 2 : temporary <= limit && !expired)
+                 continue;
+    +        await clearResponseParts('temporary',row.key.slice(owner.length+1),owner);
+             await run('readwrite', s => s.delete(row.key));
+             const local = objectUrls.get(row.key);
+             if (local) { restoreUrl(local); objectUrls.delete(row.key); }
+    @@ -132,9 +140,16 @@ export async function trimCache() {
+         }
+     }
+     export async function resolveCachedMedia(url: string, user = owner): Promise<string> { const id = mediaIdentity(url); if (!id || !user || id.startsWith('core'))
+    -    return url; const key = user + ':' + id,epoch=mediaEpoch; if(owner!==user)return url;try {
+    +    return url; const key = user + ':' + id,epoch=mediaEpoch,fileEpoch=fileEpochs.get(key)||0; const validFile=()=>cacheLeaseValid(user,epoch)&&(fileEpochs.get(key)||0)===fileEpoch; if(owner!==user)return url;try {
+    +    if(mediaTransport==='native'){const local=await responseCacheLookup(url,user);if(local&&validFile())return local;}
+         const row = await run<Entry | undefined>('readonly', s => s.get(key));
+    -    if (!row||!cacheLeaseValid(user,epoch)||versions.has(key)&&row.version!==versions.get(key))return url;
+    +    if(!validFile())return url;
+    +    if(!row||versions.has(key)&&row.version!==versions.get(key)){const native=await responseCacheLookup(url,user);return validFile()&&native?native:url;}
+    +    if(row.stream){
+    +      const hot=objectUrls.get(key);if(hot&&validFile())return hot;
+    +      if(row.size<=2*1024*1024){const blob=await readStreamedBlob(row,url,user,epoch);if(!blob||!validFile())return url;let local=objectUrls.get(key);if(!local){local=URL.createObjectURL(blob);objectUrls.set(key,local);}originals.set(local,url);return local;}
+    +      await mediaReady;if(!validFile()||!mediaBound)return url;const local=new URL('/supabase/storage/v1/object/authenticated/'+id,location.origin);local.searchParams.set('__cm',mediaNonce);local.searchParams.set('__cm_local','1');return local.href;
+    +    }
+         const type = contentType(id, row.type || row.blob?.type);
+         const blob = row.blob || (row.bytes instanceof ArrayBuffer ? new Blob([row.bytes], { type }) : undefined);
+         if (!blob?.size || !usableType(type)) {
+    @@ -154,7 +169,7 @@ export async function resolveCachedMedia(url: string, user = owner): Promise<str
+         return local;
+     }
+     catch {
+    -    return url;
+    +    const local=await responseCacheLookup(url,user).catch(()=>null);return validFile()&&local?local:url;
+     } }
+     // Bound cache fills independently of the number of mounted messages. Visible
+     // interface/avatars precede small previews; originals enter only on playback.
+    @@ -163,6 +178,7 @@ const cacheJobs:{priority:number;run:()=>Promise<void>;resolve:()=>void}[]=[];
+     function cacheJob(priority:number,run:()=>Promise<void>){return new Promise<void>(resolve=>{cacheJobs.push({priority,run,resolve});cacheJobs.sort((a,b)=>a.priority-b.priority);pumpCacheJobs();});}
+     function pumpCacheJobs(){while(cacheWorkers<3&&cacheJobs.length){const job=cacheJobs.shift()!;cacheWorkers++;void job.run().catch(()=>{}).finally(()=>{cacheWorkers--;job.resolve();pumpCacheJobs();});}}
+     export async function boundedMediaBody(response:Response,maxBytes:number):Promise<Blob|null>{
+    + if(!Number.isFinite(maxBytes)||maxBytes<=0){await response.body?.cancel();return null;}
+      const length=Number(response.headers.get('content-length')||0);
+      if(length>maxBytes){await response.body?.cancel();return null;}
+      // Streaming cap also covers absent or misleading Content-Length.
+    @@ -172,36 +188,47 @@ export async function boundedMediaBody(response:Response,maxBytes:number):Promis
+      finally{reader.releaseLock();}
+      return size?new Blob(parts,{type:response.headers.get('content-type')||''}):null;
+     }
+    -async function remember(url:string,user:string,maxBytes=256*1024**2,signal?:AbortSignal){
+    - const id=mediaIdentity(url);if(!id||!user||id.startsWith('core')||owner!==user||signal?.aborted)return;
+    - const key=user+':'+id,epoch=mediaEpoch,version=versions.get(key);if(pending.has(key))return pending.get(key);
+    +async function remember(url:string,user:string,maxBytes=0,signal?:AbortSignal){
+    + const id=mediaIdentity(url);if(!Number.isFinite(maxBytes)||maxBytes<=0||!id||!user||id.startsWith('core')||owner!==user||signal?.aborted)return;
+    + const key=user+':'+id,epoch=mediaEpoch,fileEpoch=fileEpochs.get(user+':'+id)||0,version=versions.get(key);if(pending.has(key))return pending.get(key);
+      const operation=cacheJob(mediaCategory(id)==='system'?0:/__(thumb\.webp|poster\.jpg)$/.test(id)?1:2,async()=>{
+        if(!cacheLeaseValid(user,epoch)||signal?.aborted)return;
+        const old=await run<Entry|undefined>('readonly',s=>s.get(key));
+        if(old&&(!versions.has(key)||old.version===version))return;
+    +   if(!cacheLeaseValid(user,epoch)||(fileEpochs.get(key)||0)!==fileEpoch)return;
+        if(old){const stale=objectUrls.get(key);if(stale){restoreUrl(stale);objectUrls.delete(key);}}
+    -   const controller=new AbortController(),abort=()=>controller.abort();controllers.add(controller);signal?.addEventListener('abort',abort,{once:true});
+    +   const controller=new AbortController(),abort=()=>controller.abort();controllers.set(key,controller);signal?.addEventListener('abort',abort,{once:true});
+        try{
+    -    const response=await fetch(url,{cache:'force-cache',signal:controller.signal});if(!response.ok||response.status===206)return;
+    -    const blob=await boundedMediaBody(response,maxBytes);if(!blob||!cacheLeaseValid(user,epoch)||versions.get(key)!==version)return;
+    +    const response=await fetch(url,{cache:'force-cache',signal:controller.signal});if(!response.ok||response.status===206){await response.body?.cancel();return;}
+    +    const blob=await boundedMediaBody(response,maxBytes);if(!blob||!cacheLeaseValid(user,epoch)||(fileEpochs.get(key)||0)!==fileEpoch||versions.get(key)!==version)return;
+    +    if(mediaTransport==='worker'||mediaTransport==='native')return;
+         const type=contentType(id,blob.type);if(!usableType(type))return;const bytes=await blob.arrayBuffer();
+         const database=await db();await new Promise<void>((resolve,reject)=>{
+           const tx=database.transaction([STORE,'retired'],'readwrite');const check=tx.objectStore('retired').get(key);
+    -      check.onsuccess=()=>{if(!check.result&&cacheLeaseValid(user,epoch)&&versions.get(key)===version)tx.objectStore(STORE).put({key,user,category:mediaCategory(id,type),size:blob.size,used:Date.now(),bytes,type,version} satisfies Entry);};
+    +      check.onsuccess=()=>{if(!check.result&&cacheLeaseValid(user,epoch)&&(fileEpochs.get(key)||0)===fileEpoch&&versions.get(key)===version)tx.objectStore(STORE).put({key,user,category:mediaCategory(id,type),size:blob.size,used:Date.now(),bytes,type,version} satisfies Entry);};
+           tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Cache write aborted'));
+         });await trimCache();
+    -   }finally{signal?.removeEventListener('abort',abort);controllers.delete(controller);}
+    +   }finally{signal?.removeEventListener('abort',abort);if(controllers.get(key)===controller)controllers.delete(key);}
+      }).catch(()=>{}).finally(()=>{if(pending.get(key)===operation)pending.delete(key);});
+      pending.set(key,operation);return operation;
+     }
+    +/** Rendered images may fill only small sidecars, avatars and stickers. */
+    +function automaticImageByteLimit(id:string):number{
+    + if(/__(thumb\.webp|poster\.jpg)$/.test(id))return 512*1024;
+    + if(id.startsWith('connect-avatars/'))return 1024*1024;
+    + if(id.startsWith('connect-stickers/'))return 2*1024*1024;
+    + return 0;
+    +}
+    +function rememberRenderedImage(_el:HTMLImageElement,_user:string){/* The first response is captured by the request transport; no second GET. */}
+     export function installMediaCache(user: string, refreshUrl?: (source: string) => Promise<string | undefined>) {
+         mediaEpoch++;owner = user;window.dispatchEvent(new Event('connect:account-changed'));
+    +    installMediaFetchGate();const stopResponseCache=beginResponseCache(user);
+         let alive = true;
+         const visible = new IntersectionObserver(items => { for (const item of items)
+             if (item.isIntersecting) {
+                 const el = item.target as HTMLImageElement;
+                 if (el.complete && el.naturalWidth)
+    -                void remember(originals.get(el.src) || el.currentSrc || el.src, user);
+    +                rememberRenderedImage(el,user);
+                 visible.unobserve(el);
+             } }, { rootMargin: '0px' });
+         const scan = () => {
+    @@ -232,8 +259,26 @@ export function installMediaCache(user: string, refreshUrl?: (source: string) =>
+             if (!(el instanceof HTMLImageElement || el instanceof HTMLMediaElement)) return;
+             const binding = bindings.get(el);
+             if (!binding || binding.retried) return;
+    +        const failedSrc = el.getAttribute('src') || '';
+    +        if (failedSrc !== binding.current) return;
+             binding.retried = true;
+             void (async () => {
+    +            // CONNECT_MEDIA_STALE_IMAGE_ERROR_GUARD_20261117
+    +            // An old request can dispatch `error` after a healthy cached blob
+    +            // becomes current. Only evict when the CURRENT image fails decode.
+    +            if (el instanceof HTMLImageElement && (originals.has(failedSrc)||isCachedMediaUrl(failedSrc))) {
+    +                try {
+    +                    await el.decode();
+    +                    if (alive && bindings.get(el) === binding && el.getAttribute('src') === failedSrc) {
+    +                        binding.retried = false;
+    +                        return;
+    +                    }
+    +                } catch { /* Decode really failed; follow existing repair path. */ }
+    +            }
+    +            if (!alive || bindings.get(el) !== binding || el.getAttribute('src') !== failedSrc) {
+    +                binding.retried = false;
+    +                return;
+    +            }
+                 const id = mediaIdentity(binding.source);
+                 if (!id) return;
+                 if (originals.has(el.src)) await clearCachedMedia('temporary', id).catch(() => {});
+    @@ -257,7 +302,7 @@ export function installMediaCache(user: string, refreshUrl?: (source: string) =>
+         const loaded = (event: Event) => {
+             const el = event.target;
+             if (el instanceof HTMLImageElement && el.getBoundingClientRect().bottom >= 0 && el.getBoundingClientRect().top <= innerHeight)
+    -            void remember(originals.get(el.src) || el.currentSrc || el.src, user);
+    +            rememberRenderedImage(el,user);
+         };
+         const observer = new MutationObserver(scan);
+         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    @@ -266,13 +311,16 @@ export function installMediaCache(user: string, refreshUrl?: (source: string) =>
+         scan();
+         void trimCache().catch(() => { });
+         void navigator.storage?.persist?.().catch(() => { });
+    -    return () => { alive = false; observer.disconnect(); visible.disconnect(); document.removeEventListener('load', loaded, true); document.removeEventListener('play', loaded, true); document.removeEventListener('error', failed, true); if (owner === user){owner = '';mediaEpoch++;window.dispatchEvent(new Event('connect:account-changed'));for(const c of controllers)c.abort();controllers.clear();versions.clear();} for (const url of objectUrls.values())
+    -        restoreUrl(url); objectUrls.clear(); bindings.clear(); };
+    +    return () => { stopResponseCache();alive = false; observer.disconnect(); visible.disconnect(); document.removeEventListener('load', loaded, true); document.removeEventListener('play', loaded, true); document.removeEventListener('error', failed, true); if (owner === user){owner = '';mediaEpoch++;responseMediaVersions.clear();signedMediaIssued.clear();window.dispatchEvent(new Event('connect:account-changed'));for(const c of controllers.values())c.abort();controllers.clear();pending.clear();fileEpochs.clear();versions.clear();} for (const url of objectUrls.values())
+    +        restoreUrl(url); objectUrls.clear(); bindings.clear(); originals.clear(); };
+     }
+ 
+     /** Local content index contains only message IDs and stable storage identities. */
+     export async function linkMessageMedia(user:string,message:string,paths:string[]){
+  CONNECT_MEDIA_PATCH_008: |2
+    - if(!paths.length)return;const d=await db();await new Promise<void>((resolve,reject)=>{const tx=d.transaction(['links','retired'],'readwrite');const identities=[...new Set(paths.flatMap(path=>[path,path+'__thumb.webp',path+'__poster.jpg']))].map(path=>'connect-attachments/'+path);const guard=tx.objectStore('retired').get(user+':message:'+message);guard.onsuccess=()=>{if(guard.result)return;tx.objectStore('links').put(identities,user+':'+message);for(const identity of identities)tx.objectStore('retired').delete(user+':'+identity);};tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
+    + if(owner!==user||!paths.length)return;const epoch=mediaEpoch,d=await db(),revived:string[]=[];
+    + await new Promise<void>((resolve,reject)=>{const tx=d.transaction(['links','retired'],'readwrite'),retired=tx.objectStore('retired');const identities=[...new Set(paths.flatMap(path=>[path,path+'__thumb.webp',path+'__poster.jpg']))].map(path=>'connect-attachments/'+path);const guard=retired.get(user+':message:'+message);
+    + guard.onsuccess=()=>{if(guard.result||!cacheLeaseValid(user,epoch))return;tx.objectStore('links').put(identities,user+':'+message);for(const identity of identities){const q=retired.get(user+':'+identity);q.onsuccess=()=>{if(q.result)revived.push(identity);retired.delete(user+':'+identity);};}};tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});
+    + if(revived.length){await mediaReady;if(mediaTransport==='native'&&cacheLeaseValid(user,epoch))for(const identity of revived)await nativeMedia('revive',{identity},user);}
+     }
+     export async function purgeDeletedMedia(user:string,message:string){
+      if(owner!==user)return;const d=await db();const paths=await new Promise<string[]>((resolve,reject)=>{
+    @@ -284,10 +332,9 @@ export async function purgeDeletedMedia(user:string,message:string){
+ 
+     /** Background warmup of visible, lightweight chat previews; best effort. */
+     export async function prefetchCachedMedia(url:string,user:string):Promise<void>{
+    -  const id=mediaIdentity(url);if(!url||!user||!id||mediaCategory(id)!=='system'&&!/__(thumb\.webp|poster\.jpg)$/.test(id))return;
+    -  // Avatars should stay small; previews must never fetch unbounded originals.
+    -  const maxBytes=id.startsWith('connect-avatars/')?1024*1024:512*1024;
+    -  try{await remember(url,user,maxBytes);}catch{/* Network fallback remains usable. */}
+    + const id=mediaIdentity(url),maxBytes=id?automaticImageByteLimit(id):0;
+    + if(!url||!user||!maxBytes)return;
+    + await remember(url,user,maxBytes);
+     }
+ 
+     /** Profile bytes reuse this same objects store, keyed by path, never signed URL. */
+    @@ -295,17 +342,19 @@ function profileIdentity(path:string){return 'connect-profile-media/'+path;}
+     export async function resolveCachedProfileFile(user:string,path:string,version?:string):Promise<string|null>{
+      if(owner!==user||!path||path.includes('?')||path.includes('://'))return null;
+      const identity=profileIdentity(path),key=user+':'+identity;
+    - if(version)versions.set(key,version);
+    + if(version){await noteMediaVersion(user,identity,version);versions.set(key,version);}
+      const source=location.origin+'/storage/v1/object/authenticated/'+identity.split('/').map(encodeURIComponent).join('/');
+      const resolved=await resolveCachedMedia(source,user);return resolved===source?null:resolved;
+     }
+    -export async function prefetchProfileFile(url:string,user:string,_kind:string,maxBytes:number,epoch=mediaEpoch,signal?:AbortSignal):Promise<void>{
+    - const id=mediaIdentity(url);if(!id?.startsWith('connect-profile-media/')||!cacheLeaseValid(user,epoch))return;
+    +export async function prefetchProfileFile(url:string,user:string,kind:string,maxBytes:number,epoch=mediaEpoch,signal?:AbortSignal):Promise<void>{
+    + // Image sidecars use prefetchCachedMedia; photo/video originals stay on demand.
+    + const id=mediaIdentity(url);if(kind!=='music'||!id?.startsWith('connect-profile-media/')||mediaCategory(id)!=='audio'||!cacheLeaseValid(user,epoch))return;
+      await remember(url,user,maxBytes,signal);
+     }
+     export async function purgeCachedProfileFile(user:string,path:string,permanent=false):Promise<void>{
+      if(owner!==user)return;const key=user+':'+profileIdentity(path),database=await db();versions.set(key,'revoked:'+Date.now());
+      await new Promise<void>((resolve,reject)=>{const tx=database.transaction([STORE,'retired'],'readwrite');if(permanent)tx.objectStore('retired').put(true,key);tx.objectStore(STORE).delete(key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
+    + await clearCachedMedia('temporary',profileIdentity(path));
+      const local=objectUrls.get(key);if(local){URL.revokeObjectURL(local);originals.delete(local);objectUrls.delete(key);}
+      window.dispatchEvent(new CustomEvent('connect:profile-media-retired',{detail:{user,path}}));
+     }
+    @@ -319,6 +368,8 @@ export const retireCachedProfileFile=(user:string,path:string)=>purgeCachedProfi
+ 
+     /** Preserve the existing Android/DuckDNS media proxy for renewed player URLs. */
+     export function mediaPlaybackUrl(url:string):string{
+    + const result=cacheMediaUrl(url);if(!signedMediaIssued.has(result))signedMediaIssued.set(result,Date.now());if(signedMediaIssued.size>2048)signedMediaIssued.delete(signedMediaIssued.keys().next().value!);return result;
+    + /* Legacy proxy retained below for source compatibility. */
+      if(location.hostname!=='connect-chat.duckdns.org')return url;
+      const root=process.env.NEXT_PUBLIC_SUPABASE_URL||'';
+      try{const source=new URL(url),base=new URL(root);
+    @@ -366,3 +417,140 @@ export async function prefetchChatAudio(url:string,user:string,declaredSize:numb
+       if(!url||!user||!id?.startsWith('connect-attachments/')||!declaredSize||declaredSize>1024*1024)return;
+       await remember(url,user,1024*1024);
+     }
+    +
+    +/** In-memory signatures only; durable bytes remain in the existing account/path cache. */
+    +type IO={
+    + lease:(user:string)=>number|null;
+    + cached:(user:string,bucket:string,path:string)=>Promise<string|null>;
+    + sign:(user:string,bucket:string,path:string)=>Promise<string|undefined>;
+    + now?:()=>number;
+    +};
+    +export function createSignedMediaCache(io:IO){
+    + const now=io.now||Date.now;
+    + const links=new Map<string,{url:string;expires:number;lease:number}>();
+    + const pending=new Map<string,Promise<string|undefined>>();
+    + async function resolve(user:string,bucket:string,path:string,force=false):Promise<string|undefined>{
+    +  const lease=io.lease(user);if(lease===null||!user||!path)return;
+    +  const valid=()=>io.lease(user)===lease;
+    +  // Local bytes are independent of token expiry; never sign merely to read them.
+    +  if(!force){const local=await io.cached(user,bucket,path);if(!valid())return;if(local)return local;}
+    +  const key=user+':'+bucket+'/'+path;
+    +  if(force)links.delete(key);
+    +  const old=links.get(key);
+    +  if(!force&&old?.lease===lease&&old.expires>now()+60000)return old.url;
+    +  const operationKey=key+':'+lease,existing=pending.get(operationKey);if(existing)return existing;
+    +  const started=now();
+    +  const task=(async()=>{
+    +   const url=await io.sign(user,bucket,path);
+    +   if(!url||!valid()||started+3600000<=now()+60000)return;
+    +   links.set(key,{url,expires:started+3600000,lease});
+    +   if(links.size>1024)links.delete(links.keys().next().value!);
+    +   return url;
+    +  })().finally(()=>{if(pending.get(operationKey)===task)pending.delete(operationKey);});
+    +  pending.set(operationKey,task);return task;
+    + }
+    + return {resolve,clear:(user:string)=>{for(const key of links.keys())if(key.startsWith(user+':'))links.delete(key);}};
+    +}
+    +
+    +
+    +// CONNECT_MEDIA_RESPONSE_CACHE_V1 — per-login request scope, not a cache key.
+    +type MediaCacheTransport='pending'|'worker'|'native'|'legacy';
+    +let mediaTransport:MediaCacheTransport='legacy',mediaNonce='',mediaBound=false;
+    +let mediaReady:Promise<boolean>=Promise.resolve(false),mediaBarrier:Promise<unknown>=Promise.resolve();
+    +let firstMediaOwner:(()=>void)|undefined,hasMediaOwner=false;
+    +const firstMediaOwnerReady=new Promise<void>(resolve=>{firstMediaOwner=resolve;});
+    +const mediaEpochKeys=(user:string,file:string)=>['@cm-owner:'+user,'@cm-file:'+file,...(['system','photos','videos','audio','other'] as const).map(k=>'@cm-kind:'+user+':'+k),'@cm-version:'+file,file];
+    +const nativeMediaBridge=()=>typeof window==='undefined'?undefined:(window as unknown as {ConnectNative?:{request:(name:string,value:unknown)=>Promise<any>}}).ConnectNative;
+    +export function whenMediaCacheReady(){return mediaReady;}
+    +export function isCachedMediaUrl(source:string){if(source.startsWith('blob:'))return true;try{const u=new URL(source,location.href);return !!owner&&u.origin===location.origin&&u.searchParams.get('__cm_local')==='1'&&u.searchParams.get('__cm')===mediaNonce;}catch{return false;}}
+    +function mediaBaseUrl(source:string){try{const u=new URL(source,location.href);if(!mediaIdentity(u.href)||mediaIdentity(u.href)!.startsWith('core'))return source;if(u.origin!==location.origin){const proxy=u.hostname.endsWith('.storage.supabase.co')?'/supabase-storage':'/supabase';return location.origin+proxy+u.pathname+u.search;}return u.href;}catch{return source;}}
+    +export function cacheMediaUrl(source:string){const raw=mediaBaseUrl(source);try{const u=new URL(raw,location.href);if(!mediaIdentity(u.href)||mediaIdentity(u.href)!.startsWith('core'))return raw;const old=u.searchParams.get('__cm');if(old&&old!==mediaNonce)return '';if(mediaBound&&owner)u.searchParams.set('__cm',mediaNonce);else{u.searchParams.delete('__cm');u.searchParams.delete('__cm_local');}return u.href;}catch{return raw;}}
+    +async function mediaRPC(worker:ServiceWorker,value:unknown,timeout=3000):Promise<any>{return new Promise((resolve,reject)=>{const channel=new MessageChannel();const timer=setTimeout(()=>{channel.port1.close();reject(Error('Media cache worker unavailable'));},timeout);channel.port1.onmessage=event=>{clearTimeout(timer);channel.port1.close();resolve(event.data);};worker.postMessage(value,[channel.port2]);});}
+    +async function nativeMedia(action:string,payload:Record<string,unknown>={},user=owner,nonce=mediaNonce):Promise<any>{const bridge=nativeMediaBridge();if(!bridge)return;const reply=await bridge.request('media:cache',{action,userId:user,nonce,...payload});return reply?.supported?reply.value:undefined;}
+    +async function bindMediaWorker(user:string,nonce:string):Promise<boolean>{
+    + if(!('serviceWorker' in navigator))return false;
+    + const value={type:'CONNECT_MEDIA_BIND',protocol:1,user,nonce,limit:LIMITS[cacheLimit()]||LIMITS.auto};
+    + const current=()=>owner===user&&mediaNonce===nonce;
+    + const active=navigator.serviceWorker.controller;
+    + if(active){try{const reply=await mediaRPC(active,value,300);if(reply?.protocol===1&&reply.supported&&current())return true;}catch{/* Upgrade a pre-cache worker without delaying already cached blobs. */}}
+    + const installed=await navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'});
+    + const updating=installed.installing||installed.waiting;if(updating&&updating.state!=='activated')await new Promise<void>((resolve,reject)=>{const done=()=>{if(updating.state==='activated'){clearTimeout(timer);updating.removeEventListener('statechange',done);resolve();}else if(updating.state==='redundant'){clearTimeout(timer);updating.removeEventListener('statechange',done);reject(Error('Media worker upgrade failed'));}};const timer=setTimeout(()=>{updating.removeEventListener('statechange',done);reject(Error('Media worker upgrade timed out'));},8000);updating.addEventListener('statechange',done);done();});
+    + const registration=await navigator.serviceWorker.ready;
+    + if(!navigator.serviceWorker.controller){await mediaRPC(registration.active!,value);await new Promise<void>((resolve,reject)=>{const done=()=>{clearTimeout(timer);navigator.serviceWorker.removeEventListener('controllerchange',done);resolve();};const timer=setTimeout(()=>{navigator.serviceWorker.removeEventListener('controllerchange',done);reject(Error('Media worker is not controlling this document'));},5000);navigator.serviceWorker.addEventListener('controllerchange',done);if(navigator.serviceWorker.controller)done();});}
+    + const reply=await mediaRPC(navigator.serviceWorker.controller!,value);return reply?.protocol===1&&reply.supported&&current();
+    +}
+    +function beginResponseCache(user:string){
+    + const nonce=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');mediaNonce=nonce;mediaBound=false;mediaTransport='pending';hasMediaOwner=true;firstMediaOwner?.();firstMediaOwner=undefined;
+    + mediaReady=(async()=>{await mediaBarrier;if(owner!==user||mediaNonce!==nonce)return false;
+    +  if(nativeMediaBridge()){const reply=await nativeMedia('bind',{limitBytes:LIMITS[cacheLimit()]||LIMITS.auto},user,nonce);if(owner!==user||mediaNonce!==nonce)return false;mediaBound=reply===true;mediaTransport=mediaBound?'native':'legacy';}
+    +  else{mediaBound=await bindMediaWorker(user,nonce);mediaTransport=mediaBound?'worker':'legacy';}
+    +  return mediaBound;
+    + })().catch(()=>{if(owner===user&&mediaNonce===nonce){mediaBound=false;mediaTransport='legacy';window.dispatchEvent(new CustomEvent('connect:media-cache-capability',{detail:{available:false}}));}return false;});
+    + if('serviceWorker' in navigator&&!nativeMediaBridge()){
+    +  const message=(event:MessageEvent)=>{if(event.data?.type==='CONNECT_MEDIA_SCOPE_REQUEST'&&owner===user&&mediaNonce===nonce)event.ports?.[0]?.postMessage({user,nonce,limit:LIMITS[cacheLimit()]||LIMITS.auto});if(event.data?.type==='CONNECT_MEDIA_FILLED'&&event.data.user===owner)window.dispatchEvent(new CustomEvent('connect:media-cache-filled',{detail:event.data}));};
+    +  const changed=()=>{if(owner===user&&mediaNonce===nonce){mediaReady=bindMediaWorker(user,nonce).then(ok=>{mediaBound=ok;mediaTransport=ok?'worker':'legacy';return ok;}).catch(()=>false);}};
+    +  navigator.serviceWorker.addEventListener('message',message);navigator.serviceWorker.addEventListener('controllerchange',changed);
+    +  return()=>{navigator.serviceWorker.removeEventListener('message',message);navigator.serviceWorker.removeEventListener('controllerchange',changed);navigator.serviceWorker.controller?.postMessage({type:'CONNECT_MEDIA_UNBIND',nonce});endResponseCache(user,nonce);};
+    + }
+    + return()=>{void nativeMedia('unbind',{},user,nonce).catch(()=>{});endResponseCache(user,nonce);};
+    +}
+    +function endResponseCache(user:string,nonce:string){if(mediaNonce===nonce){mediaBound=false;mediaTransport='legacy';mediaNonce='';}mediaBarrier=mediaBarrier.catch(()=>{}).then(async()=>{const d=await db();await new Promise<void>((resolve,reject)=>{const tx=d.transaction('retired','readwrite'),store=tx.objectStore('retired');const q=store.get('@cm-owner:'+user);q.onsuccess=()=>store.put(Number(q.result||0)+1,'@cm-owner:'+user);tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});}).catch(()=>{});}
+    +function installMediaSourceGate(){
+    + if(typeof window==='undefined')return;
+    + const record=new WeakMap<Element,Map<string,{source:string;promise:Promise<void>}>>();
+    + const setAttribute=Element.prototype.setAttribute,removeAttribute=Element.prototype.removeAttribute;
+    + const isMedia=(el:Element,name:string)=>name==='src'&&['IMG','AUDIO','VIDEO','SOURCE'].includes(el.tagName)||name==='poster'&&el.tagName==='VIDEO';
+    + function assign(el:Element,name:string,source:string,write:(value:string)=>void){
+    +  const old=record.get(el);old?.delete(name);
+    +  if(!isMedia(el,name)||source.startsWith('blob:')||source.startsWith('data:')){write(source);return;}const id=mediaIdentity(source);if(!id||id.startsWith('core')){write(source);return;}
+    +  if(!owner&&hasMediaOwner){write('');return;}
+    +  const requestedOwner=owner,requestedNonce=mediaNonce;const entries=old||new Map();record.set(el,entries);
+    +  const item={source,promise:Promise.resolve()};entries.set(name,item);
+  CONNECT_MEDIA_PATCH_009: |2
+    +  item.promise=(async()=>{if(!requestedOwner)await firstMediaOwnerReady;const user=requestedOwner||owner,nonce=requestedNonce||mediaNonce;await mediaReady;if(entries.get(name)!==item||owner!==user||mediaNonce!==nonce||!user)return;const local=await resolveCachedMedia(source,user);if(entries.get(name)!==item||owner!==user||mediaNonce!==nonce)return;entries.delete(name);write(cacheMediaUrl(local));})();
+    + }
+    + Element.prototype.setAttribute=function(name,value){const key=name.toLowerCase();assign(this,key,String(value),next=>setAttribute.call(this,name,next));};
+    + Element.prototype.removeAttribute=function(name){record.get(this)?.delete(name.toLowerCase());removeAttribute.call(this,name);};
+    + for(const [prototype,name]of [[HTMLImageElement.prototype,'src'],[HTMLMediaElement.prototype,'src'],[HTMLSourceElement.prototype,'src'],[HTMLVideoElement.prototype,'poster']] as const){const descriptor=Object.getOwnPropertyDescriptor(prototype,name);if(!descriptor?.set)continue;Object.defineProperty(prototype,name,{...descriptor,set(this:Element,value:string){assign(this,name,String(value),next=>descriptor.set!.call(this,next));}});}
+    + const decode=HTMLImageElement.prototype.decode;if(decode)HTMLImageElement.prototype.decode=function(){const waiting=record.get(this)?.get('src');return waiting?waiting.promise.then(()=>decode.call(this)):decode.call(this);};
+    + const play=HTMLMediaElement.prototype.play,load=HTMLMediaElement.prototype.load;HTMLMediaElement.prototype.play=function(){const pending=record.get(this)?.get('src');return pending?pending.promise.then(()=>play.call(this)):play.call(this);};HTMLMediaElement.prototype.load=function(){const pending=record.get(this)?.get('src');if(pending){void pending.promise.then(()=>{if(!record.get(this)?.get('src'))load.call(this);});}else load.call(this);};
+    +}
+    +let mediaFetchInstalled=false;
+    +function installMediaFetchGate(){if(mediaFetchInstalled)return;mediaFetchInstalled=true;const original=window.fetch.bind(window);
+    + window.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{const raw=typeof input==='string'?input:input instanceof URL?input.href:input.url,method=init?.method||(input instanceof Request?input.method:'GET'),id=mediaIdentity(raw);if(method.toUpperCase()!=='GET'||!id||id.startsWith('core'))return original(input,init);const request=new Request(input,init);const user=owner,epoch=mediaEpoch,nonce=mediaNonce;if(!user)throw new DOMException('Media account signed out','AbortError');await mediaReady;if(!cacheLeaseValid(user,epoch)||nonce!==mediaNonce)throw new DOMException('Media account changed','AbortError');const source=cacheMediaUrl(request.url);if(!source)throw new DOMException('Stale media scope','AbortError');return original(new Request(source,request));}) as typeof fetch;
+    +}
+    +async function readStreamedBlob(row:Entry,url:string,user:string,epoch:number):Promise<Blob|null>{
+    + const d=await db();const key=row.key;const meta=await new Promise<any>((resolve,reject)=>{const q=d.transaction('media-ranges').objectStore('media-ranges').get(key);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});if(!meta?.complete||meta.total!==row.size)return null;
+    + const pieces:ArrayBuffer[]=[];let offset=0;
+    + while(offset<row.size){const part=await new Promise<any>((resolve,reject)=>{const q=d.transaction('media-ranges').objectStore('media-ranges').index('fileStart').openCursor(IDBKeyRange.bound([key,0],[key,offset]),'prev');q.onsuccess=()=>resolve(q.result?.value);q.onerror=()=>reject(q.error);});if(!part||part.end<offset||!cacheLeaseValid(user,epoch))return null;const size=Math.min(row.size-offset,part.end-offset+1);pieces.push(part.bytes.slice(offset-part.start,offset-part.start+size));offset+=size;}
+    + return new Blob(pieces,{type:row.type||contentType(mediaIdentity(url)||'')});
+    +}
+    +async function responseCacheLookup(url:string,user:string):Promise<string|null>{
+    + if(user!==owner)return null;await mediaReady;if(mediaTransport!=='native'||user!==owner)return null;const id=mediaIdentity(url);if(!id)return null;const value=await nativeMedia('lookup',{identity:id,version:versionsForMedia().get(user+':'+id)||''});return value?.complete&&typeof value.url==='string'?value.url:null;
+    +}
+    +// Each platform retains its existing cache entry schema; versions are shared locally.
+    +const responseMediaVersions=new Map<string,string>();
+    +function versionsForMedia(){return responseMediaVersions;}
+    +export async function noteMediaVersion(user:string,identity:string,version:string){
+    + if(!version||user!==owner)return;const key=user+':'+identity,previous=responseMediaVersions.get(key);responseMediaVersions.set(key,version);const d=await db();let invalidate=false;
+    + await new Promise<void>((resolve,reject)=>{const tx=d.transaction(['retired','objects'],'readwrite'),store=tx.objectStore('retired'),request=store.get('@cm-version:'+key);request.onsuccess=()=>{invalidate=Boolean(request.result&&request.result!==version||previous&&previous!==version);store.put(version,'@cm-version:'+key);};tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});
+    + if(invalidate)await clearCachedMedia('temporary',identity);if(mediaTransport==='native')await nativeMedia('lookup',{identity,version});
+    +}
+    +async function clearResponseParts(category:CacheCategory|'temporary',identity:string|undefined,viewer:string){
+    + const d=await db();const metas=await new Promise<any[]>((resolve,reject)=>{const q=d.transaction('media-ranges').objectStore('media-ranges').index('kind').getAll('meta');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});
+    + const affected=metas.filter(m=>m.user===viewer&&(identity?m.id===identity:category==='temporary'?m.category!=='system':m.category===category));
+    + await new Promise<void>((resolve,reject)=>{const tx=d.transaction(['retired','media-ranges'],'readwrite'),retired=tx.objectStore('retired'),parts=tx.objectStore('media-ranges');const bump=(key:string)=>{const q=retired.get(key);q.onsuccess=()=>retired.put(Number(q.result||0)+1,key);};if(identity)bump('@cm-file:'+viewer+':'+identity);else for(const kind of category==='temporary'?['photos','videos','audio','other']:[category])bump('@cm-kind:'+viewer+':'+kind);
+    +  for(const meta of affected){const q=parts.index('file').openKeyCursor(IDBKeyRange.only(meta.file));q.onsuccess=()=>{const cursor=q.result;if(cursor){parts.delete(cursor.primaryKey);cursor.continue();}};}tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);
+    + });
+    + if(mediaTransport==='native'&&viewer===owner){let retire=false;if(identity)retire=await new Promise<boolean>((resolve,reject)=>{const q=d.transaction('retired').objectStore('retired').get(viewer+':'+identity);q.onsuccess=()=>resolve(Boolean(q.result));q.onerror=()=>reject(q.error);});await nativeMedia('clear',{category,...(identity?{identity,retire}: {})});}
+    +}
+    +installMediaSourceGate();
+    +
+    +const signedMediaIssued=new Map<string,number>();
+    +export function signedMediaUrlValid(url:string):boolean{
+    + if(!url)return false;if(isCachedMediaUrl(url))return true;
+    + try{const token=new URL(url,location.href).searchParams.get('token');if(token){const raw=token.split('.')[1];if(raw){const data=JSON.parse(atob(raw.replace(/-/g,'+').replace(/_/g,'/')));if(Number.isFinite(data.exp))return Date.now()<data.exp*1000-45000;}}}catch{}
+    + const at=signedMediaIssued.get(url);return at!==undefined&&Date.now()<at+3555000;
+    +}
+    +
+    +async function updateResponseCacheLimit(){try{await mediaReady;if(!owner||!mediaBound)return;const limit=LIMITS[cacheLimit()]||LIMITS.auto;if(mediaTransport==='native')await nativeMedia('bind',{limitBytes:limit});else if(navigator.serviceWorker.controller)await mediaRPC(navigator.serviceWorker.controller,{type:'CONNECT_MEDIA_BIND',protocol:1,user:owner,nonce:mediaNonce,limit});}catch{/* Cache settings never invalidate authentication. */}}
+    +async function responseCacheStats(result:Record<CacheCategory,number>){const user=owner;try{const d=await db();const partial=await new Promise<any[]>((resolve,reject)=>{const q=d.transaction('media-ranges').objectStore('media-ranges').index('kind').getAll('meta');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});for(const m of partial)if(m.user===user&&!m.complete)result[m.category as CacheCategory]+=Number(m.stored)||0;if(mediaTransport==='native'){const native=await nativeMedia('stats');if(user===owner&&native)for(const kind of ['system','photos','videos','audio','other'] as const)result[kind]+=Number(native[kind])||0;}}catch{/* Browser/private storage may be unavailable. */}return user===owner?result:{system:0,photos:0,videos:0,audio:0,other:0};}
+    diff --git a/native/web/lib/profile-media-index.ts b/native/web/lib/profile-media-index.ts
+    index dbf31cb..066751f 100644
+    --- a/native/web/lib/profile-media-index.ts
+    +++ b/native/web/lib/profile-media-index.ts
+    @@ -23,7 +23,7 @@ export async function removeProfileLibraryItem(viewer:string,owner:string,kind:P
+     }
+     export function profilePrefetchSelection(kind:ProfileLibraryKind,rows:ProfileLibraryRow[]){
+      const caps={photos:{count:3,bytes:2*1024**2},videos:{count:1,bytes:4*1024**2},music:{count:1,bytes:4*1024**2}};
+    - const cap=caps[kind];return {cap,items:rows.filter(x=>(x.size||0)>0&&x.size!<=cap.bytes).slice(0,cap.count)};
+    + const cap=caps[kind];return {cap,items:[] as ProfileLibraryRow[]};
+     }
+     export function allowProfilePrefetch(){
+      const c=(navigator as Navigator&{connection?:{saveData?:boolean;effectiveType?:string}}).connection;
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      base: ${{ steps.base.outputs.sha }}
+      tree: ${{ steps.tree.outputs.sha }}
+    steps:
+      - name: Require the intended repository and main dispatch
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Check latest default branch and record source SHA
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" = main
+          current="$(git rev-parse HEAD)"
+          test "$current" = "$GITHUB_SHA"
+          test "$current" = "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test -s native/package-lock.json
+          git diff --exit-code
+          echo "sha=$current" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/connect-media-logs"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Validate this complete YAML, expressions and byte size
+        env:
+          WORKFLOW_PATH: .github/workflows/connect-android-media-egress.yml
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python3 - <<'PY'
+          import os,pathlib,yaml
+          path=pathlib.Path(os.environ['WORKFLOW_PATH']);data=path.read_bytes()
+          assert 0<len(data)<450000, 'Workflow must be below 450000 bytes'
+          doc=yaml.load(data,Loader=yaml.BaseLoader)
+          assert set(doc['on'])=={'workflow_dispatch'}
+          assert set(doc['jobs'])=={'verify','commit'}
+          print(str(path)+': '+str(len(data))+' bytes; YAML parsed')
+          PY
+          tool="$RUNNER_TEMP/connect-actionlint"
+          mkdir -p "$tool"
+          archive=actionlint_1.7.12_linux_amd64.tar.gz
+          base=https://github.com/rhysd/actionlint/releases/download/v1.7.12
+          curl --fail --location --retry 2 "$base/$archive" --output "$tool/$archive"
+          curl --fail --location --retry 2 "$base/actionlint_1.7.12_checksums.txt" --output "$tool/checksums.txt"
+          (cd "$tool" && awk -v wanted="$archive" '$2 == wanted || $2 == ("*" wanted) {print;matched=1} END {if(!matched)exit 1}' checksums.txt | sha256sum --check)
+          tar -xzf "$tool/$archive" -C "$tool" actionlint
+          "$tool/actionlint" -color "$WORKFLOW_PATH"
+      - name: Apply only the exact audited missing repairs
+        id: patch
+        run: &apply_media |
+          set -euo pipefail
+          python3 - <<'PY_CONNECT_MEDIA_INSTALL_20261120'
+          import hashlib,json,os,pathlib,subprocess
+          root=pathlib.Path.cwd()
+          def run(*args,**kw):return subprocess.run(args,check=True,**kw)
+          def digest(name):
+           p=root/name
+           if not p.is_file() or p.is_symlink() or not p.resolve().is_relative_to(root.resolve()):raise SystemExit('SOURCE_DRIFT: missing/unsafe '+name)
+           run('git','ls-files','--error-unmatch','--',name,stdout=subprocess.DEVNULL)
+           return hashlib.sha256(p.read_bytes()).hexdigest()
+          STATES=json.loads(os.environ['CONNECT_MEDIA_STATES'])
+          GUARDS=json.loads(os.environ['CONNECT_MEDIA_GUARDS'])
+          for name,expected in GUARDS.items():
+           if digest(name)!=expected:raise SystemExit('SOURCE_DRIFT: audited dependency/configuration changed: '+name)
+          actual={name:digest(name) for name in STATES}
+          before=all(actual[n]==v['before'] for n,v in STATES.items())
+          after=all(actual[n]==v['after'] for n,v in STATES.items())
+          if not before and not after:raise SystemExit('SOURCE_DRIFT: incompatible or partially edited sources; nothing overwritten')
+          if os.environ.get('VERIFY_ONLY')=='1' and not after:raise SystemExit('SOURCE_DRIFT: tested sources changed during verification')
+          PATCH=''.join(os.environ[k] for k in sorted(os.environ) if k.startswith('CONNECT_MEDIA_PATCH_'))
+          if before:
+           run('git','apply','--check','--whitespace=error-all','-',input=PATCH.encode())
+           run('git','apply','--whitespace=error-all','-',input=PATCH.encode())
+          for name,v in STATES.items():
+           if digest(name)!=v['after']:raise SystemExit('SOURCE_DRIFT: unexpected patched bytes: '+name)
+          changed=subprocess.check_output(['git','diff','--name-only','--diff-filter=ACDMRTUXB']).decode().splitlines()
+          if set(changed)-set(STATES):raise SystemExit('Unexpected modified files: '+repr(set(changed)-set(STATES)))
+          run('git','diff','--check')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+           out.write('changed='+str(bool(changed)).lower()+'\n')
+           out.write('paths='+json.dumps(list(STATES),separators=(',',':'))+'\n')
+          print('Exact reviewed source state verified: '+('patched existing files' if before else 'already applied'))
+          PY_CONNECT_MEDIA_INSTALL_20261120
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+      - name: Locked install, reviewed source lock and embedded UI
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/check-parity-source.mjs
+          npm run build:web 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/build-web.log"
+          node scripts/release/validate.mjs source
+          npm run typecheck 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/typecheck-native.log"
+          npm run typecheck:web 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/typecheck-web.log"
+      - name: Unit, browser, signing policy, calls, push, TTL and cache regressions
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npx --no-install playwright-core install --with-deps chromium
+          CHROMIUM_PATH="$(node -p "require('playwright-core').chromium.executablePath()")"
+          export CHROMIUM_PATH
+          export CONNECT_CHROMIUM_PATH="$CHROMIUM_PATH"
+          test -x "$CHROMIUM_PATH"
+          python3 -m unittest discover -s scripts -p test_release_signing.py 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/signing-policy.log"
+          node scripts/verify-builtin-sounds.cjs
+          node scripts/generate-call-policy.cjs --check
+          npm test 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/node-tests.log"
+          npm run test:browser 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/browser-tests.log"
+      - name: Verify existing identity, native fingerprint and Hermes export
+        working-directory: native
+        run: |
+          set -euo pipefail
+          node scripts/release/config.mjs 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/native-baseline.json"
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import {app,nativeBaseline} from './scripts/release/config.mjs';
+          assert.equal(app.android.package,'com.connect.messenger');assert.equal(app.version,'3.0.8');assert.equal(app.android.versionCode,26);
+          assert.equal(app.runtimeVersion,'connect-android-ota-v2-sdk58');assert.equal(app.extra.eas.projectId,'430c7f08-3921-48d5-96d1-f7c3d686d3bf');
+          assert.equal(app.updates.requestHeaders['expo-channel-name'],'production');
+          assert.equal(nativeBaseline().nativeSha256,'b1e3c53d0ab0c258944102b131a1f801ceae0304a158a9ec484e1637fbf7262d');
+          console.log('Native code changed: a new production-signed APK is required; no OTA is published by this workflow.');
+          JS
+          npx --no-install expo export --platform android --output-dir verification/parity/export 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/export.log"
+          node scripts/release/validate.mjs export
+      - name: Generate native project and use the actual reviewed SDK packages
+        working-directory: native
+        run: |
+          set -euo pipefail
+          npx --no-install expo prebuild --platform android --no-install 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/prebuild.log"
+          node scripts/release/validate.mjs prebuild
+          node scripts/check-parity-source.mjs --tools > "$RUNNER_TEMP/connect-media-logs/android-tools.json"
+          readarray -t sdk < <(node -e "const v=require(process.env.RUNNER_TEMP+'/connect-media-logs/android-tools.json');console.log(v.sdkPlatform);console.log(v.buildTools);console.log(v.ndk)")
+          sdkmanager --channel=3 "${sdk[0]}" "build-tools;${sdk[1]}" "ndk;${sdk[2]}" 'cmake;3.22.1' 'platform-tools'
+      - name: Compile Kotlin and Java; run real HTTP and SQLite JVM tests; Android Lint
+        working-directory: native/android
+        run: |
+          set -euo pipefail
+          jvm='-Xmx2560m -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8'
+          ./gradlew :app:compileReleaseKotlin :app:compileReleaseJavaWithJavac :app:testReleaseUnitTest \
+            --no-daemon --max-workers=2 "-Dorg.gradle.jvmargs=$jvm" 2>&1 | tee "$RUNNER_TEMP/connect-media-logs/gradle-tests.log"
+          # Separate Lint's daemon/metaspace from native compilation, as in the existing release workflow.
+          ./gradlew :app:lintRelease --no-daemon --max-workers=1 "-Dorg.gradle.jvmargs=$jvm" \
+            2>&1 | tee "$RUNNER_TEMP/connect-media-logs/gradle-lint.log"
+          python3 - <<'PY'
+          import pathlib,xml.etree.ElementTree as E
+          reports=list(pathlib.Path('app/build/test-results').rglob('*MediaResponseCacheTest*.xml'))
+          assert reports, 'The new real HTTP/Range JVM tests did not execute'
+          for path in reports:
+              suite=E.parse(path).getroot()
+              assert int(suite.attrib['tests'])>=8 and int(suite.attrib.get('failures','0'))==0 and int(suite.attrib.get('errors','0'))==0 and int(suite.attrib.get('skipped','0'))==0
+          print('Verified actual MediaResponseCacheTest reports')
+          PY
+      - name: Recheck exact source bytes after all gates
+        id: sealed
+        env:
+          VERIFY_ONLY: '1'
+        run: *apply_media
+      - name: Seal the exact tested tree
+        id: tree
+        env:
+          ALLOWED_PATHS: ${{ steps.sealed.outputs.paths }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess
+          paths=json.loads(os.environ['ALLOWED_PATHS'])
+          changed=subprocess.check_output(['git','diff','--name-only']).decode().splitlines()
+          assert set(changed)<=set(paths), 'Unexpected source changes'
+          assert not subprocess.check_output(['git','ls-files','--others','--exclude-standard']), 'Unexpected new tracked candidates'
+          subprocess.run(['git','add','--',*paths],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          tree=subprocess.check_output(['git','write-tree']).decode().strip()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:out.write('sha='+tree+'\n')
+          PY
+      - name: Store verification logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: connect-android-media-verification-${{ github.run_id }}
+          path: ${{ runner.temp }}/connect-media-logs/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Verification summary and physical-device checklist
+        if: always()
+        env:
+          VERIFY_RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Verification result: '"$VERIFY_RESULT"
+            echo 'Source SHA: ${{ steps.base.outputs.sha }}'
+            echo 'Tests and byte accounting are available in the verification artifact.'
+            echo 'No Supabase schema, policies, accounts, messages or server media are changed.'
+            echo 'НЕ ПРОВЕРЕНО на устройствах: iPhone installed PWA cold/offline history and media; Poco F1 Android 10 and a modern Android: offline photo/voice/audio/video/video notes, seek, process restart, expiry, account switch, cache clear, delete for everyone, large chat scrolling.'
+            echo 'НЕ ПРОВЕРЕНО на устройствах: background/locked-screen calls, push notifications, reconnect and data/login retention after a signed APK upgrade.'
+            echo 'No production deploy, APK upload, version bump or OTA publication runs here.'
+            echo 'Android first-response interception requires a new APK via the existing production signing/release workflow. Existing OTA infrastructure stays unchanged; its native fingerprint gate must reject the previous APK baseline.'
+          } >> "$GITHUB_STEP_SUMMARY"
+  commit:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Require the intended main dispatch
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Chimera1988/connect-android'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.base }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Reproduce the inline repair from the tested parent
+        id: patch
+        run: *apply_media
+      - name: Commit the exact tested files only if main has not moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_BASE: ${{ needs.verify.outputs.base }}
+          EXPECTED_TREE: ${{ needs.verify.outputs.tree }}
+          ALLOWED_PATHS: ${{ steps.patch.outputs.paths }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$EXPECTED_BASE"
+          python3 - <<'PY'
+          import json,os,subprocess
+          paths=json.loads(os.environ['ALLOWED_PATHS'])
+          changed=subprocess.check_output(['git','diff','--name-only']).decode().splitlines()
+          assert set(changed)<=set(paths)
+          subprocess.run(['git','add','--',*paths],check=True)
+          tree=subprocess.check_output(['git','write-tree']).decode().strip()
+          assert tree==os.environ['EXPECTED_TREE'], 'The commit tree differs from the verified tree'
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          PY
+          if git diff --cached --quiet; then
+            echo 'All exact repairs are already in main; no empty commit created.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(media): persist first responses and reuse verified ranges'
+          # Ordinary fast-forward push; a concurrent main update fails safely.
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:refs/heads/main
+          committed="$(git rev-parse HEAD)"
+          status="$(gh api "repos/$GITHUB_REPOSITORY/compare/$committed...main" --jq .status)"
+          [[ "$status" == identical || "$status" == ahead ]]
+          echo "GitHub confirmed commit in main: https://github.com/$GITHUB_REPOSITORY/commit/$committed" >> "$GITHUB_STEP_SUMMARY"
+          echo 'No release was published by this workflow.' >> "$GITHUB_STEP_SUMMARY"
