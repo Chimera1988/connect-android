@@ -46,10 +46,11 @@ output = Path(sys.argv[2] if len(sys.argv) > 2 else apk.parent).resolve()
 output.mkdir(parents=True, exist_ok=True)
 sdk = Path(os.environ.get('ANDROID_SDK_ROOT', os.environ.get('ANDROID_HOME', '')))
 tools = sdk / 'build-tools' / '37.0.0'
+app_config = json.loads((Path(__file__).resolve().parents[1]/'app.json').read_text())['expo']
 badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(apk)], text=True)
 assert "package: name='com.connect.messenger'" in badging, 'Wrong application ID'
 assert "application-label:'Connect'" in badging, 'Wrong visible name'
-assert "versionCode='26'" in badging and "versionName='3.0.8'" in badging, 'Wrong release version'
+assert f"versionCode='{app_config['android']['versionCode']}'" in badging and f"versionName='{app_config['version']}'" in badging, 'Wrong release version'
 assert "sdkVersion:'29'" in badging, 'Android 10 minimum not enforced'
 assert 'application-debuggable' not in badging, 'Release must not be debuggable'
 with zipfile.ZipFile(apk) as z:
@@ -72,7 +73,6 @@ with zipfile.ZipFile(apk) as z:
         assert ('Lcom/connect/messenger/'+name+';').encode() in dex, 'Native implementation missing: '+name
     assert b'getAppIdentity' in dex, 'Installed APK identity API missing'
     resource_table = subprocess.check_output([str(tools/'aapt2'), 'dump', 'resources', str(apk)],text=True)
-    app_config = json.loads((Path(__file__).resolve().parents[1]/'app.json').read_text())['expo']
     assert app_config['runtimeVersion'] in resource_table, 'Packaged Expo runtime mismatch'
     manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'],text=True)
     assert app_config['updates']['url'] in manifest and 'production' in manifest, 'Wrong packaged OTA project/channel'
@@ -111,7 +111,7 @@ if compatible is False:
     raise SystemExit('Certificate differs from configured previous release; refusing incompatible update artifact')
 report = {
     'filename': 'Connect.apk', 'applicationId': 'com.connect.messenger',
-    'version': '3.0.8', 'versionCode': 26, 'minSdk': 29,
+    'version': app_config['version'], 'versionCode': app_config['android']['versionCode'], 'minSdk': 29,
     'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
     'signerSha256': fingerprint,
     'signing': 'verified-production-key',

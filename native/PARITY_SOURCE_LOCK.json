@@ -113,7 +113,7 @@
     "scripts/generate-call-policy.cjs": "f445667273a33e9481decade64a922e303552e84434591c55ea7bb4673faec5b",
     "scripts/test-cache-browser.mjs": "6c15be70064b3c6ea9c466ffcf42a30789547dd2b8eafbbea0f581ad0350771e",
     "scripts/test_release_signing.py": "1a372d660d8b8904277f46225f54bc2a72f5ed1c418795e911f56ad736a44b51",
-    "scripts/verify-apk.py": "d57490f4a5c0ee5f5c2b77dd33ca569ecc0879bbbf148570fbc150d658405b34",
+    "scripts/verify-apk.py": "5b9dfd65f212d3896357d9ffe4872541cc3158759a12c3035f9cb9adc8db1019",
     "scripts/verify-builtin-sounds.cjs": "65c13bbb426757fb08947d0420bb7be284939a052b825544f0a599068e381696",
     "scripts/verify-call-resources.py": "cfe785d9a7692eb39abe251fc10b02301f1a345c5695dfb5ffbe8af652628980",
     "shared/call-missed-fixtures.tsv": "0709375ba37a6302c2ce6b3dbf8abc9d82ec1be20ea9b806c076a1ecf8fb6a00",
