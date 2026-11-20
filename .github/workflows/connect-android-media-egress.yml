@@ -1827,24 +1827,58 @@ jobs:
           GUARDS=json.loads(os.environ['CONNECT_MEDIA_GUARDS'])
           for name,expected in GUARDS.items():
            if digest(name)!=expected:raise SystemExit('SOURCE_DRIFT: audited dependency/configuration changed: '+name)
+          TEST='native/plugins/history-tests/HistoryStoreTest.kt'
+          LOCK='native/PARITY_SOURCE_LOCK.json'
+          LEGACY='com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1",0),0)'
+          REPAIRED='MediaTestHttpServer.create(java.net.InetSocketAddress("127.0.0.1",0),0)'
+          HELPER='\n\n// CONNECT_MEDIA_HTTP_FIX_20261120: only public Android/JVM APIs in unit tests.\nprivate class MediaTestHeaders {\n    private val values=linkedMapOf<String,String>()\n    fun add(name:String,value:String){values[name.lowercase(java.util.Locale.ROOT)]=value}\n    fun getFirst(name:String):String?=values[name.lowercase(java.util.Locale.ROOT)]\n    fun lines():String=values.entries.joinToString(""){(key,value)->"$key: $value\\r\\n"}\n}\nprivate class MediaTestExchange(\n    val requestURI:java.net.URI,\n    val requestHeaders:MediaTestHeaders,\n    private val client:java.net.Socket\n) {\n    val responseHeaders=MediaTestHeaders()\n    val responseBody:java.io.OutputStream get()=client.getOutputStream()\n    fun sendResponseHeaders(status:Int,length:Long){\n        responseHeaders.add("Content-Length",maxOf(0,length).toString())\n        val reason=when(status){200->"OK";206->"Partial Content";503->"Service Unavailable";else->"Error"}\n        val head="HTTP/1.1 $status $reason\\r\\nConnection: close\\r\\n"+responseHeaders.lines()+"\\r\\n"\n        client.getOutputStream().write(head.toByteArray(Charsets.ISO_8859_1))\n        client.getOutputStream().flush()\n    }\n    fun close(){client.close()}\n}\nprivate class MediaTestHttpServer private constructor(\n    val address:java.net.InetSocketAddress,\n    private val listener:java.net.ServerSocket\n) {\n    lateinit var executor:java.util.concurrent.Executor\n    private var callback:((MediaTestExchange)->Unit)?=null\n    companion object {\n        fun create(address:java.net.InetSocketAddress,backlog:Int):MediaTestHttpServer {\n            val listener=java.net.ServerSocket()\n            listener.bind(address,maxOf(1,backlog))\n            return MediaTestHttpServer(listener.localSocketAddress as java.net.InetSocketAddress,listener)\n        }\n    }\n    fun createContext(path:String,handler:(MediaTestExchange)->Unit){\n        require(path=="/")\n        callback=handler\n    }\n    fun start(){\n        val handle=requireNotNull(callback)\n        executor.execute {\n            while(!listener.isClosed){\n                val socket=try{listener.accept()}catch(_:java.net.SocketException){break}\n                executor.execute {\n                    socket.use { connection ->\n                        connection.soTimeout=15000\n                        try{\n                            val reader=java.io.BufferedReader(java.io.InputStreamReader(connection.getInputStream(),Charsets.ISO_8859_1))\n                            val request=reader.readLine()?:return@use\n                            val parts=request.split(\' \')\n                            if(parts.size<2)return@use\n                            val headers=MediaTestHeaders()\n                            while(true){\n                                val line=reader.readLine()?:break\n                                if(line.isEmpty())break\n                                val colon=line.indexOf(\':\')\n                                if(colon>0)headers.add(line.substring(0,colon).trim(),line.substring(colon+1).trim())\n                            }\n                            handle(MediaTestExchange(java.net.URI(parts[1]),headers,connection))\n                        }catch(_:java.io.IOException){\n                            // Client cancellations are expected in the partial-range tests.\n                        }\n                    }\n                }\n            }\n        }\n    }\n    fun stop(delay:Int){listener.close()}\n}\n'
+          def sha(data):return hashlib.sha256(data).hexdigest()
+          def fixed_is_exact():
+           try:
+            test=(root/TEST).read_text()
+            lock=(root/LOCK).read_text()
+            if not test.endswith(HELPER) or test.count(REPAIRED)!=1 or LEGACY in test:return False
+            original_test=test[:-len(HELPER)].replace(REPAIRED,LEGACY)
+            if sha(original_test.encode())!=STATES[TEST]['after']:return False
+            actual_sha=sha(test.encode())
+            original_lock=lock.replace(actual_sha,STATES[TEST]['after'])
+            if actual_sha==STATES[TEST]['after'] or lock.count(actual_sha)!=1:return False
+            if sha(original_lock.encode())!=STATES[LOCK]['after']:return False
+            return True
+           except Exception:return False
           actual={name:digest(name) for name in STATES}
           before=all(actual[n]==v['before'] for n,v in STATES.items())
-          after=all(actual[n]==v['after'] for n,v in STATES.items())
-          if not before and not after:raise SystemExit('SOURCE_DRIFT: incompatible or partially edited sources; nothing overwritten')
-          if os.environ.get('VERIFY_ONLY')=='1' and not after:raise SystemExit('SOURCE_DRIFT: tested sources changed during verification')
+          original_after=all(actual[n]==v['after'] for n,v in STATES.items())
+          fixed=all(actual[n]==v['after'] for n,v in STATES.items() if n not in (TEST,LOCK)) and fixed_is_exact()
+          if not(before or original_after or fixed):raise SystemExit('SOURCE_DRIFT: incompatible or partially edited sources; nothing overwritten')
+          if os.environ.get('VERIFY_ONLY')=='1' and not fixed:raise SystemExit('SOURCE_DRIFT: tested sources changed during verification')
           PATCH=''.join(os.environ[k] for k in sorted(os.environ) if k.startswith('CONNECT_MEDIA_PATCH_'))
           if before:
            run('git','apply','--check','--whitespace=error-all','-',input=PATCH.encode())
            run('git','apply','--whitespace=error-all','-',input=PATCH.encode())
+          if before or original_after:
+           for name,v in STATES.items():
+            if digest(name)!=v['after']:raise SystemExit('SOURCE_DRIFT: unexpected original patched bytes: '+name)
+           target=root/TEST
+           source=target.read_text()
+           if source.count(LEGACY)!=1 or HELPER.strip() in source:raise SystemExit('Unexpected legacy HTTP test fixture')
+           changed_test=source.replace(LEGACY,REPAIRED)+HELPER
+           target.write_text(changed_test)
+           test_hash=digest(TEST)
+           target_lock=root/LOCK
+           lock_data=target_lock.read_text()
+           if lock_data.count(STATES[TEST]['after'])!=1:raise SystemExit('Source lock is missing the exact original test checksum')
+           target_lock.write_text(lock_data.replace(STATES[TEST]['after'],test_hash))
+          if not fixed_is_exact():raise SystemExit('HTTP test repair does not exactly match the audited patch')
           for name,v in STATES.items():
-           if digest(name)!=v['after']:raise SystemExit('SOURCE_DRIFT: unexpected patched bytes: '+name)
+           if name not in (TEST,LOCK) and digest(name)!=v['after']:raise SystemExit('SOURCE_DRIFT: unexpected patched bytes: '+name)
           changed=subprocess.check_output(['git','diff','--name-only','--diff-filter=ACDMRTUXB']).decode().splitlines()
           if set(changed)-set(STATES):raise SystemExit('Unexpected modified files: '+repr(set(changed)-set(STATES)))
           run('git','diff','--check')
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
            out.write('changed='+str(bool(changed)).lower()+'\n')
            out.write('paths='+json.dumps(list(STATES),separators=(',',':'))+'\n')
-          print('Exact reviewed source state verified: '+('patched existing files' if before else 'already applied'))
+          print('Exact reviewed source and HTTP fixture verified: '+('patched existing files' if before else 'already applied'))
           PY_CONNECT_MEDIA_INSTALL_20261120
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
